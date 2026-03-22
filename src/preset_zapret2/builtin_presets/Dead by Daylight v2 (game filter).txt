@@ -272,7 +272,7 @@
 
 --new
 
---filter-udp=*
+--filter-udp=80,443-65535
 --ipset=lists/ipset-all.txt
 --ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt

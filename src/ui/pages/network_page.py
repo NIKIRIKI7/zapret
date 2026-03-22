@@ -535,7 +535,7 @@ class NetworkPage(BasePage):
         custom_layout.addWidget(self.custom_primary)
 
         self.custom_secondary = LineEdit()
-        self.custom_secondary.setPlaceholderText("8.8.4.4")
+        self.custom_secondary.setPlaceholderText("208.67.222.222")
         self.custom_secondary.setFixedWidth(110)
         self.custom_secondary.returnPressed.connect(self._apply_custom_dns_quick)
         custom_layout.addWidget(self.custom_secondary)

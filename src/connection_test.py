@@ -116,7 +116,7 @@ class ConnectionTestWorker(QObject):
                     dns_ip = dns_checker.dns_servers.get(results['summary']['recommended_dns'])
                     if dns_ip:
                         self.log_message(f"   • Предпочитаемый: {dns_ip}")
-                        self.log_message(f"   • Альтернативный: 8.8.4.4")
+                        self.log_message(f"   • Альтернативный: 208.67.222.222 (OpenDNS)")
                 else:
                     self.log_message("   • Предпочитаемый: 8.8.8.8 (Google)")
                     self.log_message("   • Альтернативный: 1.1.1.1 (Cloudflare)")
