@@ -973,19 +973,6 @@ class StrategyDetailPage(BasePage):
         settings_host_layout.setContentsMargins(0, 0, 0, 0)
         settings_host_layout.setSpacing(6)
 
-        # Toggle включения/выключения категории (без фоновой карточки)
-        self._enable_toggle = Win11ToggleRow(
-            "fa5s.power-off",
-            self._tr("page.z2_strategy_detail.toggle.enable.title", "Включить обход"),
-            self._tr(
-                "page.z2_strategy_detail.toggle.enable.description",
-                "Активировать DPI-обход для этой категории",
-            ),
-            "#4CAF50",
-        )
-        self._enable_toggle.toggled.connect(self._on_enable_toggled)
-        settings_host_layout.addWidget(self._enable_toggle)
-
         # ═══════════════════════════════════════════════════════════════
         # ТУЛБАР НАСТРОЕК КАТЕГОРИИ (фоновой блок)
         # ═══════════════════════════════════════════════════════════════
@@ -1621,11 +1608,8 @@ class StrategyDetailPage(BasePage):
             # Восстанавливаем последнюю позицию прокрутки для этой категории.
             self._restore_scroll_state(category_key, defer=True)
 
-        # Обновляем состояние toggle включения
-        is_enabled = self._current_strategy_id != "none"
-        self._enable_toggle.setChecked(is_enabled, block_signals=True)
-
         # Обновляем галочку статуса
+        is_enabled = self._current_strategy_id != "none"
         self._update_status_icon(is_enabled)
 
         # Показываем режим фильтрации только если категория поддерживает оба варианта
@@ -2572,11 +2556,6 @@ class StrategyDetailPage(BasePage):
                     else:
                         self._strategies_tree.clearSelection()
 
-            if self._selected_strategy_id != "none":
-                self._enable_toggle.setChecked(True, block_signals=True)
-            else:
-                self._enable_toggle.setChecked(False, block_signals=True)
-
             # Reset writes the preset to disk and triggers the same hot-reload/restart
             # path as any other setting change, so show the spinner.
             self.show_loading()
@@ -2592,6 +2571,46 @@ class StrategyDetailPage(BasePage):
 
         prev_strategy_id = self._selected_strategy_id
 
+        # TCP multi-phase: restore last enabled args when switching from "none" to a strategy
+        if self._tcp_phase_mode and strategy_id != "none" and prev_strategy_id == "none":
+            last_args = (self._tcp_last_enabled_args_by_category.get(self._category_key) or "").strip()
+            if last_args:
+                try:
+                    preset = self._preset_manager.get_active_preset()
+                    if preset:
+                        if self._category_key not in preset.categories:
+                            preset.categories[self._category_key] = self._preset_manager._create_category_with_defaults(self._category_key)
+                        cat = preset.categories[self._category_key]
+                        cat.tcp_args = last_args
+                        cat.strategy_id = self._infer_strategy_id_from_args_exact(last_args)
+                        preset.touch()
+                        self._preset_manager._save_and_sync_preset(preset)
+                        self._selected_strategy_id = cat.strategy_id or "none"
+                        self._current_strategy_id = cat.strategy_id or "none"
+                        self._set_category_enabled_ui(True)
+                        self._update_selected_strategy_header(self._selected_strategy_id)
+                        self._refresh_args_editor_state()
+                        self._load_tcp_phase_state_from_preset()
+                        self._apply_tcp_phase_tabs_visibility()
+                        self._select_default_tcp_phase_tab()
+                        self._apply_filters()
+                        self.show_loading()
+                        self.strategy_selected.emit(self._category_key, self._selected_strategy_id)
+                        return
+                except Exception as e:
+                    log(f"TCP phase restore failed: {e}", "WARNING")
+
+        # Remember last strategy before switching to "none"
+        if strategy_id == "none" and prev_strategy_id and prev_strategy_id != "none":
+            self._last_enabled_strategy_id = prev_strategy_id
+            if self._tcp_phase_mode:
+                try:
+                    cur_args = self._get_category_strategy_args_text().strip()
+                    if cur_args:
+                        self._tcp_last_enabled_args_by_category[self._category_key] = cur_args
+                except Exception:
+                    pass
+
         self._selected_strategy_id = strategy_id
         if self._strategies_tree:
             self._strategies_tree.set_selected_strategy(strategy_id)
@@ -2601,9 +2620,7 @@ class StrategyDetailPage(BasePage):
         if prev_strategy_id != strategy_id:
             self._hide_args_editor(clear_text=False)
 
-        # Синхронизируем toggle
         if strategy_id != "none":
-            self._enable_toggle.setChecked(True, block_signals=True)
             # Показываем анимацию загрузки
             self.show_loading()
         else:
@@ -3079,10 +3096,9 @@ class StrategyDetailPage(BasePage):
             preset.touch()
             self._preset_manager._save_and_sync_preset(preset)
 
-            # Update local state for enable toggle / UI.
+            # Update local state for UI.
             self._selected_strategy_id = cat.strategy_id or "none"
             self._current_strategy_id = cat.strategy_id or "none"
-            self._enable_toggle.setChecked(self._selected_strategy_id != "none", block_signals=True)
             self._set_category_enabled_ui(self._selected_strategy_id != "none")
             self._refresh_args_editor_state()
 
@@ -3249,111 +3265,6 @@ class StrategyDetailPage(BasePage):
                 log.error(f"Error saving favorite toggled: {e}")
             except:
                 pass
-
-    def _on_enable_toggled(self, enabled: bool):
-        """╨Ю╨▒╤А╨░╨▒╨╛╤В╤З╨╕╨║ ╨▓╨║╨╗╤О╤З╨╡╨╜╨╕╤П/╨▓╤Л╨║╨╗╤О╤З╨╡╨╜╨╕╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕"""
-        if not self._category_key:
-            return
-
-        # TCP multi-phase: restore last enabled args when toggling back on.
-        if self._tcp_phase_mode and enabled:
-            try:
-                last_args = (self._tcp_last_enabled_args_by_category.get(self._category_key) or "").strip()
-            except Exception:
-                last_args = ""
-
-            if last_args:
-                try:
-                    preset = self._preset_manager.get_active_preset()
-                    if not preset:
-                        return
-                    if self._category_key not in preset.categories:
-                        preset.categories[self._category_key] = self._preset_manager._create_category_with_defaults(self._category_key)
-
-                    cat = preset.categories[self._category_key]
-                    cat.tcp_args = last_args
-                    cat.strategy_id = self._infer_strategy_id_from_args_exact(last_args)
-                    preset.touch()
-                    self._preset_manager._save_and_sync_preset(preset)
-
-                    self._selected_strategy_id = cat.strategy_id or "none"
-                    self._current_strategy_id = cat.strategy_id or "none"
-
-                    self._set_category_enabled_ui(True)
-                    self._update_selected_strategy_header(self._selected_strategy_id)
-                    self._refresh_args_editor_state()
-
-                    # Rebuild phase state + tabs selection
-                    self._load_tcp_phase_state_from_preset()
-                    self._apply_tcp_phase_tabs_visibility()
-                    self._select_default_tcp_phase_tab()
-                    self._apply_filters()
-
-                    self.show_loading()
-                    self.strategy_selected.emit(self._category_key, self._selected_strategy_id)
-                    log(f"╨Ъ╨░╤В╨╡╨│╨╛╤А╨╕╤П {self._category_key} ╨▓╨║╨╗╤О╤З╨╡╨╜╨░ (restore phase chain)", "INFO")
-                    return
-                except Exception as e:
-                    log(f"TCP phase restore failed: {e}", "WARNING")
-
-        if enabled:
-            # ╨Т╨║╨╗╤О╤З╨░╨╡╨╝ - ╨▓╨╛╤Б╤Б╤В╨░╨╜╨░╨▓╨╗╨╕╨▓╨░╨╡╨╝ ╨┐╨╛╤Б╨╗╨╡╨┤╨╜╤О╤О ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤О (╨╡╤Б╨╗╨╕ ╨▒╤Л╨╗╨░), ╨╕╨╜╨░╤З╨╡ ╨┤╨╡╤Д╨╛╨╗╤В╨╜╤Г╤О
-            strategy_to_select = getattr(self, "_last_enabled_strategy_id", None) or self._get_default_strategy()
-
-            # Rare: strategies catalog may not be available yet (first-run install/extract/update).
-            # Try a one-shot reload before giving up and reverting the toggle.
-            if (not strategy_to_select or strategy_to_select == "none") and not (self._strategies_data_by_id or {}):
-                try:
-                    from strategy_menu.strategies_registry import registry
-                    registry.reload_strategies()
-                    self._clear_strategies()
-                    self._load_strategies()
-                    strategy_to_select = self._get_default_strategy()
-                except Exception:
-                    strategy_to_select = strategy_to_select or "none"
-
-            if strategy_to_select and strategy_to_select != "none":
-                self._selected_strategy_id = strategy_to_select
-                if self._strategies_tree:
-                    self._strategies_tree.set_selected_strategy(strategy_to_select)
-                self._update_selected_strategy_header(self._selected_strategy_id)
-                self._set_category_enabled_ui(True)
-                # ╨Я╨╛╨║╨░╨╖╤Л╨▓╨░╨╡╨╝ ╨░╨╜╨╕╨╝╨░╤Ж╨╕╤О ╨╖╨░╨│╤А╤Г╨╖╨║╨╕
-                self.show_loading()
-                self.strategy_selected.emit(self._category_key, strategy_to_select)
-                log(f"╨Ъ╨░╤В╨╡╨│╨╛╤А╨╕╤П {self._category_key} ╨▓╨║╨╗╤О╤З╨╡╨╜╨░ ╤Б╨╛ ╤Б╤В╤А╨░╤В╨╡╨│╨╕╨╡╨╣ {strategy_to_select}", "INFO")
-            else:
-                log(f"╨Э╨╡╤В ╨┤╨╛╤Б╤В╤Г╨┐╨╜╤Л╤Е ╤Б╤В╤А╨░╤В╨╡╨│╨╕╨╣ ╨┤╨╗╤П {self._category_key}", "WARNING")
-                self._enable_toggle.setChecked(False, block_signals=True)
-                self._set_category_enabled_ui(False)
-            self._refresh_args_editor_state()
-        else:
-            # ╨Ч╨░╨┐╨╛╨╝╨╕╨╜╨░╨╡╨╝ ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤О ╨┐╨╡╤А╨╡╨┤ ╨▓╤Л╨║╨╗╤О╤З╨╡╨╜╨╕╨╡╨╝, ╤З╤В╨╛╨▒╤Л ╨▓╨╛╤Б╤Б╤В╨░╨╜╨╛╨▓╨╕╤В╤М ╨┐╤А╨╕ ╨▓╨║╨╗╤О╤З╨╡╨╜╨╕╨╕
-            if self._selected_strategy_id and self._selected_strategy_id != "none":
-                self._last_enabled_strategy_id = self._selected_strategy_id
-            # TCP multi-phase: also store full args chain (required for restore)
-            if self._tcp_phase_mode:
-                try:
-                    cur_args = self._get_category_strategy_args_text().strip()
-                    if cur_args:
-                        self._tcp_last_enabled_args_by_category[self._category_key] = cur_args
-                except Exception:
-                    pass
-            # ╨Т╤Л╨║╨╗╤О╤З╨░╨╡╨╝ - ╤Г╤Б╤В╨░╨╜╨░╨▓╨╗╨╕╨▓╨░╨╡╨╝ "none"
-            self._selected_strategy_id = "none"
-            if self._strategies_tree:
-                if self._strategies_tree.has_strategy("none"):
-                    self._strategies_tree.set_selected_strategy("none")
-                else:
-                    self._strategies_tree.clearSelection()
-            self._update_selected_strategy_header(self._selected_strategy_id)
-            # ╨б╨║╤А╤Л╨▓╨░╨╡╨╝ ╨│╨░╨╗╨╛╤З╨║╤Г
-            self._stop_loading()
-            self._success_icon.hide()
-            self.strategy_selected.emit(self._category_key, "none")
-            log(f"╨Ъ╨░╤В╨╡╨│╨╛╤А╨╕╤П {self._category_key} ╨╛╤В╨║╨╗╤О╤З╨╡╨╜╨░", "INFO")
-            self._refresh_args_editor_state()
-            self._set_category_enabled_ui(False)
 
     def _get_default_strategy(self) -> str:
         """╨Т╨╛╨╖╨▓╤А╨░╤Й╨░╨╡╤В ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤О ╨┐╨╛ ╤Г╨╝╨╛╨╗╤З╨░╨╜╨╕╤О ╨┤╨╗╤П ╤В╨╡╨║╤Г╤Й╨╡╨╣ ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕"""
@@ -3547,171 +3458,6 @@ class StrategyDetailPage(BasePage):
         protocol_key = "udp" if is_udp_like else "tcp"
         syndata = self._preset_manager.get_category_syndata(category_key, protocol=protocol_key)
         return syndata.to_dict()
-
-
-    def _on_enable_toggled(self, enabled: bool):
-        """╨Ю╨▒╤А╨░╨▒╨╛╤В╤З╨╕╨║ ╨▓╨║╨╗╤О╤З╨╡╨╜╨╕╤П/╨▓╤Л╨║╨╗╤О╤З╨╡╨╜╨╕╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕"""
-        if not self._category_key:
-            return
-
-        # TCP multi-phase: restore last enabled args when toggling back on.
-        if self._tcp_phase_mode and enabled:
-            try:
-                last_args = (self._tcp_last_enabled_args_by_category.get(self._category_key) or "").strip()
-            except Exception:
-                last_args = ""
-
-            if last_args:
-                try:
-                    preset = self._preset_manager.get_active_preset()
-                    if not preset:
-                        return
-                    if self._category_key not in preset.categories:
-                        preset.categories[self._category_key] = self._preset_manager._create_category_with_defaults(self._category_key)
-
-                    cat = preset.categories[self._category_key]
-                    cat.tcp_args = last_args
-                    cat.strategy_id = self._infer_strategy_id_from_args_exact(last_args)
-                    preset.touch()
-                    self._preset_manager._save_and_sync_preset(preset)
-
-                    self._selected_strategy_id = cat.strategy_id or "none"
-                    self._current_strategy_id = cat.strategy_id or "none"
-
-                    self._set_category_enabled_ui(True)
-                    self._update_selected_strategy_header(self._selected_strategy_id)
-                    self._refresh_args_editor_state()
-
-                    # Rebuild phase state + tabs selection
-                    self._load_tcp_phase_state_from_preset()
-                    self._apply_tcp_phase_tabs_visibility()
-                    self._select_default_tcp_phase_tab()
-                    self._apply_filters()
-
-                    self.show_loading()
-                    self.strategy_selected.emit(self._category_key, self._selected_strategy_id)
-                    log(f"╨Ъ╨░╤В╨╡╨│╨╛╤А╨╕╤П {self._category_key} ╨▓╨║╨╗╤О╤З╨╡╨╜╨░ (restore phase chain)", "INFO")
-                    return
-                except Exception as e:
-                    log(f"TCP phase restore failed: {e}", "WARNING")
-
-        if enabled:
-            # ╨Т╨║╨╗╤О╤З╨░╨╡╨╝ - ╨▓╨╛╤Б╤Б╤В╨░╨╜╨░╨▓╨╗╨╕╨▓╨░╨╡╨╝ ╨┐╨╛╤Б╨╗╨╡╨┤╨╜╤О╤О ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤О (╨╡╤Б╨╗╨╕ ╨▒╤Л╨╗╨░), ╨╕╨╜╨░╤З╨╡ ╨┤╨╡╤Д╨╛╨╗╤В╨╜╤Г╤О
-            strategy_to_select = getattr(self, "_last_enabled_strategy_id", None) or self._get_default_strategy()
-
-            # Rare: strategies catalog may not be available yet (first-run install/extract/update).
-            # Try a one-shot reload before giving up and reverting the toggle.
-            if (not strategy_to_select or strategy_to_select == "none") and not (self._strategies_data_by_id or {}):
-                try:
-                    from strategy_menu.strategies_registry import registry
-                    registry.reload_strategies()
-                    self._clear_strategies()
-                    self._load_strategies()
-                    strategy_to_select = self._get_default_strategy()
-                except Exception:
-                    strategy_to_select = strategy_to_select or "none"
-
-            if strategy_to_select and strategy_to_select != "none":
-                self._selected_strategy_id = strategy_to_select
-                if self._strategies_tree:
-                    self._strategies_tree.set_selected_strategy(strategy_to_select)
-                self._update_selected_strategy_header(self._selected_strategy_id)
-                self._set_category_enabled_ui(True)
-                # ╨Я╨╛╨║╨░╨╖╤Л╨▓╨░╨╡╨╝ ╨░╨╜╨╕╨╝╨░╤Ж╨╕╤О ╨╖╨░╨│╤А╤Г╨╖╨║╨╕
-                self.show_loading()
-                self.strategy_selected.emit(self._category_key, strategy_to_select)
-                log(f"╨Ъ╨░╤В╨╡╨│╨╛╤А╨╕╤П {self._category_key} ╨▓╨║╨╗╤О╤З╨╡╨╜╨░ ╤Б╨╛ ╤Б╤В╤А╨░╤В╨╡╨│╨╕╨╡╨╣ {strategy_to_select}", "INFO")
-            else:
-                log(f"╨Э╨╡╤В ╨┤╨╛╤Б╤В╤Г╨┐╨╜╤Л╤Е ╤Б╤В╤А╨░╤В╨╡╨│╨╕╨╣ ╨┤╨╗╤П {self._category_key}", "WARNING")
-                self._enable_toggle.setChecked(False, block_signals=True)
-                self._set_category_enabled_ui(False)
-            self._refresh_args_editor_state()
-        else:
-            # ╨Ч╨░╨┐╨╛╨╝╨╕╨╜╨░╨╡╨╝ ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤О ╨┐╨╡╤А╨╡╨┤ ╨▓╤Л╨║╨╗╤О╤З╨╡╨╜╨╕╨╡╨╝, ╤З╤В╨╛╨▒╤Л ╨▓╨╛╤Б╤Б╤В╨░╨╜╨╛╨▓╨╕╤В╤М ╨┐╤А╨╕ ╨▓╨║╨╗╤О╤З╨╡╨╜╨╕╨╕
-            if self._selected_strategy_id and self._selected_strategy_id != "none":
-                self._last_enabled_strategy_id = self._selected_strategy_id
-            # TCP multi-phase: also store full args chain (required for restore)
-            if self._tcp_phase_mode:
-                try:
-                    cur_args = self._get_category_strategy_args_text().strip()
-                    if cur_args:
-                        self._tcp_last_enabled_args_by_category[self._category_key] = cur_args
-                except Exception:
-                    pass
-            # ╨Т╤Л╨║╨╗╤О╤З╨░╨╡╨╝ - ╤Г╤Б╤В╨░╨╜╨░╨▓╨╗╨╕╨▓╨░╨╡╨╝ "none"
-            self._selected_strategy_id = "none"
-            if self._strategies_tree:
-                if self._strategies_tree.has_strategy("none"):
-                    self._strategies_tree.set_selected_strategy("none")
-                else:
-                    self._strategies_tree.clearSelection()
-            self._update_selected_strategy_header(self._selected_strategy_id)
-            # ╨б╨║╤А╤Л╨▓╨░╨╡╨╝ ╨│╨░╨╗╨╛╤З╨║╤Г
-            self._stop_loading()
-            self._success_icon.hide()
-            self.strategy_selected.emit(self._category_key, "none")
-            log(f"╨Ъ╨░╤В╨╡╨│╨╛╤А╨╕╤П {self._category_key} ╨╛╤В╨║╨╗╤О╤З╨╡╨╜╨░", "INFO")
-            self._refresh_args_editor_state()
-            self._set_category_enabled_ui(False)
-
-    def _get_default_strategy(self) -> str:
-        """╨Т╨╛╨╖╨▓╤А╨░╤Й╨░╨╡╤В ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤О ╨┐╨╛ ╤Г╨╝╨╛╨╗╤З╨░╨╜╨╕╤О ╨┤╨╗╤П ╤В╨╡╨║╤Г╤Й╨╡╨╣ ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕"""
-        try:
-            from strategy_menu.strategies_registry import registry
-
-            # ╨Я╤А╨╛╨▒╤Г╨╡╨╝ ╨┐╨╛╨╗╤Г╤З╨╕╤В╤М ╨┤╨╡╤Д╨╛╨╗╤В╨╜╤Г╤О ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤О ╨╕╨╖ ╤А╨╡╨╡╤Б╤В╤А╨░
-            defaults = registry.get_default_selections()
-            if self._category_key in defaults:
-                default_id = defaults[self._category_key]
-                if default_id and default_id != "none" and (default_id in (self._default_strategy_order or [])):
-                    return default_id
-
-            # ╨Ш╨╜╨░╤З╨╡ ╨▒╨╡╤А╤С╨╝ ╨┐╨╡╤А╨▓╤Г╤О ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤О ╨╕╨╖ ╤Б╨┐╨╕╤Б╨║╨░ (╨╜╨╡ none)
-            for sid in (self._default_strategy_order or []):
-                if sid and sid != "none":
-                    return sid
-
-            return "none"
-        except Exception as e:
-            log(f"╨Ю╤И╨╕╨▒╨║╨░ ╨┐╨╛╨╗╤Г╤З╨╡╨╜╨╕╤П ╤Б╤В╤А╨░╤В╨╡╨│╨╕╨╕ ╨┐╨╛ ╤Г╨╝╨╛╨╗╤З╨░╨╜╨╕╤О: {e}", "DEBUG")
-            # Fallback - ╨┐╨╡╤А╨▓╨░╤П ╨╜╨╡-none ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤П
-            for sid in (self._default_strategy_order or []):
-                if sid and sid != "none":
-                    return sid
-            return "none"
-
-    def _on_filter_mode_changed(self, new_mode: str):
-        """╨Ю╨▒╤А╨░╨▒╨╛╤В╤З╨╕╨║ ╨╕╨╖╨╝╨╡╨╜╨╡╨╜╨╕╤П ╤А╨╡╨╢╨╕╨╝╨░ ╤Д╨╕╨╗╤М╤В╤А╨░╤Ж╨╕╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕"""
-        if not self._category_key:
-            return
-
-        # Save via PresetManager (triggers DPI reload automatically)
-        self._save_category_filter_mode(self._category_key, new_mode)
-        self.filter_mode_changed.emit(self._category_key, new_mode)
-        log(f"╨а╨╡╨╢╨╕╨╝ ╤Д╨╕╨╗╤М╤В╤А╨░╤Ж╨╕╨╕ ╨┤╨╗╤П {self._category_key}: {new_mode}", "INFO")
-
-    def _save_category_filter_mode(self, category_key: str, mode: str):
-        """╨б╨╛╤Е╤А╨░╨╜╤П╨╡╤В ╤А╨╡╨╢╨╕╨╝ ╤Д╨╕╨╗╤М╤В╤А╨░╤Ж╨╕╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╤З╨╡╤А╨╡╨╖ PresetManager"""
-        self._preset_manager.update_category_filter_mode(
-            category_key, mode, save_and_sync=True
-        )
-
-    def _load_category_filter_mode(self, category_key: str) -> str:
-        """╨Ч╨░╨│╤А╤Г╨╢╨░╨╡╤В ╤А╨╡╨╢╨╕╨╝ ╤Д╨╕╨╗╤М╤В╤А╨░╤Ж╨╕╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╨╕╨╖ PresetManager"""
-        return self._preset_manager.get_category_filter_mode(category_key)
-
-    def _save_category_sort(self, category_key: str, sort_order: str):
-        """╨б╨╛╤Е╤А╨░╨╜╤П╨╡╤В ╨┐╨╛╤А╤П╨┤╨╛╨║ ╤Б╨╛╤А╤В╨╕╤А╨╛╨▓╨║╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╤З╨╡╤А╨╡╨╖ PresetManager"""
-        # Sort order is UI-only parameter, doesn't affect DPI
-        # But save_and_sync=True is needed to persist changes to disk
-        # (hot-reload may trigger but sort_order has no effect on winws2)
-        self._preset_manager.update_category_sort_order(
-            category_key, sort_order, save_and_sync=True
-        )
-
-    def _load_category_sort(self, category_key: str) -> str:
-        """╨Ч╨░╨│╤А╤Г╨╢╨░╨╡╤В ╨┐╨╛╤А╤П╨┤╨╛╨║ ╤Б╨╛╤А╤В╨╕╤А╨╛╨▓╨║╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╨╕╨╖ PresetManager"""
-        return self._preset_manager.get_category_sort_order(category_key)
 
     # ======================================================================
     # TCP PHASE TAB PERSISTENCE (UI-only)
@@ -4172,15 +3918,6 @@ class StrategyDetailPage(BasePage):
                     )
                 else:
                     self._subtitle.setText("")
-
-        if getattr(self, "_enable_toggle", None) is not None:
-            self._enable_toggle.set_texts(
-                self._tr("page.z2_strategy_detail.toggle.enable.title", "Включить обход"),
-                self._tr(
-                    "page.z2_strategy_detail.toggle.enable.description",
-                    "Активировать DPI-обход для этой категории",
-                ),
-            )
 
         if getattr(self, "_filter_mode_frame", None) is not None:
             self._filter_mode_frame.set_title(
