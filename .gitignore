@@ -56,3 +56,4 @@ _build_secrets.py
 CLAUDE.md
 AGENTS.md
 .claude/
+.editorconfig
