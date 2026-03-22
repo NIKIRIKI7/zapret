@@ -2571,45 +2571,9 @@ class StrategyDetailPage(BasePage):
 
         prev_strategy_id = self._selected_strategy_id
 
-        # TCP multi-phase: restore last enabled args when switching from "none" to a strategy
-        if self._tcp_phase_mode and strategy_id != "none" and prev_strategy_id == "none":
-            last_args = (self._tcp_last_enabled_args_by_category.get(self._category_key) or "").strip()
-            if last_args:
-                try:
-                    preset = self._preset_manager.get_active_preset()
-                    if preset:
-                        if self._category_key not in preset.categories:
-                            preset.categories[self._category_key] = self._preset_manager._create_category_with_defaults(self._category_key)
-                        cat = preset.categories[self._category_key]
-                        cat.tcp_args = last_args
-                        cat.strategy_id = self._infer_strategy_id_from_args_exact(last_args)
-                        preset.touch()
-                        self._preset_manager._save_and_sync_preset(preset)
-                        self._selected_strategy_id = cat.strategy_id or "none"
-                        self._current_strategy_id = cat.strategy_id or "none"
-                        self._set_category_enabled_ui(True)
-                        self._update_selected_strategy_header(self._selected_strategy_id)
-                        self._refresh_args_editor_state()
-                        self._load_tcp_phase_state_from_preset()
-                        self._apply_tcp_phase_tabs_visibility()
-                        self._select_default_tcp_phase_tab()
-                        self._apply_filters()
-                        self.show_loading()
-                        self.strategy_selected.emit(self._category_key, self._selected_strategy_id)
-                        return
-                except Exception as e:
-                    log(f"TCP phase restore failed: {e}", "WARNING")
-
         # Remember last strategy before switching to "none"
         if strategy_id == "none" and prev_strategy_id and prev_strategy_id != "none":
             self._last_enabled_strategy_id = prev_strategy_id
-            if self._tcp_phase_mode:
-                try:
-                    cur_args = self._get_category_strategy_args_text().strip()
-                    if cur_args:
-                        self._tcp_last_enabled_args_by_category[self._category_key] = cur_args
-                except Exception:
-                    pass
 
         self._selected_strategy_id = strategy_id
         if self._strategies_tree:
