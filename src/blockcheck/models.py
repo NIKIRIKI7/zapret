@@ -38,6 +38,9 @@ class TestType(Enum):
     DNS_DOH = "dns_doh"
     ISP_PAGE = "isp_page"
     TCP_16_20 = "tcp_16_20"
+    PREFLIGHT_DNS = "preflight_dns"
+    PREFLIGHT_TCP = "preflight_tcp"
+    PREFLIGHT_HTTP = "preflight_http"
 
 
 @dataclass
@@ -71,8 +74,29 @@ class DNSIntegrityResult:
     stub_ip: str | None = None
 
 
+class PreflightVerdict(Enum):
+    PASSED = "passed"
+    WARNING = "warning"
+    FAILED = "failed"
+
+
+@dataclass
+class PreflightResult:
+    domain: str
+    resolved_ips: list[str] = field(default_factory=list)
+    is_block_ip: bool = False
+    block_ip_detail: str = ""
+    ping: SingleTestResult | None = None
+    tcp_443: SingleTestResult | None = None
+    dns_result: SingleTestResult | None = None
+    http_check: SingleTestResult | None = None
+    verdict: PreflightVerdict = PreflightVerdict.PASSED
+    verdict_detail: str = ""
+
+
 @dataclass
 class BlockcheckReport:
+    preflight: list[PreflightResult] = field(default_factory=list)
     targets: list[TargetResult] = field(default_factory=list)
     dns_integrity: list[DNSIntegrityResult] = field(default_factory=list)
     summary: dict[str, Any] = field(default_factory=dict)

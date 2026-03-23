@@ -9,6 +9,7 @@ import subprocess
 import re, os, sys
 from typing import Dict, List, Tuple, Optional
 from log import log
+from blockcheck.config import KNOWN_BLOCK_IPS
 
 
 class DNSChecker:
@@ -71,19 +72,8 @@ class DNSChecker:
             'AdGuard DNS': '94.140.14.14',
         }
         
-        # Известные IP адреса блокировок провайдеров
-        self.known_block_ips = [
-            '127.0.0.1',
-            '0.0.0.0',
-            '10.10.10.10',
-            '195.82.146.214',  # Ростелеком заглушка
-            '81.19.72.32',     # МТС заглушка
-            '213.180.193.250', # Билайн заглушка
-            '217.169.80.229',  # Мегафон заглушка
-            '62.33.207.196',   # Заглушка РКН
-            '62.33.207.197',   # Заглушка РКН
-            '62.33.207.198',   # Заглушка РКН
-        ]
+        # Известные IP адреса блокировок провайдеров (из blockcheck.config)
+        self.known_block_ips = list(KNOWN_BLOCK_IPS)
     
     def check_dns_poisoning(self, log_callback=None) -> Dict:
         """

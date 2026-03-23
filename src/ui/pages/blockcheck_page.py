@@ -32,7 +32,7 @@ except ImportError:
     )
 
 from ui.compat_widgets import (
-    SettingsCard, ActionButton, PrimaryActionButton, InfoBarHelper,
+    SettingsCard, ActionButton, PrimaryActionButton, InfoBarHelper, CheckBox,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,10 +134,12 @@ class BlockcheckWorker(QObject):
     log_message = pyqtSignal(str)                 # log line
     finished = pyqtSignal(object)                 # BlockcheckReport
 
-    def __init__(self, mode: str = "full", extra_domains: list[str] | None = None, parent=None):
+    def __init__(self, mode: str = "full", extra_domains: list[str] | None = None,
+                 skip_preflight_failed: bool = False, parent=None):
         super().__init__(parent)
         self._mode = mode
         self._extra_domains = extra_domains
+        self._skip_preflight_failed = skip_preflight_failed
         self._runner = None
         self._cancelled = False
         self._bg_thread: threading.Thread | None = None
@@ -158,6 +160,7 @@ class BlockcheckWorker(QObject):
                 mode=self._mode,
                 callback=self,
                 extra_domains=self._extra_domains,
+                skip_preflight_failed=self._skip_preflight_failed,
             )
             report = self._runner.run()
             self.finished.emit(report)
@@ -369,6 +372,18 @@ class BlockcheckPage(BasePage):
         ctrl_row.addWidget(self._mode_combo)
 
         ctrl_row.addStretch()
+
+        # Preflight skip checkbox
+        self._skip_failed_cb = CheckBox(
+            tr_catalog("page.blockcheck.skip_failed",
+                       default="Пропускать проблемные домены")
+        )
+        self._skip_failed_cb.setChecked(False)
+        self._skip_failed_cb.setToolTip(
+            "Если включено, домены с провалившимся preflight "
+            "(DNS-заглушка, ISP-инъекция) будут пропущены в основном блокчеке"
+        )
+        ctrl_row.addWidget(self._skip_failed_cb)
 
         # Buttons
         self._start_btn = PrimaryActionButton(
@@ -797,6 +812,7 @@ class BlockcheckPage(BasePage):
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
         self._mode_combo.setEnabled(False)
+        self._skip_failed_cb.setEnabled(False)
         self._progress_bar.setVisible(True)
         if hasattr(self._progress_bar, 'start'):
             self._progress_bar.start()
@@ -808,7 +824,11 @@ class BlockcheckPage(BasePage):
         self._start_run_log(mode, extra)
 
         # Create worker (QObject on main thread) — work runs in daemon thread
-        self._worker = BlockcheckWorker(mode=mode, extra_domains=extra or None, parent=self)
+        skip_failed = self._skip_failed_cb.isChecked()
+        self._worker = BlockcheckWorker(
+            mode=mode, extra_domains=extra or None,
+            skip_preflight_failed=skip_failed, parent=self,
+        )
         self._worker.phase_changed.connect(self._on_phase_changed)
         self._worker.test_result.connect(self._on_test_result)
         self._worker.target_complete.connect(self._on_target_complete)
@@ -991,6 +1011,7 @@ class BlockcheckPage(BasePage):
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._mode_combo.setEnabled(True)
+        self._skip_failed_cb.setEnabled(True)
         self._progress_bar.setVisible(False)
         if hasattr(self._progress_bar, 'stop'):
             self._progress_bar.stop()
@@ -1311,6 +1332,26 @@ class BlockcheckPage(BasePage):
         for tr in report.targets:
             if tr.classification != DPIClassification.NONE:
                 details.append(f"{tr.name}: {_DPI_LABELS_RU.get(tr.classification.value, tr.classification.value)}")
+
+        # Preflight summary (append before setText)
+        if report.preflight:
+            pf_passed = sum(1 for p in report.preflight if p.verdict.value == "passed")
+            pf_warned = sum(1 for p in report.preflight if p.verdict.value == "warning")
+            pf_failed = sum(1 for p in report.preflight if p.verdict.value == "failed")
+            pf_text = f"Preflight: {pf_passed} OK"
+            if pf_warned:
+                pf_text += f", {pf_warned} предупр."
+            if pf_failed:
+                pf_text += f", {pf_failed} ошибок"
+                failed_domains = [
+                    p.domain for p in report.preflight if p.verdict.value == "failed"
+                ]
+                if failed_domains:
+                    pf_text += f"\nПроблемные: {', '.join(failed_domains[:5])}"
+                    if len(failed_domains) > 5:
+                        pf_text += f" (+{len(failed_domains) - 5})"
+            details.append(pf_text)
+
         if details:
             self._dpi_detail.setText("\n".join(details))
         else:
@@ -1584,6 +1625,7 @@ class BlockcheckPage(BasePage):
 
             self._start_btn.setText(tr_catalog("page.blockcheck.start", language=language, default="Запустить"))
             self._stop_btn.setText(tr_catalog("page.blockcheck.stop", language=language, default="Остановить"))
+            self._skip_failed_cb.setText(tr_catalog("page.blockcheck.skip_failed", language=language, default="Пропускать проблемные домены"))
             self._add_domain_btn.setText(tr_catalog("page.blockcheck.add_domain", language=language, default="Добавить"))
             self._domain_input.setPlaceholderText(tr_catalog("page.blockcheck.domain_placeholder", language=language, default="example.com"))
             if self._strategy_tab_page is not None:

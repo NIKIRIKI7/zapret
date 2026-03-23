@@ -21,11 +21,13 @@ from blockcheck.config import (
 )
 from blockcheck.dpi_classifier import DPIClassifier
 from blockcheck.dns_integrity import check_dns_integrity
+from blockcheck.preflight import run_preflight
 from blockcheck.isp_page_detector import check_http_injection, detect_isp_page
 from blockcheck.models import (
     BlockcheckReport,
     DPIClassification,
     DNSIntegrityResult,
+    PreflightVerdict,
     SingleTestResult,
     TargetResult,
     TestStatus,
@@ -97,6 +99,7 @@ class BlockcheckRunner:
         parallel: int = DEFAULT_PARALLEL,
         callback: BlockcheckCallback | None = None,
         extra_domains: list[str] | None = None,
+        skip_preflight_failed: bool = False,
     ):
         self.mode = mode
         if timeout is not None:
@@ -109,6 +112,7 @@ class BlockcheckRunner:
         self.cb = callback or _NullCallback()
         self._cancelled = threading.Event()
         self._extra_domains = extra_domains
+        self._skip_preflight_failed = skip_preflight_failed
 
     def cancel(self) -> None:
         """Thread-safe cancellation."""
@@ -126,6 +130,35 @@ class BlockcheckRunner:
 
         phase_count = self._count_phases()
         current_phase = 0
+
+        # ── Phase 0: Preflight ──
+        if not self.cancelled:
+            current_phase += 1
+            self.cb.on_phase_change(f"Фаза {current_phase}/{phase_count}: Preflight")
+            self.cb.on_log("=== Preflight Domain Check ===")
+            preflight_domains = self._extract_unique_hosts(targets)
+            report.preflight = run_preflight(
+                preflight_domains,
+                callback=self.cb,
+                parallel=self.parallel,
+                cancelled=lambda: self.cancelled,
+            )
+            if self._skip_preflight_failed and report.preflight:
+                failed_domains = {
+                    p.domain for p in report.preflight
+                    if p.verdict == PreflightVerdict.FAILED
+                }
+                if failed_domains:
+                    before = len(targets)
+                    targets = [
+                        t for t in targets
+                        if self._extract_host_from_target(t) not in failed_domains
+                    ]
+                    skipped = before - len(targets)
+                    self.cb.on_log(
+                        f"Preflight: skipped {skipped} targets "
+                        f"({len(failed_domains)} failed domains)"
+                    )
 
         # ── Phase 1: DNS integrity ──
         if self.mode in (RunMode.FULL, RunMode.DPI_ONLY) and not self.cancelled:
@@ -717,6 +750,29 @@ class BlockcheckRunner:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _extract_unique_hosts(targets: list[dict]) -> list[str]:
+        """Extract unique domain names from HTTPS targets (skip PING/STUN/TCP)."""
+        seen: set[str] = set()
+        result: list[str] = []
+        for t in targets:
+            v = t["value"]
+            if v.startswith(("PING:", "STUN:", "TCP:")):
+                continue
+            host = re.sub(r"^https?://", "", v).rstrip("/").split("/")[0].lower()
+            if host and host not in seen:
+                seen.add(host)
+                result.append(host)
+        return result
+
+    @staticmethod
+    def _extract_host_from_target(target: dict) -> str:
+        """Extract host from a single target dict."""
+        v = target["value"]
+        if v.startswith(("PING:", "STUN:", "TCP:")):
+            return v
+        return re.sub(r"^https?://", "", v).rstrip("/").split("/")[0].lower()
+
+    @staticmethod
     def _resolve_host_ips(host: str) -> tuple[list[str], list[str]]:
         """Resolve host and return (ipv4_list, ipv6_list)."""
         host = str(host or "").strip()
@@ -761,10 +817,10 @@ class BlockcheckRunner:
 
     def _count_phases(self) -> int:
         if self.mode == RunMode.QUICK:
-            return 2  # TLS + Ping
+            return 3  # Preflight + TLS + Ping
         if self.mode == RunMode.DPI_ONLY:
-            return 4  # DNS + TLS + ISP + TCP
-        return 6  # Full: DNS + TLS + ISP + TCP + STUN + Ping
+            return 5  # Preflight + DNS + TLS + ISP + TCP
+        return 7  # Preflight + Full: DNS + TLS + ISP + TCP + STUN + Ping
 
     @staticmethod
     def _build_summary(report: BlockcheckReport) -> dict:
@@ -842,5 +898,16 @@ class BlockcheckRunner:
         dpi_detected = [c for c in classifications if c != DPIClassification.NONE]
         stats["dpi_types"] = sorted({c.value for c in dpi_detected})
         stats["dpi_count"] = len(dpi_detected)
+
+        # Preflight
+        stats["preflight_passed"] = sum(
+            1 for p in report.preflight if p.verdict == PreflightVerdict.PASSED
+        )
+        stats["preflight_warned"] = sum(
+            1 for p in report.preflight if p.verdict == PreflightVerdict.WARNING
+        )
+        stats["preflight_failed"] = sum(
+            1 for p in report.preflight if p.verdict == PreflightVerdict.FAILED
+        )
 
         return stats

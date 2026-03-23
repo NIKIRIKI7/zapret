@@ -122,3 +122,26 @@ STRATEGY_KILL_TIMEOUT = 4         # seconds to wait for winws2 shutdown
 WINWS2_EXE_RELATIVE = "exe/winws2.exe"
 PROBE_TEMP_PRESET = "blockcheck_probe.txt"
 PROBE_TEMP_HOSTLIST = "blockcheck_probe_hosts.txt"
+
+# ---------------------------------------------------------------------------
+# Preflight
+# ---------------------------------------------------------------------------
+PREFLIGHT_DNS_TIMEOUT = 3
+PREFLIGHT_TCP_TIMEOUT = 2
+PREFLIGHT_HTTP_TIMEOUT = 2
+PREFLIGHT_PING_COUNT = 1
+PREFLIGHT_PING_TIMEOUT = 2
+
+# Known ISP block IPs (shared — also used by dns_checker.py)
+KNOWN_BLOCK_IPS: set[str] = {
+    "127.0.0.1",
+    "0.0.0.0",
+    "10.10.10.10",
+    "195.82.146.214",    # Ростелеком
+    "81.19.72.32",       # МТС
+    "213.180.193.250",   # Билайн
+    "217.169.80.229",    # Мегафон
+    "62.33.207.196",     # РКН
+    "62.33.207.197",     # РКН
+    "62.33.207.198",     # РКН
+}
