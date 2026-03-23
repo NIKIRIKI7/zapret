@@ -1008,6 +1008,28 @@ def _handle_gen_failure(exit_code: int, stderr: str) -> WinDivertDiagnosis:
 
 
 def _handle_invalid_parameter(exit_code: int, stderr: str) -> WinDivertDiagnosis:
+    import re
+    stderr_lower = (stderr or "").lower()
+
+    # Lua desync function not found — lua-init auto-fix didn't help,
+    # meaning the .lua file itself is missing from disk.
+    m = re.search(r"desync function '([^']+)' does not exist", stderr or "")
+    if m:
+        func_name = m.group(1)
+        return WinDivertDiagnosis(
+            cause=f"Lua-функция '{func_name}' не найдена — файл .lua отсутствует на диске",
+            solution="Переустановите программу — файлы в папке lua/ повреждены или удалены",
+            severity="critical",
+        )
+
+    # Lua script syntax/runtime error
+    if "lua" in stderr_lower and ("error" in stderr_lower or "syntax" in stderr_lower):
+        return WinDivertDiagnosis(
+            cause="Ошибка в Lua-скрипте",
+            solution="Переустановите программу или проверьте файлы в папке lua/",
+            severity="critical",
+        )
+
     return WinDivertDiagnosis(
         cause="Ошибка в параметрах фильтра или Lua-скрипта",
         solution="Проверьте настройки стратегии — возможно повреждён пресет",
