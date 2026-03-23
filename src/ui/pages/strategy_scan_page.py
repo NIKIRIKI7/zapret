@@ -405,6 +405,17 @@ class StrategyScanPage(BasePage):
             tr_catalog("page.strategy_scan.log", default="Подробный лог")
         )
 
+        # Кнопка "Развернуть / Свернуть" в заголовке лог-карточки
+        self._log_expanded = False
+        self._expand_log_btn = PushButton()
+        self._expand_log_btn.setText("Развернуть")
+        self._expand_log_btn.setFixedWidth(120)
+        self._expand_log_btn.clicked.connect(self._toggle_log_expand)
+        log_header = QHBoxLayout()
+        log_header.addStretch()
+        log_header.addWidget(self._expand_log_btn)
+        self._log_card.add_layout(log_header)
+
         self._log_edit = ScrollBlockingTextEdit()
         self._log_edit.setReadOnly(True)
         self._log_edit.setMinimumHeight(180)
@@ -414,6 +425,33 @@ class StrategyScanPage(BasePage):
         self.add_widget(self._log_card)
 
         self._on_protocol_changed(self._protocol_combo.currentIndex())
+
+    # ------------------------------------------------------------------
+    # Log expand / collapse
+    # ------------------------------------------------------------------
+
+    def _toggle_log_expand(self):
+        """Развернуть/свернуть лог на всю страницу."""
+        self._log_expanded = not self._log_expanded
+
+        if self._log_expanded:
+            # Скрываем остальные карточки
+            self._control_card.setVisible(False)
+            self._warning_card.setVisible(False)
+            self._results_card.setVisible(False)
+            # Убираем потолок высоты лога
+            self._log_edit.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
+            self._log_edit.setMinimumHeight(400)
+            self._expand_log_btn.setText("Свернуть")
+        else:
+            # Восстанавливаем карточки
+            self._control_card.setVisible(True)
+            self._warning_card.setVisible(True)
+            self._results_card.setVisible(True)
+            # Восстанавливаем ограничения
+            self._log_edit.setMinimumHeight(180)
+            self._log_edit.setMaximumHeight(300)
+            self._expand_log_btn.setText("Развернуть")
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1579,6 +1617,13 @@ class StrategyScanPage(BasePage):
             self._log_card.set_title(
                 tr_catalog("page.strategy_scan.log", language=language,
                            default="Подробный лог"))
+            self._expand_log_btn.setText(
+                tr_catalog("page.strategy_scan.collapse_log", language=language,
+                           default="Свернуть")
+                if self._log_expanded else
+                tr_catalog("page.strategy_scan.expand_log", language=language,
+                           default="Развернуть")
+            )
             self._warning_card.set_title(
                 tr_catalog("page.strategy_scan.warning_title", language=language,
                            default="Внимание"))

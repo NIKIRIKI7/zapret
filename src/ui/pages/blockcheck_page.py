@@ -570,6 +570,17 @@ class BlockcheckPage(BasePage):
             tr_catalog("page.blockcheck.log", default="Подробный лог")
         )
 
+        # Кнопка "Развернуть / Свернуть"
+        self._log_expanded = False
+        self._expand_log_btn = PushButton()
+        self._expand_log_btn.setText("Развернуть")
+        self._expand_log_btn.setFixedWidth(120)
+        self._expand_log_btn.clicked.connect(self._toggle_log_expand)
+        log_header = QHBoxLayout()
+        log_header.addStretch()
+        log_header.addWidget(self._expand_log_btn)
+        self._log_card.add_layout(log_header)
+
         self._log_edit = ScrollBlockingTextEdit()
         self._log_edit.setReadOnly(True)
         self._log_edit.setMinimumHeight(180)
@@ -1015,6 +1026,29 @@ class BlockcheckPage(BasePage):
         self._progress_bar.setVisible(False)
         if hasattr(self._progress_bar, 'stop'):
             self._progress_bar.stop()
+
+    def _toggle_log_expand(self):
+        """Развернуть/свернуть лог на всю страницу."""
+        self._log_expanded = not self._log_expanded
+
+        if self._log_expanded:
+            self._control_card.setVisible(False)
+            self._domains_card.setVisible(False)
+            self._results_card.setVisible(False)
+            self._dpi_card.setVisible(False)
+            self._log_edit.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
+            self._log_edit.setMinimumHeight(400)
+            self._expand_log_btn.setText("Свернуть")
+        else:
+            self._control_card.setVisible(True)
+            self._domains_card.setVisible(True)
+            self._results_card.setVisible(True)
+            # dpi_card visibility depends on whether results exist
+            if self._last_report and self._last_report.targets:
+                self._dpi_card.setVisible(True)
+            self._log_edit.setMinimumHeight(180)
+            self._log_edit.setMaximumHeight(300)
+            self._expand_log_btn.setText("Развернуть")
 
     def _find_row(self, name: str) -> int:
         for row in range(self._table.rowCount()):
