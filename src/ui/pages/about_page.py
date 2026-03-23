@@ -83,6 +83,7 @@ class AboutPage(BasePage):
         # Tab lazy init flags
         self._support_tab_initialized = False
         self._help_tab_initialized = False
+        self._kvn_tab_initialized = False
 
         self._sub_is_premium = False
         self._sub_days_left: int | None = None
@@ -107,6 +108,8 @@ class AboutPage(BasePage):
                                     onClick=lambda: self._switch_tab(1))
             self.tabs_pivot.addItem(routeKey="help", text=" " + tr_catalog("page.about.tab.help", default="СПРАВКА"),
                                     onClick=lambda: self._switch_tab(2))
+            self.tabs_pivot.addItem(routeKey="kvn", text=" ZAPRET KVN",
+                                    onClick=lambda: self._switch_tab(3))
             self.tabs_pivot.setCurrentItem("about")
             self.tabs_pivot.setItemFontSize(13)
             self.add_widget(self.tabs_pivot)
@@ -133,9 +136,16 @@ class AboutPage(BasePage):
         self._help_layout.setContentsMargins(0, 0, 0, 0)
         self._help_layout.setSpacing(16)
 
+        # Tab 3: Zapret KVN (lazy)
+        self._kvn_tab = QWidget()
+        self._kvn_layout = QVBoxLayout(self._kvn_tab)
+        self._kvn_layout.setContentsMargins(0, 0, 0, 0)
+        self._kvn_layout.setSpacing(16)
+
         self.stacked_widget.addWidget(self._about_tab)
         self.stacked_widget.addWidget(self._support_tab)
         self.stacked_widget.addWidget(self._help_tab)
+        self.stacked_widget.addWidget(self._kvn_tab)
 
         self.add_widget(self.stacked_widget)
 
@@ -154,10 +164,17 @@ class AboutPage(BasePage):
             except Exception as e:
                 log(f"Ошибка построения вкладки справки: {e}", "ERROR")
 
+        if index == 3 and not self._kvn_tab_initialized:
+            self._kvn_tab_initialized = True
+            try:
+                self._build_kvn_content(self._kvn_layout)
+            except Exception as e:
+                log(f"Ошибка построения вкладки KVN: {e}", "ERROR")
+
         self.stacked_widget.setCurrentIndex(index)
 
         if _HAS_FLUENT and hasattr(self, "tabs_pivot"):
-            keys = ["about", "support", "help"]
+            keys = ["about", "support", "help", "kvn"]
             try:
                 self.tabs_pivot.setCurrentItem(keys[index])
             except Exception:
@@ -172,8 +189,8 @@ class AboutPage(BasePage):
     def switch_to_tab(self, key: str) -> None:
         """External API: switch to About/Support/Help tab by key."""
         normalized = str(key or "").strip().lower()
-        if normalized in {"about", "support", "help"}:
-            self._switch_tab({"about": 0, "support": 1, "help": 2}[normalized])
+        if normalized in {"about", "support", "help", "kvn"}:
+            self._switch_tab({"about": 0, "support": 1, "help": 2, "kvn": 3}[normalized])
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
@@ -183,6 +200,7 @@ class AboutPage(BasePage):
                 self.tabs_pivot.setItemText("about", " " + tr_catalog("page.about.tab.about", language=language, default="О ПРОГРАММЕ"))
                 self.tabs_pivot.setItemText("support", " " + tr_catalog("page.about.tab.support", language=language, default="ПОДДЕРЖКА"))
                 self.tabs_pivot.setItemText("help", " " + tr_catalog("page.about.tab.help", language=language, default="СПРАВКА"))
+                self.tabs_pivot.setItemText("kvn", " ZAPRET KVN")
             except Exception:
                 pass
 
@@ -191,6 +209,8 @@ class AboutPage(BasePage):
             self._rebuild_support_tab()
         if self._help_tab_initialized:
             self._rebuild_help_tab()
+        if self._kvn_tab_initialized:
+            self._rebuild_kvn_tab()
 
     def _clear_layout(self, layout: QLayout | None) -> None:
         if layout is None:
@@ -1158,6 +1178,176 @@ class AboutPage(BasePage):
         except Exception as e:
             if InfoBar:
                 InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{e}",
+                                parent=self.window())
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Tab 3: Zapret KVN
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _rebuild_kvn_tab(self) -> None:
+        self._clear_layout(self._kvn_layout)
+        self._build_kvn_content(self._kvn_layout)
+
+    def _build_kvn_content(self, layout: QVBoxLayout):
+        tokens = get_theme_tokens()
+
+        # ── Hero-баннер ────────────────────────────────────────────────────
+        hero_wrap = QFrame()
+        hero_wrap.setStyleSheet("QFrame { background: transparent; border: none; }")
+
+        hero_layout = QVBoxLayout(hero_wrap)
+        hero_layout.setContentsMargins(0, 8, 0, 0)
+        hero_layout.setSpacing(4)
+
+        hero_icon = QLabel()
+        hero_icon.setPixmap(qta.icon("fa5s.globe-americas", color=tokens.accent_hex).pixmap(48, 48))
+        hero_icon.setFixedSize(56, 56)
+        hero_layout.addWidget(hero_icon)
+
+        if _HAS_FLUENT:
+            hero_title = SubtitleLabel("Zapret KVN")
+        else:
+            hero_title = QLabel("Zapret KVN")
+            hero_title.setStyleSheet(f"color: {tokens.fg}; font-size: 20px; font-weight: 700;")
+        hero_title.setProperty("tone", "primary")
+        hero_layout.addWidget(hero_title)
+
+        subtitle = QLabel("Уникальный туннель до любой страны мира")
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet(
+            f"QLabel {{ color: {tokens.fg}; font-size: 15px; font-weight: 600; "
+            f"font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif; }}"
+        )
+        hero_layout.addWidget(subtitle)
+
+        desc = QLabel("Создан передовыми мировыми инженерами (не является тем чем вы думаете)")
+        desc.setWordWrap(True)
+        desc.setStyleSheet(
+            f"QLabel {{ color: {tokens.fg_muted}; font-size: 12px; font-style: italic; "
+            f"font-family: 'Palatino Linotype', 'Book Antiqua', 'Georgia', serif; "
+            f"padding-top: 2px; }}"
+        )
+        hero_layout.addWidget(desc)
+
+        layout.addWidget(hero_wrap)
+        layout.addSpacing(8)
+
+        # ── Возможности ────────────────────────────────────────────────────
+        layout.addWidget(_make_section_label("Возможности"))
+
+        features_card = SettingsCard()
+
+        yt_row = SettingsRow(
+            "fa5s.rocket",
+            "Ускорение YouTube и Discord",
+            "Позволяет ускорить замедленные сервера в случае если те перестали работать и начали деградировать",
+        )
+        features_card.add_widget(yt_row)
+
+        game_row = SettingsRow(
+            "fa5s.gamepad",
+            "Игровые серверы",
+            "Также подходит для ускорения игровых серверов",
+        )
+        features_card.add_widget(game_row)
+
+        layout.addWidget(features_card)
+        layout.addSpacing(16)
+
+        # ── Ссылки ─────────────────────────────────────────────────────────
+        layout.addWidget(_make_section_label("Ссылки"))
+
+        links_card = SettingsCard()
+
+        tg_row = SettingsRow(
+            "fa5b.telegram",
+            "Канал Zapret KVN",
+            "Новости и обновления",
+        )
+        tg_btn = ActionButton("Открыть", "fa5s.external-link-alt", accent=False)
+        tg_btn.setProperty("noDrag", True)
+        tg_btn.setFixedHeight(36)
+        tg_btn.clicked.connect(self._open_kvn_channel)
+        tg_row.set_control(tg_btn)
+        links_card.add_widget(tg_row)
+
+        bot_row = SettingsRow(
+            "fa5s.shopping-cart",
+            "Купить подписку",
+            "Оформление через Telegram-бота @zapretvpns_bot",
+        )
+        bot_btn = ActionButton("Купить", "fa5s.star", accent=True)
+        bot_btn.setProperty("noDrag", True)
+        bot_btn.setFixedHeight(36)
+        bot_btn.clicked.connect(self._open_kvn_bot)
+        bot_row.set_control(bot_btn)
+        links_card.add_widget(bot_row)
+
+        bypass_row = SettingsRow(
+            "fa5b.telegram",
+            "Канал BypassBlock",
+            "Второй канал с новостями",
+        )
+        bypass_btn = ActionButton("Открыть", "fa5s.external-link-alt", accent=False)
+        bypass_btn.setProperty("noDrag", True)
+        bypass_btn.setFixedHeight(36)
+        bypass_btn.clicked.connect(self._open_kvn_bypass)
+        bypass_row.set_control(bypass_btn)
+        links_card.add_widget(bypass_row)
+
+        gh_row = SettingsRow(
+            "fa5b.github",
+            "Исходный код",
+            "GitHub репозиторий Zapret KVN",
+        )
+        gh_btn = ActionButton("Открыть", "fa5s.external-link-alt", accent=False)
+        gh_btn.setProperty("noDrag", True)
+        gh_btn.setFixedHeight(36)
+        gh_btn.clicked.connect(self._open_kvn_github)
+        gh_row.set_control(gh_btn)
+        links_card.add_widget(gh_row)
+
+        layout.addWidget(links_card)
+
+        layout.addStretch()
+
+    def _open_kvn_channel(self):
+        try:
+            from config.telegram_links import open_telegram_link
+            open_telegram_link("vpndiscordyooutube")
+            log("Открыт Telegram: vpndiscordyooutube", "INFO")
+        except Exception as e:
+            if InfoBar:
+                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{e}",
+                                parent=self.window())
+
+    def _open_kvn_bot(self):
+        try:
+            from config.telegram_links import open_telegram_link
+            open_telegram_link("zapretvpns_bot")
+            log("Открыт Telegram: zapretvpns_bot", "INFO")
+        except Exception as e:
+            if InfoBar:
+                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{e}",
+                                parent=self.window())
+
+    def _open_kvn_bypass(self):
+        try:
+            from config.telegram_links import open_telegram_link
+            open_telegram_link("bypassblock")
+            log("Открыт Telegram: bypassblock", "INFO")
+        except Exception as e:
+            if InfoBar:
+                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{e}",
+                                parent=self.window())
+
+    def _open_kvn_github(self):
+        try:
+            webbrowser.open("https://github.com/youtubediscord/zapret-kvn")
+            log("Открыт GitHub: zapret-kvn", "INFO")
+        except Exception as e:
+            if InfoBar:
+                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть GitHub:\n{e}",
                                 parent=self.window())
 
     # ─────────────────────────────────────────────────────────────────────────
