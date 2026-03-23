@@ -2221,6 +2221,15 @@ def main():
                 except Exception as e:
                     log(f"Не удалось показать предупреждение Kaspersky: {e}", "⚠️ KASPERSKY")
 
+            telega_found_path = payload.get("telega_found_path")
+            if telega_found_path:
+                log(f"Обнаружена Telega Desktop: {telega_found_path}", "🚨 TELEGA")
+                try:
+                    from startup.telega_check import show_telega_warning
+                    show_telega_warning(window, found_path=str(telega_found_path))
+                except Exception as e:
+                    log(f"Не удалось показать предупреждение Telega: {e}", "🚨 TELEGA")
+
             if not ok and not start_in_tray:
                 log("Некритические проверки не пройдены, продолжаем работу после предупреждения", "⚠ WARNING")
 
@@ -2290,6 +2299,13 @@ def main():
             except Exception:
                 kaspersky_detected = False
 
+            telega_found_path = None
+            try:
+                from startup.telega_check import _check_telega_installed
+                telega_found_path = _check_telega_installed()
+            except Exception:
+                telega_found_path = None
+
             if is_verbose_logging_enabled():
                 from startup.admin_check_debug import debug_admin_status
                 debug_admin_status()
@@ -2306,6 +2322,7 @@ def main():
                     "warnings": warnings,
                     "fatal_error": fatal_error,
                     "kaspersky_detected": kaspersky_detected,
+                    "telega_found_path": telega_found_path,
                 }
             )
         except Exception as e:
