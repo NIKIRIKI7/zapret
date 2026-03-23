@@ -37,6 +37,9 @@ class DPIStartWorker(QObject):
         try:
             self.progress.emit("Подготовка к запуску...")
 
+            from utils.process_killer import kill_winws_force
+            kill_winws_force()
+
             # Pre-calc preset start parameters (used for safe preflight validation).
             skip_stop = False
             mode_param = self.selected_mode

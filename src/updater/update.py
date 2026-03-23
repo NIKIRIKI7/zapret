@@ -559,10 +559,9 @@ class UpdateWorker(QObject):
         
         download_error = None
         for idx, (url, verify_ssl) in enumerate(download_urls):
-            # Пропускаем telegram:// URL - они обрабатываются выше
             if url.startswith("telegram://"):
                 continue
-                
+
             try:
                 log(f"Попытка #{idx+1} с {url} (SSL={verify_ssl})", "🔁 UPDATE")
                 

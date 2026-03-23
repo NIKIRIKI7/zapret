@@ -37,16 +37,6 @@ CONFLICTING_PROCESSES = {
         'reason': 'Конфликт с другим DPI bypass инструментом',
         'solution': 'Используйте только один DPI bypass инструмент'
     },
-    'winws.exe': {  # ✅ НОВОЕ: Проверка дублей
-        'name': 'Другой экземпляр winws.exe',
-        'reason': 'Уже запущен другой экземпляр DPI обхода',
-        'solution': 'Остановите старый экземпляр перед запуском нового'
-    },
-    'winws2.exe': {  # Проверка дублей для Zapret 2
-        'name': 'Другой экземпляр winws2.exe',
-        'reason': 'Уже запущен другой экземпляр DPI обхода (Zapret 2)',
-        'solution': 'Остановите старый экземпляр перед запуском нового'
-    }
 }
 
 def check_process_health(process_name: str = "winws.exe", monitor_duration: int = 5, check_interval: float = 0.5) -> Tuple[bool, Optional[str]]:
@@ -266,11 +256,6 @@ def check_conflicting_processes() -> List[Dict[str, str]]:
                 # Проверяем каждый конфликтующий процесс
                 for conflict_exe, info in CONFLICTING_PROCESSES.items():
                     if proc_name.lower() == conflict_exe.lower():
-                        # ✅ ОСОБАЯ ПРОВЕРКА для winws.exe (игнорируем "свой" процесс)
-                        if conflict_exe.lower() == 'winws.exe':
-                            # Пропускаем если это наш процесс (будет проверяться отдельно)
-                            continue
-                        
                         found_conflicts.append({
                             'exe': conflict_exe,
                             'name': info['name'],

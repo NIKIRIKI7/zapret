@@ -41,7 +41,7 @@ jobs:
               R*) emoji="📝" ;;
               *)  emoji="📄" ;;
             esac
-            FILE_LIST="${FILE_LIST}${emoji} <code>${file}</code>\n"
+            FILE_LIST="${FILE_LIST}${emoji} <code>${file}</code>"$'\n'
           done <<< "$FILES_CHANGED"
 
           # First line of commit message
