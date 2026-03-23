@@ -134,8 +134,8 @@ class BlockcheckRunner:
         # ── Phase 0: Preflight ──
         if not self.cancelled:
             current_phase += 1
-            self.cb.on_phase_change(f"Фаза {current_phase}/{phase_count}: Preflight")
-            self.cb.on_log("=== Preflight Domain Check ===")
+            self.cb.on_phase_change(f"Фаза {current_phase}/{phase_count}: Preflight проверка")
+            self.cb.on_log("=== Preflight — предварительная проверка доменов ===")
             preflight_domains = self._extract_unique_hosts(targets)
             report.preflight = run_preflight(
                 preflight_domains,
@@ -156,8 +156,8 @@ class BlockcheckRunner:
                     ]
                     skipped = before - len(targets)
                     self.cb.on_log(
-                        f"Preflight: skipped {skipped} targets "
-                        f"({len(failed_domains)} failed domains)"
+                        f"Preflight: пропущено {skipped} целей "
+                        f"({len(failed_domains)} проблемных доменов)"
                     )
 
         # ── Phase 1: DNS integrity ──

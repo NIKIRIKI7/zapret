@@ -271,6 +271,12 @@ class StrategyScanner:
         # Pre-scan: kill any running winws and clean WinDivert
         self._pre_scan_cleanup()
 
+        # Preflight — быстрая проверка целевого хоста перед сканированием
+        if not self._cancelled:
+            preflight_ok = self._run_preflight_check()
+            if not preflight_ok:
+                self._cb.on_log("Preflight: обнаружены проблемы, но сканирование продолжится")
+
         # Baseline test: check if target is already accessible without winws2
         baseline_accessible = self._run_baseline_test()
 
@@ -1487,6 +1493,35 @@ class StrategyScanner:
             self._cb.on_log(f"Cleanup finished with warnings: {'; '.join(errors)}")
         else:
             self._cb.on_log("Cleanup done")
+
+    def _run_preflight_check(self) -> bool:
+        """Быстрая preflight-проверка целевого хоста перед сканированием стратегий."""
+        if self._scan_protocol != _PROTOCOL_TCP_HTTPS:
+            return True  # Preflight только для HTTPS-целей
+
+        try:
+            from blockcheck.preflight import check_one_domain, format_domain_log
+            from blockcheck.models import PreflightVerdict
+        except ImportError:
+            self._cb.on_log("Preflight: модуль недоступен, пропускаем")
+            return True
+
+        self._cb.on_phase("Preflight проверка")
+        self._cb.on_log(f"\n--- Preflight: {self._target_host} ---")
+
+        result = check_one_domain(self._target_host)
+
+        # Подробный лог каждой проверки
+        self._cb.on_log(format_domain_log(result))
+
+        if result.is_block_ip:
+            self._cb.on_log(
+                f"\n  DNS возвращает IP-заглушку провайдера ({result.block_ip_detail}).\n"
+                "  Стратегии будут тестироваться на заглушке, а не на реальном сервере.\n"
+                "  Рекомендация: используйте DoH/DoT или измените системный DNS."
+            )
+
+        return result.verdict != PreflightVerdict.FAILED
 
     def _cleanup_temp_files(self) -> None:
         """Remove temp preset and hostlist files."""

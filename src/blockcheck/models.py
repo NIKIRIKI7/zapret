@@ -41,6 +41,7 @@ class TestType(Enum):
     PREFLIGHT_DNS = "preflight_dns"
     PREFLIGHT_TCP = "preflight_tcp"
     PREFLIGHT_HTTP = "preflight_http"
+    PREFLIGHT_PING = "preflight_ping"
 
 
 @dataclass
