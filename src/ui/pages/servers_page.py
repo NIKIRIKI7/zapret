@@ -1201,6 +1201,7 @@ class ServersPage(BasePage):
         self._found_update = False
         self._remote_version = ""
         self._release_notes = ""
+        self._update_in_progress = False
 
         self._last_check_time = 0.0
         self._check_cooldown = 60
@@ -1694,18 +1695,11 @@ class ServersPage(BasePage):
         self.start_checks(telegram_only=telegram_only)
 
     def _install_update(self):
-        # Guard: if a download thread is already running, ignore the call.
-        # _update_thread stays set until the thread finishes and we clear it below.
-        try:
-            thr = getattr(self, "_update_thread", None)
-            if thr is not None and thr.isRunning():
-                log("Загрузка уже выполняется, повторный запуск проигнорирован", "🔄 UPDATE")
-                return
-        except RuntimeError:
-            # C++ object already deleted — safe to proceed
-            self._update_thread = None
-        except Exception:
-            pass
+        if self._update_in_progress:
+            log("Загрузка уже выполняется, повторный запуск проигнорирован", "🔄 UPDATE")
+            return
+
+        self._update_in_progress = True
 
         log(f"Запуск установки обновления v{self._remote_version}", "🔄 UPDATE")
 
@@ -1730,8 +1724,8 @@ class ServersPage(BasePage):
             self._update_worker.finished.connect(self._update_worker.deleteLater)
             self._update_thread.finished.connect(self._update_thread.deleteLater)
 
-            # Reset refs after the thread dies so the guard above works next time.
             def _on_thread_done():
+                self._update_in_progress = False
                 self._update_thread = None
                 self._update_worker = None
             self._update_thread.finished.connect(_on_thread_done)
@@ -1748,6 +1742,7 @@ class ServersPage(BasePage):
 
         except Exception as e:
             log(f"Ошибка при запуске обновления: {e}", "❌ ERROR")
+            self._update_in_progress = False
             self._update_thread = None
             self._update_worker = None
             self.changelog_card.download_failed(str(e)[:50])

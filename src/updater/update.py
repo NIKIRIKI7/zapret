@@ -357,11 +357,8 @@ class UpdateWorker(QObject):
     finished = pyqtSignal(bool)
     ask_user = pyqtSignal(str, str, bool)
     show_no_updates = pyqtSignal(str)
-    show_download_dialog = pyqtSignal(str)
-    hide_download_dialog = pyqtSignal()
     download_complete = pyqtSignal()
     download_failed = pyqtSignal(str)
-    retry_download = pyqtSignal()
 
     def __init__(self, parent=None, silent: bool = False, skip_rate_limit: bool = False):
         super().__init__()
@@ -371,8 +368,6 @@ class UpdateWorker(QObject):
         self._should_continue = True
         self._user_response = None
         self._response_event = threading.Event()
-        self._retry_requested = False
-        self._last_release_info = None
 
     def set_user_response(self, response: bool):
         log(f"UpdateWorker: получен ответ: {response}", "🔁 UPDATE")
@@ -403,11 +398,6 @@ class UpdateWorker(QObject):
         else:
             log("UpdateWorker: таймаут ожидания ответа", "🔁 UPDATE")
             return False
-    
-    def request_retry(self):
-        self._retry_requested = True
-        if self._last_release_info:
-            self._download_update(self._last_release_info, is_retry=True)
     
     def _get_download_urls(self, release_info: dict) -> list:
         """Формирует список URL в порядке приоритета со всеми доступными серверами"""
@@ -540,13 +530,8 @@ class UpdateWorker(QObject):
     
     def _download_update(self, release_info: dict, is_retry: bool = False) -> bool:
         new_ver = release_info["version"]
-        
-        if not is_retry:
-            log(f"UpdateWorker: показываем диалог загрузки v{new_ver}", "🔁 UPDATE")
-            self.show_download_dialog.emit(new_ver)
-        else:
-            log(f"UpdateWorker: retry - используем существующий диалог", "🔁 UPDATE")
-        
+        log(f"UpdateWorker: загрузка v{new_ver} (retry={is_retry})", "🔁 UPDATE")
+
         tmp_dir = tempfile.mkdtemp(prefix="zapret_upd_")
         setup_exe = os.path.join(tmp_dir, "Zapret2Setup.exe")
         
@@ -591,8 +576,6 @@ class UpdateWorker(QObject):
                     time.sleep(1)
         
         if download_error:
-            self._last_release_info = release_info
-
             error_msg = str(download_error)
             if "ConnectionPool" in error_msg or "Connection" in error_msg:
                 error_msg = "Ошибка подключения. Проверьте интернет."
@@ -605,7 +588,6 @@ class UpdateWorker(QObject):
         if not os.path.exists(setup_exe):
             error_msg = "Нет доступных источников для скачивания обновления"
             log(f"❌ {error_msg}", "🔁❌ ERROR")
-            self._last_release_info = release_info
             self.download_failed.emit(error_msg)
             self._emit(f"Ошибка: {error_msg}")
             shutil.rmtree(tmp_dir, True)
