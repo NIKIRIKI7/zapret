@@ -55,7 +55,7 @@ body:
         GitHub поддерживает drag & drop файлов в это поле.
       placeholder: "Перетащите файл .txt сюда"
     validations:
-      required: false
+      required: true
 
   - type: dropdown
     id: category
