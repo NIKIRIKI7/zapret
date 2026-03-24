@@ -2,7 +2,7 @@
 
 ### Документация доступна здесь https://publish.obsidian.md/zapret
 
-### Поддержка по багам и идея доступна здесь https://t.me/bypassblock/1359
+### Попробуйте наш новый [Zapret KVN](https://github.com/youtubediscord/zapret-kvn)!
 
 Один из самых популярных GUI лаунчеров для программы Запрет.
 
