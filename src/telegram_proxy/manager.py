@@ -9,7 +9,7 @@ from PyQt6.QtCore import QThread, pyqtSignal, QTimer
 from typing import Optional, Callable
 
 from telegram_proxy import ProxyController
-from telegram_proxy.wss_proxy import ProxyStats
+from telegram_proxy.wss_proxy import ProxyStats, UpstreamProxyConfig
 from telegram_proxy.proxy_logger import get_proxy_logger
 
 
@@ -56,7 +56,8 @@ class TelegramProxyManager(QThread):
     def proxy_logger(self):
         return self._proxy_logger
 
-    def start_proxy(self, port: int = 1353, mode: str = "socks5", host: str = "127.0.0.1") -> bool:
+    def start_proxy(self, port: int = 1353, mode: str = "socks5", host: str = "127.0.0.1",
+                    upstream_config: Optional[UpstreamProxyConfig] = None) -> bool:
         """Start the proxy. Thread-safe, non-blocking."""
         if self.is_running:
             return False
@@ -66,6 +67,7 @@ class TelegramProxyManager(QThread):
             mode=mode,
             on_log=self._on_log,
             host=host,
+            upstream_config=upstream_config,
         )
         ok = self._controller.start()
         if ok:
@@ -85,10 +87,11 @@ class TelegramProxyManager(QThread):
         self._controller = None
         self.status_changed.emit(False)
 
-    def restart_proxy(self, port: int = 1353, mode: str = "socks5", host: str = "127.0.0.1") -> bool:
+    def restart_proxy(self, port: int = 1353, mode: str = "socks5", host: str = "127.0.0.1",
+                      upstream_config: Optional[UpstreamProxyConfig] = None) -> bool:
         """Restart with new config."""
         self.stop_proxy()
-        return self.start_proxy(port, mode, host)
+        return self.start_proxy(port, mode, host, upstream_config=upstream_config)
 
     def cleanup(self) -> None:
         """Called on app exit."""
@@ -101,7 +104,7 @@ class TelegramProxyManager(QThread):
                 self._controller.stop()
         except Exception:
             pass
-            self._controller = None
+        self._controller = None
 
     def _on_log(self, msg: str) -> None:
         # Write to file logger + ring buffer (thread-safe)

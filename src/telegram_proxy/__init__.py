@@ -17,7 +17,7 @@ import threading
 from dataclasses import dataclass
 from typing import Optional, Callable
 
-from telegram_proxy.wss_proxy import TelegramWSProxy, ProxyStats
+from telegram_proxy.wss_proxy import TelegramWSProxy, ProxyStats, UpstreamProxyConfig
 
 log = logging.getLogger("tg_proxy")
 
@@ -38,11 +38,13 @@ class ProxyController:
         mode: str = "socks5",
         on_log: Optional[Callable[[str], None]] = None,
         host: str = "127.0.0.1",
+        upstream_config: Optional[UpstreamProxyConfig] = None,
     ):
         self._port = port
         self._mode = mode
         self._on_log = on_log
         self._host = host
+        self._upstream_config = upstream_config
         self._proxy: Optional[TelegramWSProxy] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
@@ -82,6 +84,7 @@ class ProxyController:
             mode=self._mode,
             on_log=self._on_log,
             host=self._host,
+            upstream_config=self._upstream_config,
         )
         self._started.clear()
         self._thread = threading.Thread(
@@ -123,7 +126,8 @@ class ProxyController:
         if thread and thread.is_alive():
             thread.join(timeout=1.0)
 
-    def update_config(self, port: int = None, mode: str = None, host: str = None) -> None:
+    def update_config(self, port: int = None, mode: str = None, host: str = None,
+                      upstream_config: Optional[UpstreamProxyConfig] = None) -> None:
         """Update config. Requires restart to take effect."""
         if port is not None:
             self._port = port
@@ -131,6 +135,8 @@ class ProxyController:
             self._mode = mode
         if host is not None:
             self._host = host
+        if upstream_config is not None:
+            self._upstream_config = upstream_config
 
     def restart(self) -> bool:
         """Restart with current config."""

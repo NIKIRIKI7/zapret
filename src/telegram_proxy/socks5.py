@@ -17,6 +17,7 @@ log = logging.getLogger("tg_proxy.socks5")
 # SOCKS5 constants
 SOCKS_VER = 0x05
 AUTH_NONE = 0x00
+AUTH_USERPASS = 0x02
 CMD_CONNECT = 0x01
 ATYP_IPV4 = 0x01
 ATYP_DOMAIN = 0x03
@@ -129,3 +130,111 @@ def _send_reply(writer: asyncio.StreamWriter, rep: int) -> None:
 def send_failure(writer: asyncio.StreamWriter, rep: int = REP_GENERAL_FAILURE) -> None:
     """Send failure reply. For use after handshake if tunnel setup fails."""
     _send_reply(writer, rep)
+
+
+# ---- SOCKS5 client (outbound connect through upstream proxy) ----
+
+
+async def connect_via_socks5(
+    proxy_host: str,
+    proxy_port: int,
+    target_host: str,
+    target_port: int,
+    username: str = "",
+    password: str = "",
+    timeout: float = 10.0,
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Connect to target through a SOCKS5 proxy. Returns (reader, writer) to target.
+
+    Supports both IPv4 addresses and domain names as target_host.
+    Supports no-auth (0x00) and username/password auth (0x02, RFC 1929).
+    Raises Socks5Error on any SOCKS5 protocol failure.
+    """
+    reader, writer = await asyncio.wait_for(
+        asyncio.open_connection(proxy_host, proxy_port),
+        timeout=timeout,
+    )
+
+    try:
+        # Phase 1: Greeting — offer available auth methods
+        has_creds = bool(username)
+        if has_creds:
+            writer.write(struct.pack("!BBBB", SOCKS_VER, 2, AUTH_NONE, AUTH_USERPASS))
+        else:
+            writer.write(struct.pack("!BBB", SOCKS_VER, 1, AUTH_NONE))
+        await writer.drain()
+
+        reply = await asyncio.wait_for(reader.readexactly(2), timeout=timeout)
+        ver, method = struct.unpack("!BB", reply)
+        if ver != SOCKS_VER:
+            raise Socks5Error(f"Upstream proxy bad SOCKS version: {ver}")
+
+        if method == AUTH_USERPASS:
+            if not has_creds:
+                raise Socks5Error("Upstream proxy requires auth but no credentials provided")
+            # RFC 1929: VER=1, ULEN, USERNAME, PLEN, PASSWORD
+            uname = username.encode("utf-8")
+            passwd = password.encode("utf-8")
+            auth_req = struct.pack("!BB", 0x01, len(uname)) + uname
+            auth_req += struct.pack("!B", len(passwd)) + passwd
+            writer.write(auth_req)
+            await writer.drain()
+            auth_reply = await asyncio.wait_for(reader.readexactly(2), timeout=timeout)
+            auth_ver, auth_status = struct.unpack("!BB", auth_reply)
+            if auth_status != 0x00:
+                raise Socks5Error(f"Upstream proxy auth failed (status=0x{auth_status:02X})")
+        elif method == AUTH_NONE:
+            pass  # No auth needed
+        elif method == 0xFF:
+            raise Socks5Error("Upstream proxy rejected all auth methods")
+        else:
+            raise Socks5Error(f"Upstream proxy selected unsupported method 0x{method:02X}")
+
+        # Phase 2: CONNECT request
+        # Determine address type
+        is_ipv4 = all(c.isdigit() or c == "." for c in target_host) and "." in target_host
+        if is_ipv4:
+            parts = target_host.split(".")
+            addr_bytes = struct.pack("!BBBB", *[int(p) for p in parts])
+            req = struct.pack("!BBB", SOCKS_VER, CMD_CONNECT, 0x00)
+            req += struct.pack("!B", ATYP_IPV4) + addr_bytes
+        else:
+            # Domain name
+            domain_bytes = target_host.encode("ascii")
+            req = struct.pack("!BBB", SOCKS_VER, CMD_CONNECT, 0x00)
+            req += struct.pack("!BB", ATYP_DOMAIN, len(domain_bytes)) + domain_bytes
+
+        req += struct.pack("!H", target_port)
+        writer.write(req)
+        await writer.drain()
+
+        # Read CONNECT reply header (VER + REP + RSV + ATYP)
+        resp = await asyncio.wait_for(reader.readexactly(4), timeout=timeout)
+        ver, rep, _rsv, atyp = struct.unpack("!BBBB", resp)
+
+        if ver != SOCKS_VER:
+            raise Socks5Error(f"Upstream proxy bad reply version: {ver}")
+        if rep != REP_SUCCESS:
+            raise Socks5Error(f"Upstream proxy CONNECT failed (REP=0x{rep:02X})")
+
+        # Consume bound address (we don't need it but must read it)
+        if atyp == ATYP_IPV4:
+            await reader.readexactly(4 + 2)  # 4-byte addr + 2-byte port
+        elif atyp == ATYP_DOMAIN:
+            domain_len = (await reader.readexactly(1))[0]
+            await reader.readexactly(domain_len + 2)  # domain + 2-byte port
+        elif atyp == ATYP_IPV6:
+            await reader.readexactly(16 + 2)  # 16-byte addr + 2-byte port
+        else:
+            # Unknown ATYP — try to read 4+2 as fallback
+            await reader.readexactly(4 + 2)
+
+        return reader, writer
+
+    except Exception:
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+        raise

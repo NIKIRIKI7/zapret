@@ -7,10 +7,12 @@ port configuration, and quick-setup deep link for Telegram.
 
 from __future__ import annotations
 
+import os
+import threading
 import webbrowser
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QStackedWidget, QLineEdit,
@@ -26,11 +28,11 @@ try:
     from qfluentwidgets import (
         BodyLabel, CaptionLabel, StrongBodyLabel,
         SpinBox, InfoBar, InfoBarPosition,
-        SegmentedWidget,
+        SegmentedWidget, ComboBox,
     )
     _HAS_FLUENT = True
 except ImportError:
-    from PyQt6.QtWidgets import QSpinBox as SpinBox
+    from PyQt6.QtWidgets import QSpinBox as SpinBox, QComboBox as ComboBox
     BodyLabel = QLabel
     CaptionLabel = QLabel
     StrongBodyLabel = QLabel
@@ -55,6 +57,27 @@ def _get_proxy_manager():
 
 # How often (ms) the GUI reads new log lines from the ring buffer
 _LOG_REFRESH_MS = 500
+
+def _load_upstream_presets() -> list[dict]:
+    """Load SOCKS5 proxy presets from build secrets. Returns list with "Ручной ввод" first."""
+    manual = [{"name": "Ручной ввод", "host": "", "port": 0, "username": "", "password": ""}]
+    try:
+        from config._build_secrets import PROXY_PRESETS
+        if isinstance(PROXY_PRESETS, list) and PROXY_PRESETS:
+            return manual + PROXY_PRESETS
+    except ImportError:
+        pass
+    return manual
+
+
+def _load_mtproxy_link() -> str:
+    """Load MTProxy link from build secrets. Returns empty string if missing."""
+    try:
+        from config._build_secrets import MTPROXY_LINK
+        return MTPROXY_LINK or ""
+    except ImportError:
+        return ""
+
 
 
 class _StatusDot(QWidget):
@@ -254,6 +277,118 @@ class TelegramProxyPage(BasePage):
 
         layout.addWidget(self._settings_card)
 
+        # -- Upstream proxy card --
+        layout.addWidget(StrongBodyLabel("Внешний прокси (upstream)"))
+        self._upstream_card = SettingsCard()
+
+        upstream_desc = CaptionLabel(
+            "SOCKS5 прокси-сервер для DC заблокированных вашим провайдером.\n"
+            "Используется как резервный канал когда WSS relay и прямое подключение не работают."
+        )
+        upstream_desc.setWordWrap(True)
+        self._upstream_card.add_widget(upstream_desc)
+
+        # Enable toggle (reuse Win11ToggleRow already imported above)
+        self._upstream_toggle = Win11ToggleRow(
+            "mdi.server-network",
+            "Использовать внешний прокси",
+            "Маршрутизировать заблокированные DC через внешний SOCKS5 прокси",
+        )
+        self._upstream_toggle.toggle.setChecked(False)
+        self._upstream_card.add_widget(self._upstream_toggle)
+
+        # Preset selector (loaded from private JSON at runtime)
+        self._upstream_presets = _load_upstream_presets()
+        has_presets = len(self._upstream_presets) > 1
+
+        # ComboBox for preset selection (hidden if no presets file)
+        self._upstream_preset_widget = QWidget()
+        preset_layout = QHBoxLayout(self._upstream_preset_widget)
+        preset_layout.setContentsMargins(0, 0, 0, 0)
+        preset_layout.addWidget(BodyLabel("Прокси:"))
+        self._upstream_preset_combo = ComboBox()
+        self._upstream_preset_combo.setFixedWidth(250)
+        for preset in self._upstream_presets:
+            self._upstream_preset_combo.addItem(preset["name"])
+        # Default to first real preset (index 1) if presets exist
+        if has_presets:
+            self._upstream_preset_combo.setCurrentIndex(1)
+        preset_layout.addStretch()
+        self._upstream_preset_widget.setVisible(has_presets)
+        self._upstream_card.add_widget(self._upstream_preset_widget)
+
+        # Manual input container (always visible if no presets, otherwise only for "Ручной ввод")
+        self._upstream_manual_widget = QWidget()
+        manual_layout = QVBoxLayout(self._upstream_manual_widget)
+        manual_layout.setContentsMargins(0, 0, 0, 0)
+        manual_layout.setSpacing(8)
+
+        # Host + Port row
+        upstream_hp_row = QHBoxLayout()
+        upstream_hp_row.addWidget(BodyLabel("Хост:"))
+        self._upstream_host_edit = QLineEdit("")
+        self._upstream_host_edit.setFixedWidth(200)
+        self._upstream_host_edit.setPlaceholderText("192.168.1.100 или proxy.example.com")
+        upstream_hp_row.addWidget(self._upstream_host_edit)
+        upstream_hp_row.addSpacing(16)
+        upstream_hp_row.addWidget(BodyLabel("Порт:"))
+        self._upstream_port_spin = SpinBox()
+        self._upstream_port_spin.setRange(1, 65535)
+        self._upstream_port_spin.setValue(1080)
+        self._upstream_port_spin.setFixedWidth(100)
+        upstream_hp_row.addWidget(self._upstream_port_spin)
+        upstream_hp_row.addStretch()
+        manual_layout.addLayout(upstream_hp_row)
+
+        # Username + Password row
+        upstream_auth_row = QHBoxLayout()
+        upstream_auth_row.addWidget(BodyLabel("Логин:"))
+        self._upstream_user_edit = QLineEdit("")
+        self._upstream_user_edit.setFixedWidth(150)
+        self._upstream_user_edit.setPlaceholderText("username")
+        upstream_auth_row.addWidget(self._upstream_user_edit)
+        upstream_auth_row.addSpacing(16)
+        upstream_auth_row.addWidget(BodyLabel("Пароль:"))
+        self._upstream_pass_edit = QLineEdit("")
+        self._upstream_pass_edit.setFixedWidth(150)
+        self._upstream_pass_edit.setPlaceholderText("password")
+        self._upstream_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        upstream_auth_row.addWidget(self._upstream_pass_edit)
+        upstream_auth_row.addStretch()
+        manual_layout.addLayout(upstream_auth_row)
+
+        # If no presets file → always show manual fields; with presets → hide (preset selected)
+        self._upstream_manual_widget.setVisible(not has_presets)
+        self._upstream_card.add_widget(self._upstream_manual_widget)
+
+        # Mode toggle (fallback vs always) — default ON
+        self._upstream_mode_toggle = Win11ToggleRow(
+            "mdi.swap-horizontal",
+            "Весь трафик через прокси",
+            "Если выключено — только заблокированные DC. Если включено — весь трафик Telegram.",
+        )
+        self._upstream_mode_toggle.toggle.setChecked(True)
+        self._upstream_card.add_widget(self._upstream_mode_toggle)
+
+        layout.addWidget(self._upstream_card)
+
+        # -- MTProxy card (shown only if link exists in private config) --
+        self._mtproxy_link = _load_mtproxy_link()
+        self._mtproxy_card = SettingsCard()
+        mtproxy_desc = CaptionLabel(
+            "Также доступен MTProxy (белые списки). Нажмите для добавления в Telegram."
+        )
+        mtproxy_desc.setWordWrap(True)
+        self._mtproxy_card.add_widget(mtproxy_desc)
+
+        self._btn_mtproxy = ActionButton("Добавить MTProxy в Telegram")
+        self._btn_mtproxy.setToolTip("Откроет ссылку для добавления MTProxy")
+        self._btn_mtproxy.clicked.connect(self._on_open_mtproxy)
+        self._mtproxy_card.add_widget(self._btn_mtproxy)
+        self._mtproxy_card.setVisible(bool(self._mtproxy_link))
+
+        layout.addWidget(self._mtproxy_card)
+
         # -- Instructions card --
         layout.addWidget(StrongBodyLabel("Ручная настройка"))
         self._instructions_card = SettingsCard()
@@ -412,11 +547,53 @@ class TelegramProxyPage(BasePage):
                 for ip, domain, dc in self._WSS_PROBE_TARGETS
             ]
 
-            # ── Phase 3: SNI + HTTP + proxy + winws2 (parallel) ──
+            # ── Phase 0: WSS relay reachability (parallel with everything) ──
+            from telegram_proxy.wss_proxy import check_relay_reachable
+            relay_f = ex.submit(check_relay_reachable, timeout=5.0)
+
+            # ── Phase 3: SNI + HTTP + proxy + winws2 + upstream (parallel) ──
             sni_f = ex.submit(self._test_sni_vs_ip)
             http_f = ex.submit(self._test_http_port80)
             proxy_f = ex.submit(self._test_proxy_liveness, "127.0.0.1", proxy_port)
             winws2_f = ex.submit(self._check_winws2_running)
+
+            # Upstream proxy test (if configured)
+            upstream_f = None
+            try:
+                from config.reg import (get_tg_proxy_upstream_enabled,
+                                         get_tg_proxy_upstream_host,
+                                         get_tg_proxy_upstream_port)
+                if get_tg_proxy_upstream_enabled():
+                    up_host = get_tg_proxy_upstream_host()
+                    up_port = get_tg_proxy_upstream_port()
+                    if up_host and up_port > 0:
+                        upstream_f = ex.submit(self._test_upstream_proxy, up_host, up_port)
+            except Exception:
+                pass
+
+            # ── Collect relay result first ──
+            relay_result = relay_f.result()
+            results.append("=" * 76)
+            results.append("  ДОСТУПНОСТЬ WSS RELAY")
+            results.append("=" * 76)
+            results.append("  149.154.167.220:443 (web.telegram.org)")
+            if relay_result["reachable"]:
+                results.append(f"  TCP+TLS: OK ({relay_result['ms']:.0f}ms)")
+            else:
+                results.append(f"  TCP+TLS: TIMEOUT ({relay_result['ms']:.0f}ms) <- ЗАБЛОКИРОВАН")
+                results.append("  ! WSS relay недоступен — прокси не сможет проксировать через WSS.")
+                # Check zapret status
+                try:
+                    zapret_status = winws2_f.result(timeout=0.1)
+                except Exception:
+                    zapret_status = None
+                if zapret_status is not None:
+                    results.append(f"  Zapret запущен: {'ДА' if zapret_status else 'НЕТ'}")
+                if relay_result["error"]:
+                    results.append(f"  Ошибка: {relay_result['error']}")
+            self._diag_result = "\n".join(results)
+
+            results.append("")
 
             # Collect DC results with live update
             results.append("=" * 76)
@@ -488,6 +665,30 @@ class TelegramProxyPage(BasePage):
                 results.append("  SOCKS5: НЕ ЗАПУЩЕН (порт закрыт)")
             else:
                 results.append(f"  SOCKS5: {proxy_result['status']} — {proxy_result.get('error', '')}")
+
+            # Upstream proxy results
+            if upstream_f is not None:
+                upstream_result = upstream_f.result()
+                up_host = upstream_result.get("host", "?")
+                up_port = upstream_result.get("port", 0)
+                results.append("")
+                results.append("=" * 76)
+                results.append(f"  UPSTREAM PROXY ({up_host}:{up_port})")
+                results.append("=" * 76)
+                if upstream_result["status"] == "OK":
+                    results.append(
+                        f"  SOCKS5: OK (tcp {upstream_result['tcp_ms']:.0f}ms, "
+                        f"handshake {upstream_result['handshake_ms']:.0f}ms)"
+                    )
+                elif upstream_result["status"] == "NOT_RUNNING":
+                    results.append("  SOCKS5: НЕ ЗАПУЩЕН (порт закрыт)")
+                elif upstream_result["status"] == "TIMEOUT":
+                    results.append("  SOCKS5: TIMEOUT (не удалось подключиться)")
+                else:
+                    results.append(
+                        f"  SOCKS5: {upstream_result['status']} — "
+                        f"{upstream_result.get('error', '')}"
+                    )
 
         elapsed = time.time() - t0
 
@@ -678,6 +879,42 @@ class TelegramProxyPage(BasePage):
             result["status"] = "SOCKS_ERROR"
             result["error"] = str(e)
             return result
+
+    @staticmethod
+    def _test_upstream_proxy(host: str, port: int) -> dict:
+        """Test upstream SOCKS5 proxy connectivity."""
+        import socket, time
+
+        result = {
+            "host": host, "port": port,
+            "status": "NOT_RUNNING", "tcp_ms": 0, "handshake_ms": 0,
+        }
+        try:
+            t0 = time.monotonic()
+            sock = socket.create_connection((host, port), timeout=5.0)
+            result["tcp_ms"] = (time.monotonic() - t0) * 1000
+
+            # SOCKS5 greeting: VER=5, NMETHODS=1, NO_AUTH
+            t1 = time.monotonic()
+            sock.sendall(b"\x05\x01\x00")
+            reply = sock.recv(2)
+            if len(reply) == 2 and reply[0] == 5 and reply[1] == 0:
+                result["handshake_ms"] = (time.monotonic() - t1) * 1000
+                result["status"] = "OK"
+            else:
+                result["status"] = "SOCKS_ERROR"
+                result["error"] = f"Bad reply: {reply.hex()}"
+            sock.close()
+        except socket.timeout:
+            result["status"] = "TIMEOUT"
+            result["error"] = "Connection timeout"
+        except ConnectionRefusedError:
+            result["status"] = "NOT_RUNNING"
+            result["error"] = "Connection refused"
+        except Exception as e:
+            result["status"] = "ERROR"
+            result["error"] = str(e)
+        return result
 
     def _test_single_ip(self, ip: str, dc: str, wss: str) -> str:
         import socket, ssl, time
@@ -977,6 +1214,15 @@ class TelegramProxyPage(BasePage):
         self._port_spin.valueChanged.connect(self._on_port_changed)
         self._host_edit.editingFinished.connect(self._on_host_changed)
 
+        # Upstream proxy signals
+        self._upstream_toggle.toggled.connect(self._on_upstream_changed)
+        self._upstream_preset_combo.currentIndexChanged.connect(self._on_upstream_preset_changed)
+        self._upstream_host_edit.editingFinished.connect(self._on_upstream_host_changed)
+        self._upstream_port_spin.valueChanged.connect(self._on_upstream_port_changed)
+        self._upstream_user_edit.editingFinished.connect(self._on_upstream_user_changed)
+        self._upstream_pass_edit.editingFinished.connect(self._on_upstream_pass_changed)
+        self._upstream_mode_toggle.toggled.connect(self._on_upstream_mode_changed)
+
     def _load_settings(self):
         """Load settings from registry."""
         try:
@@ -995,6 +1241,45 @@ class TelegramProxyPage(BasePage):
 
             self._autostart_toggle.toggle.setChecked(get_tg_proxy_autostart())
             self._update_manual_instructions()
+
+            # Load upstream proxy settings
+            from config.reg import (get_tg_proxy_upstream_enabled, get_tg_proxy_upstream_host,
+                                     get_tg_proxy_upstream_port, get_tg_proxy_upstream_mode,
+                                     get_tg_proxy_upstream_user, get_tg_proxy_upstream_pass)
+            self._upstream_toggle.toggle.setChecked(get_tg_proxy_upstream_enabled())
+
+            # Determine which preset matches saved host/port (or fall back to manual)
+            saved_host = get_tg_proxy_upstream_host()
+            saved_port = get_tg_proxy_upstream_port()
+            preset_idx = 0  # default: manual
+            for i, preset in enumerate(self._upstream_presets):
+                if i == 0:
+                    continue  # skip "Ручной ввод"
+                if preset["host"] == saved_host and preset["port"] == saved_port:
+                    preset_idx = i
+                    break
+
+            self._upstream_preset_combo.blockSignals(True)
+            self._upstream_preset_combo.setCurrentIndex(preset_idx)
+            self._upstream_preset_combo.blockSignals(False)
+
+            # Fill manual fields
+            self._upstream_host_edit.setText(saved_host)
+            upstream_port = saved_port
+            if upstream_port > 0:
+                self._upstream_port_spin.blockSignals(True)
+                self._upstream_port_spin.setValue(upstream_port)
+                self._upstream_port_spin.blockSignals(False)
+            self._upstream_user_edit.setText(get_tg_proxy_upstream_user())
+            self._upstream_pass_edit.setText(get_tg_proxy_upstream_pass())
+
+            # Show/hide manual fields (always visible if no presets file)
+            has_presets = len(self._upstream_presets) > 1
+            self._upstream_manual_widget.setVisible(not has_presets or preset_idx == 0)
+
+            self._upstream_mode_toggle.toggle.setChecked(
+                get_tg_proxy_upstream_mode() == "always"
+            )
         except Exception as e:
             log(f"TelegramProxyPage: load settings error: {e}", "WARNING")
             self._port_spin.blockSignals(True)
@@ -1098,13 +1383,89 @@ class TelegramProxyPage(BasePage):
         mgr = _get_proxy_manager()
         port = self._port_spin.value()
         host = self._host_edit.text().strip() or "127.0.0.1"
-        ok = mgr.start_proxy(port=port, mode="socks5", host=host)
+
+        # Build upstream config from registry
+        upstream_config = None
+        try:
+            from telegram_proxy.wss_proxy import UpstreamProxyConfig
+            from config.reg import (get_tg_proxy_upstream_enabled, get_tg_proxy_upstream_host,
+                                     get_tg_proxy_upstream_port, get_tg_proxy_upstream_mode,
+                                     get_tg_proxy_upstream_user, get_tg_proxy_upstream_pass)
+            if get_tg_proxy_upstream_enabled():
+                up_host = get_tg_proxy_upstream_host()
+                up_port = get_tg_proxy_upstream_port()
+                if up_host and up_port > 0:
+                    upstream_config = UpstreamProxyConfig(
+                        enabled=True, host=up_host, port=up_port,
+                        mode=get_tg_proxy_upstream_mode(),
+                        username=get_tg_proxy_upstream_user(),
+                        password=get_tg_proxy_upstream_pass(),
+                    )
+        except Exception as e:
+            log(f"Failed to build upstream config: {e}", "WARNING")
+
+        ok = mgr.start_proxy(port=port, mode="socks5", host=host,
+                              upstream_config=upstream_config)
         if ok:
             try:
                 from config.reg import set_tg_proxy_enabled
                 set_tg_proxy_enabled(True)
             except Exception:
                 pass
+            self._check_relay_after_start()
+
+    def _check_relay_after_start(self):
+        """Check relay reachability after proxy starts. Runs check in background."""
+        def _do_check():
+            try:
+                from telegram_proxy.wss_proxy import check_relay_reachable
+                result = check_relay_reachable(timeout=5.0)
+                if not result["reachable"]:
+                    from PyQt6.QtCore import QMetaObject, Qt as QtNS
+                    QMetaObject.invokeMethod(
+                        self, "_show_relay_warning",
+                        QtNS.ConnectionType.QueuedConnection,
+                    )
+            except Exception as e:
+                log(f"Relay check error: {e}", "WARNING")
+        threading.Thread(target=_do_check, daemon=True).start()
+
+    @pyqtSlot()
+    def _show_relay_warning(self):
+        """Show InfoBar warning that WSS relay is unreachable. Must run on GUI thread."""
+        # Determine if zapret (winws2) is running to tailor the message
+        zapret_running = False
+        try:
+            app = self.window()
+            if hasattr(app, 'app') and hasattr(app.app, 'dpi_starter'):
+                zapret_running = app.app.dpi_starter.check_process_running_wmi(silent=True)
+        except Exception:
+            pass
+
+        if zapret_running:
+            title = "WSS Relay недоступен"
+            content = (
+                "web.telegram.org (149.154.167.220) не отвечает.\n"
+                "Telegram прокси не сможет работать.\n"
+                "Попробуйте выключить Zapret и перезапустить прокси — "
+                "он может мешать подключению к relay."
+            )
+        else:
+            title = "WSS Relay недоступен"
+            content = (
+                "web.telegram.org (149.154.167.220) не отвечает.\n"
+                "Ваш провайдер блокирует IP Telegram.\n"
+                "Прокси не сможет работать без внешнего прокси (VPN).\n"
+                "Настройте 'Внешний прокси' в настройках ниже."
+            )
+
+        if InfoBar is not None:
+            InfoBar.warning(
+                title, content,
+                duration=-1,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _stop_proxy(self):
         mgr = _get_proxy_manager()
@@ -1203,6 +1564,94 @@ class TelegramProxyPage(BasePage):
         except Exception:
             pass
         self._update_manual_instructions()
+
+    # -- Upstream proxy handlers --
+
+    def _on_upstream_changed(self, checked: bool):
+        try:
+            from config.reg import set_tg_proxy_upstream_enabled
+            set_tg_proxy_upstream_enabled(checked)
+        except Exception:
+            pass
+
+    def _on_upstream_preset_changed(self, index: int):
+        """Handle preset ComboBox selection. Auto-fill fields and save to registry."""
+        if index < 0 or index >= len(self._upstream_presets):
+            return
+        preset = self._upstream_presets[index]
+        is_manual = (index == 0)
+        self._upstream_manual_widget.setVisible(is_manual)
+
+        if not is_manual:
+            # Auto-fill from preset and save to registry
+            self._upstream_host_edit.setText(preset["host"])
+            self._upstream_port_spin.blockSignals(True)
+            self._upstream_port_spin.setValue(preset["port"])
+            self._upstream_port_spin.blockSignals(False)
+            self._upstream_user_edit.setText(preset["username"])
+            self._upstream_pass_edit.setText(preset["password"])
+            self._save_upstream_fields(
+                preset["host"], preset["port"],
+                preset["username"], preset["password"],
+            )
+
+    def _save_upstream_fields(self, host: str, port: int, user: str, password: str):
+        """Save all upstream proxy fields to registry."""
+        try:
+            from config.reg import (set_tg_proxy_upstream_host, set_tg_proxy_upstream_port,
+                                     set_tg_proxy_upstream_user, set_tg_proxy_upstream_pass)
+            set_tg_proxy_upstream_host(host)
+            set_tg_proxy_upstream_port(port)
+            set_tg_proxy_upstream_user(user)
+            set_tg_proxy_upstream_pass(password)
+        except Exception:
+            pass
+
+    def _on_upstream_host_changed(self):
+        try:
+            from config.reg import set_tg_proxy_upstream_host
+            set_tg_proxy_upstream_host(self._upstream_host_edit.text().strip())
+        except Exception:
+            pass
+
+    def _on_upstream_port_changed(self, port: int):
+        try:
+            from config.reg import set_tg_proxy_upstream_port
+            set_tg_proxy_upstream_port(port)
+        except Exception:
+            pass
+
+    def _on_upstream_user_changed(self):
+        try:
+            from config.reg import set_tg_proxy_upstream_user
+            set_tg_proxy_upstream_user(self._upstream_user_edit.text().strip())
+        except Exception:
+            pass
+
+    def _on_upstream_pass_changed(self):
+        try:
+            from config.reg import set_tg_proxy_upstream_pass
+            set_tg_proxy_upstream_pass(self._upstream_pass_edit.text())
+        except Exception:
+            pass
+
+    def _on_upstream_mode_changed(self, checked: bool):
+        try:
+            from config.reg import set_tg_proxy_upstream_mode
+            set_tg_proxy_upstream_mode("always" if checked else "fallback")
+        except Exception:
+            pass
+
+    def _on_open_mtproxy(self):
+        """Open MTProxy deep link in browser."""
+        link = self._mtproxy_link
+        if not link:
+            return
+        try:
+            webbrowser.open(link)
+            self._append_log_line("Opened MTProxy link")
+        except Exception as e:
+            self._append_log_line(f"Failed to open MTProxy link: {e}")
 
     @staticmethod
     def _validate_host(host: str) -> bool:

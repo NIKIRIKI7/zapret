@@ -592,6 +592,70 @@ def set_tg_proxy_host(host: str) -> bool:
     return reg(REGISTRY_PATH, _TG_PROXY_HOST_NAME, str(host))
 
 
+# ── Telegram Proxy Upstream (external SOCKS5 fallback) ──
+_TG_PROXY_UPSTREAM_ENABLED_NAME = "TgProxyUpstreamEnabled"    # REG_DWORD (0/1)
+_TG_PROXY_UPSTREAM_HOST_NAME = "TgProxyUpstreamHost"          # REG_SZ
+_TG_PROXY_UPSTREAM_PORT_NAME = "TgProxyUpstreamPort"          # REG_DWORD
+_TG_PROXY_UPSTREAM_MODE_NAME = "TgProxyUpstreamMode"          # REG_SZ
+
+def get_tg_proxy_upstream_enabled() -> bool:
+    from config import REGISTRY_PATH
+    val = reg(REGISTRY_PATH, _TG_PROXY_UPSTREAM_ENABLED_NAME)
+    return bool(val) if val is not None else False
+
+def set_tg_proxy_upstream_enabled(enabled: bool) -> bool:
+    from config import REGISTRY_PATH
+    return reg(REGISTRY_PATH, _TG_PROXY_UPSTREAM_ENABLED_NAME, 1 if enabled else 0)
+
+def get_tg_proxy_upstream_host() -> str:
+    from config import REGISTRY_PATH
+    val = reg(REGISTRY_PATH, _TG_PROXY_UPSTREAM_HOST_NAME)
+    return str(val) if val else ""
+
+def set_tg_proxy_upstream_host(host: str) -> bool:
+    from config import REGISTRY_PATH
+    return reg(REGISTRY_PATH, _TG_PROXY_UPSTREAM_HOST_NAME, str(host))
+
+def get_tg_proxy_upstream_port() -> int:
+    from config import REGISTRY_PATH
+    val = reg(REGISTRY_PATH, _TG_PROXY_UPSTREAM_PORT_NAME)
+    return int(val) if val is not None else 0
+
+def set_tg_proxy_upstream_port(port: int) -> bool:
+    from config import REGISTRY_PATH
+    return reg(REGISTRY_PATH, _TG_PROXY_UPSTREAM_PORT_NAME, int(port))
+
+def get_tg_proxy_upstream_mode() -> str:
+    from config import REGISTRY_PATH
+    val = reg(REGISTRY_PATH, _TG_PROXY_UPSTREAM_MODE_NAME)
+    return str(val) if val else "always"
+
+def set_tg_proxy_upstream_mode(mode: str) -> bool:
+    from config import REGISTRY_PATH
+    return reg(REGISTRY_PATH, _TG_PROXY_UPSTREAM_MODE_NAME, str(mode))
+
+_TG_PROXY_UPSTREAM_USER_NAME = "TgProxyUpstreamUser"      # REG_SZ
+_TG_PROXY_UPSTREAM_PASS_NAME = "TgProxyUpstreamPass"      # REG_SZ
+
+def get_tg_proxy_upstream_user() -> str:
+    from config import REGISTRY_PATH
+    val = reg(REGISTRY_PATH, _TG_PROXY_UPSTREAM_USER_NAME)
+    return str(val) if val else ""
+
+def set_tg_proxy_upstream_user(user: str) -> bool:
+    from config import REGISTRY_PATH
+    return reg(REGISTRY_PATH, _TG_PROXY_UPSTREAM_USER_NAME, str(user))
+
+def get_tg_proxy_upstream_pass() -> str:
+    from config import REGISTRY_PATH
+    val = reg(REGISTRY_PATH, _TG_PROXY_UPSTREAM_PASS_NAME)
+    return str(val) if val else ""
+
+def set_tg_proxy_upstream_pass(password: str) -> bool:
+    from config import REGISTRY_PATH
+    return reg(REGISTRY_PATH, _TG_PROXY_UPSTREAM_PASS_NAME, str(password))
+
+
 # ───────────── Registry Subkey Helpers ─────────────
 
 def reg_enumerate_values(subkey: str, *, root=HKCU) -> dict:

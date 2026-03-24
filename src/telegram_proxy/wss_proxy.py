@@ -493,6 +493,71 @@ def _is_http_transport(data: bytes) -> bool:
             data[:5] == b"HEAD " or data[:8] == b"OPTIONS ")
 
 
+# ---- Upstream proxy config ----
+
+
+@dataclass
+class UpstreamProxyConfig:
+    """Configuration for an external SOCKS5 proxy used as last-resort fallback.
+
+    Modes:
+      - "fallback": route through upstream only when WSS+TCP both fail
+      - "always":   route all traffic through upstream proxy
+    """
+    enabled: bool = False
+    host: str = ""
+    port: int = 0
+    mode: str = "always"
+    username: str = ""
+    password: str = ""
+
+
+
+# ---- Relay reachability check ----
+
+
+def check_relay_reachable(
+    relay_ip: str = "149.154.167.220",
+    timeout: float = 5.0,
+) -> dict:
+    """Synchronous TCP+TLS check of WSS relay reachability.
+
+    Called from UI diagnostics thread (ThreadPoolExecutor) — must be sync.
+    Tests: TCP connect to relay_ip:443 → TLS handshake with SNI=kws2.web.telegram.org.
+
+    Returns dict with keys:
+        reachable (bool): True if TLS handshake succeeded
+        error (str): error description on failure, empty on success
+        ms (float): elapsed time in milliseconds
+    """
+    t0 = time.monotonic()
+    try:
+        sock = _socket.create_connection((relay_ip, 443), timeout=timeout)
+        try:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            tls_sock = ctx.wrap_socket(sock, server_hostname="kws2.web.telegram.org")
+            tls_sock.close()
+        except Exception:
+            sock.close()
+            raise
+        ms = (time.monotonic() - t0) * 1000
+        return {"reachable": True, "error": "", "ms": round(ms, 1)}
+    except _socket.timeout:
+        ms = (time.monotonic() - t0) * 1000
+        return {"reachable": False, "error": f"TCP timeout ({timeout}s)", "ms": round(ms, 1)}
+    except ConnectionRefusedError:
+        ms = (time.monotonic() - t0) * 1000
+        return {"reachable": False, "error": "Connection refused", "ms": round(ms, 1)}
+    except OSError as e:
+        ms = (time.monotonic() - t0) * 1000
+        return {"reachable": False, "error": f"Network error: {e}", "ms": round(ms, 1)}
+    except Exception as e:
+        ms = (time.monotonic() - t0) * 1000
+        return {"reachable": False, "error": str(e), "ms": round(ms, 1)}
+
+
 # ---- Stats ----
 
 
@@ -509,6 +574,7 @@ class ProxyStats:
     pool_hits: int = 0
     pool_misses: int = 0
     passthrough_connections: int = 0
+    upstream_connections: int = 0
     # Per-DC recv=0 counter (connection established but no data received)
     recv_zero_count: int = 0
     http_rejected: int = 0
@@ -669,11 +735,13 @@ class TelegramWSProxy:
         mode: str = "socks5",
         on_log: Optional[Callable[[str], None]] = None,
         host: str = "127.0.0.1",
+        upstream_config: Optional[UpstreamProxyConfig] = None,
     ):
         self._port = port
         self._mode = mode
         self._host = host
         self._on_log = on_log
+        self._upstream = upstream_config or UpstreamProxyConfig()
         self._servers: list[asyncio.Server] = []
         self._tasks: set[asyncio.Task] = set()
         self._running = False
@@ -683,6 +751,8 @@ class TelegramWSProxy:
         self._ws_blacklist: set[tuple[int, bool]] = set()
         # Cooldown for failed DCs: {(dc, is_media): fail_until_timestamp}
         self._dc_cooldown: dict[tuple[int, bool], float] = {}
+        # DCs that should use upstream (learned from consecutive recv=0 failures)
+        self._dc_upstream_required: set[int] = set()
 
     def _log(self, msg: str) -> None:
         log.info(msg)
@@ -845,6 +915,14 @@ class TelegramWSProxy:
             # Cross-DC routing via kws2 does NOT work (recv=0, server rejects).
             # Port 80 fallback tested: DC1 partial, DC5 dead. Not reliable.
             if dc not in WSS_DOMAINS:
+                if (self._upstream.enabled
+                        and self._upstream.mode == "always"):
+                    self._log(f"[{label}] DC{dc} -> upstream (always mode)")
+                    await self._upstream_proxy_connect(
+                        reader, writer, target_host, target_port,
+                        init, label, dc, is_media,
+                    )
+                    return
                 self._log(f"[{label}] DC{dc} -> TCP (no WSS relay for this DC)")
                 await self._tcp_fallback(
                     reader, writer, target_host, target_port,
@@ -962,6 +1040,15 @@ class TelegramWSProxy:
                 self._dc_cooldown[dc_key] = now + DC_FAIL_COOLDOWN
                 self._log(f"[{label}] DC{dc}{media_tag} WS failed, cooldown {DC_FAIL_COOLDOWN:.0f}s")
 
+            # "always" mode: skip TCP fallback, go straight to upstream
+            if (self._upstream.enabled
+                    and self._upstream.mode == "always"):
+                await self._upstream_proxy_connect(
+                    client_reader, client_writer, target_host, target_port,
+                    init, label, dc, is_media,
+                )
+                return
+
             await self._tcp_fallback(
                 client_reader, client_writer, target_host, target_port,
                 init, label, dc, is_media,
@@ -1000,8 +1087,25 @@ class TelegramWSProxy:
         dc: int,
         is_media: bool,
     ) -> None:
-        """Fall back to direct TCP to the original DC IP."""
+        """Fall back to direct TCP to the original DC IP.
+
+        If upstream proxy is configured in "fallback" mode and this DC has
+        previously had recv=0 failures, routes through upstream instead.
+        After a direct TCP relay with recv=0, marks the DC for future upstream routing.
+        """
         media_tag = " media" if is_media else ""
+
+        # If this DC is known-blocked and upstream is available, use upstream
+        if (dc in self._dc_upstream_required
+                and self._upstream.enabled
+                and self._upstream.mode == "fallback"):
+            self._log(f"[{label}] DC{dc}{media_tag} learned-blocked -> upstream proxy")
+            await self._upstream_proxy_connect(
+                client_reader, client_writer,
+                target_host, target_port, init, label, dc, is_media,
+            )
+            return
+
         self._log(f"[{label}] DC{dc}{media_tag} TCP fallback -> {target_host}:{target_port}")
         t_connect = time.monotonic()
         try:
@@ -1013,11 +1117,71 @@ class TelegramWSProxy:
             elapsed = time.monotonic() - t_connect
             self.stats.failed_connections += 1
             self._log(f"[{label}] TCP fallback failed ({elapsed:.1f}s): {type(exc).__name__}")
+            # TCP connect failed — try upstream if available
+            if self._upstream.enabled:
+                self._log(f"[{label}] DC{dc}{media_tag} TCP failed -> trying upstream")
+                await self._upstream_proxy_connect(
+                    client_reader, client_writer,
+                    target_host, target_port, init, label, dc, is_media,
+                )
             return
 
         elapsed = time.monotonic() - t_connect
         self._log(f"[{label}] DC{dc}{media_tag} TCP connected ({elapsed:.1f}s)")
         self.stats.tcp_fallback_connections += 1
+        # Forward the buffered init packet
+        rw.write(init)
+        await rw.drain()
+        recv_total = await self._relay_tcp(client_reader, client_writer, rr, rw, label)
+
+        # Learn from recv=0: mark DC for upstream routing on future connections
+        if recv_total == 0 and self._upstream.enabled:
+            self._dc_upstream_required.add(dc)
+            self._log(f"[{label}] DC{dc} recv=0 -> marked for upstream routing")
+
+    async def _upstream_proxy_connect(
+        self,
+        client_reader: asyncio.StreamReader,
+        client_writer: asyncio.StreamWriter,
+        target_host: str,
+        target_port: int,
+        init: bytes,
+        label: str,
+        dc: int,
+        is_media: bool,
+    ) -> None:
+        """Route through upstream SOCKS5 proxy as last-resort fallback."""
+        if not self._upstream.enabled:
+            return
+
+        media_tag = " media" if is_media else ""
+        self._log(
+            f"[{label}] DC{dc}{media_tag} upstream proxy "
+            f"-> {self._upstream.host}:{self._upstream.port}"
+        )
+        t_connect = time.monotonic()
+        try:
+            rr, rw = await socks5.connect_via_socks5(
+                self._upstream.host,
+                self._upstream.port,
+                target_host,
+                target_port,
+                username=self._upstream.username,
+                password=self._upstream.password,
+                timeout=CONNECT_TIMEOUT,
+            )
+        except Exception as exc:
+            elapsed = time.monotonic() - t_connect
+            self.stats.failed_connections += 1
+            self._log(
+                f"[{label}] DC{dc}{media_tag} upstream connect failed "
+                f"({elapsed:.1f}s): {type(exc).__name__}: {exc}"
+            )
+            return
+
+        elapsed = time.monotonic() - t_connect
+        self._log(f"[{label}] DC{dc}{media_tag} upstream connected ({elapsed:.1f}s)")
+        self.stats.upstream_connections += 1
         # Forward the buffered init packet
         rw.write(init)
         await rw.drain()
@@ -1108,8 +1272,8 @@ class TelegramWSProxy:
         remote_reader: asyncio.StreamReader,
         remote_writer: asyncio.StreamWriter,
         label: str = "",
-    ) -> None:
-        """Bidirectional TCP relay (fallback or passthrough)."""
+    ) -> int:
+        """Bidirectional TCP relay (fallback or passthrough). Returns recv_total."""
         t0 = time.monotonic()
         sent_total = 0
         recv_total = 0
@@ -1157,6 +1321,7 @@ class TelegramWSProxy:
                 if recv_total == 0 and sent_total > 0:
                     self.stats.recv_zero_count += 1
                 self._log(f"[{label}] tcp relay done: sent={sent_total} recv={recv_total} ({elapsed:.1f}s)")
+        return recv_total
 
 
 def _is_domain(host: str) -> bool:
