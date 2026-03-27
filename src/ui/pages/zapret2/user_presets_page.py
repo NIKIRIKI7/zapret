@@ -1345,7 +1345,14 @@ class Zapret2UserPresetsPage(BasePage):
         self._restore_deleted_btn.setFixedHeight(32)
         self._restore_deleted_btn.clicked.connect(self._on_restore_deleted)
         self._restore_deleted_btn.setVisible(False)
-        self.add_widget(self._restore_deleted_btn)
+        self._restore_deleted_row = QWidget()
+        self._restore_deleted_row_layout = QHBoxLayout(self._restore_deleted_row)
+        self._restore_deleted_row_layout.setContentsMargins(0, 0, 0, 0)
+        self._restore_deleted_row_layout.setSpacing(0)
+        self._restore_deleted_row_layout.addWidget(self._restore_deleted_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        self._restore_deleted_row_layout.addStretch(1)
+        self._restore_deleted_row.setVisible(False)
+        self.add_widget(self._restore_deleted_row)
 
         self.add_spacing(12)
 
@@ -1963,8 +1970,12 @@ class Zapret2UserPresetsPage(BasePage):
                 get_deleted_preset_names = self._import_preset_attr("preset_defaults", "get_deleted_preset_names")
                 has_deleted = bool(get_deleted_preset_names())
                 self._restore_deleted_btn.setVisible(has_deleted)
+                if getattr(self, "_restore_deleted_row", None) is not None:
+                    self._restore_deleted_row.setVisible(has_deleted)
             except Exception:
                 self._restore_deleted_btn.setVisible(False)
+                if getattr(self, "_restore_deleted_row", None) is not None:
+                    self._restore_deleted_row.setVisible(False)
 
             self._update_presets_view_height()
             self._schedule_layout_resync()
