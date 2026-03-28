@@ -399,6 +399,7 @@ class _PresetListModel(QAbstractListModel):
 
 class _LinkedWheelListView(QListView):
     preset_activated = pyqtSignal(str)
+    preset_move_requested = pyqtSignal(str, int)
     item_dropped = pyqtSignal(str, str, str, str)
     preset_context_requested = pyqtSignal(str, QPoint)
 
@@ -491,6 +492,15 @@ class _LinkedWheelListView(QListView):
                     break
 
     def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
+            index = self.currentIndex()
+            if index.isValid() and str(index.data(_PresetListModel.KindRole) or "") == "preset":
+                name = str(index.data(_PresetListModel.NameRole) or "")
+                if name:
+                    direction = -1 if event.key() == Qt.Key.Key_PageUp else 1
+                    self.preset_move_requested.emit(name, direction)
+                    event.accept()
+                    return
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             index = self.currentIndex()
             if index.isValid() and str(index.data(_PresetListModel.KindRole) or "") == "preset":
@@ -1942,6 +1952,7 @@ class Zapret1UserPresetsPage(BasePage):
         self.presets_list.setProperty("noDrag", True)
         self.presets_list.viewport().setProperty("noDrag", True)
         self.presets_list.preset_activated.connect(self._on_activate_preset)
+        self.presets_list.preset_move_requested.connect(self._move_preset_by_step)
         self.presets_list.item_dropped.connect(self._on_item_dropped)
         self.presets_list.preset_context_requested.connect(self._on_preset_context_requested)
         self.presets_list.setDragEnabled(True)
@@ -2032,7 +2043,7 @@ class Zapret1UserPresetsPage(BasePage):
         return max(0, self.viewport().width() - margins.left() - margins.right())
 
     def _compute_toolbar_rows(self, available_width: int) -> list[list[QPushButton]]:
-        buttons = [button for button in getattr(self, "_toolbar_buttons", []) if button.isVisible()]
+        buttons = [button for button in getattr(self, "_toolbar_buttons", []) if not button.isHidden()]
         if not buttons:
             return []
 
