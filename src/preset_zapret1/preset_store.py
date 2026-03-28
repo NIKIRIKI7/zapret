@@ -21,10 +21,8 @@ class PresetStoreV1(QObject):
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
         self._presets_by_file_name: Dict[str, "PresetV1"] = {}
-        self._display_name_to_file_names: Dict[str, list[str]] = {}
         self._loaded = False
         self._active_file_name: Optional[str] = None
-        self._active_name: Optional[str] = None
 
     def get_preset_by_file_name(self, file_name: str) -> Optional["PresetV1"]:
         self._ensure_loaded()
@@ -37,10 +35,6 @@ class PresetStoreV1(QObject):
     def get_display_name(self, file_name: str) -> str:
         self._ensure_loaded()
         return self._display_name_for_file_name(file_name)
-
-    def get_file_names_for_display_name(self, name: str) -> List[str]:
-        self._ensure_loaded()
-        return list(self._display_name_to_file_names.get(str(name or "").strip().lower(), []))
 
     def get_active_preset_file_name(self) -> Optional[str]:
         self._ensure_loaded()
@@ -63,18 +57,7 @@ class PresetStoreV1(QObject):
     def notify_preset_switched(self, file_name: str) -> None:
         target_file_name = str(file_name or "").strip() or None
         self._active_file_name = target_file_name
-        self._active_name = self.get_display_name(target_file_name) if target_file_name else None
         self.preset_switched.emit(target_file_name or "")
-
-    def notify_active_name_changed(self) -> None:
-        try:
-            from core.services import get_selection_service
-
-            self._active_file_name = get_selection_service().get_selected_file_name("winws1")
-            self._active_name = self._display_name_for_file_name(self._active_file_name) if self._active_file_name else None
-        except Exception:
-            self._active_file_name = None
-            self._active_name = None
 
     def _ensure_loaded(self) -> None:
         if not self._loaded:
@@ -85,7 +68,6 @@ class PresetStoreV1(QObject):
         from .preset_storage import _load_preset_from_path_v1
 
         self._presets_by_file_name.clear()
-        self._display_name_to_file_names.clear()
         documents = get_preset_repository().list_presets("winws1")
         for document in documents:
             file_name = str(document.manifest.file_name or "").strip()
@@ -100,18 +82,12 @@ class PresetStoreV1(QObject):
                     except Exception:
                         pass
                     self._presets_by_file_name[file_name] = preset
-                    display_name = str(getattr(preset, "name", "") or "").strip() or Path(file_name).stem
-                    self._display_name_to_file_names.setdefault(display_name.lower(), []).append(file_name)
             except Exception as e:
                 log(f"PresetStoreV1: error loading preset '{file_name}': {e}", "DEBUG")
-        for names in self._display_name_to_file_names.values():
-            names.sort(key=lambda item: item.lower())
         try:
             self._active_file_name = get_selection_service().get_selected_file_name("winws1")
-            self._active_name = self._display_name_for_file_name(self._active_file_name) if self._active_file_name else None
         except Exception:
             self._active_file_name = None
-            self._active_name = None
         self._loaded = True
         log(f"PresetStoreV1: loaded {len(self._presets_by_file_name)} presets", "DEBUG")
 
@@ -121,16 +97,6 @@ class PresetStoreV1(QObject):
         target_file_name = str(file_name or "").strip()
         if not target_file_name:
             return
-        previous = self._presets_by_file_name.get(target_file_name)
-        if previous is not None:
-            previous_display = str(getattr(previous, "name", "") or "").strip().lower()
-            if previous_display in self._display_name_to_file_names:
-                self._display_name_to_file_names[previous_display] = [
-                    item for item in self._display_name_to_file_names[previous_display]
-                    if item != target_file_name
-                ]
-                if not self._display_name_to_file_names[previous_display]:
-                    self._display_name_to_file_names.pop(previous_display, None)
         try:
             preset_path = get_app_paths().engine_paths("winws1").ensure_directories().presets_dir / target_file_name
             preset = _load_preset_from_path_v1(preset_path, Path(target_file_name).stem)
@@ -140,11 +106,6 @@ class PresetStoreV1(QObject):
                 except Exception:
                     pass
                 self._presets_by_file_name[target_file_name] = preset
-                display_name = str(getattr(preset, "name", "") or "").strip() or Path(target_file_name).stem
-                bucket = self._display_name_to_file_names.setdefault(display_name.lower(), [])
-                if target_file_name not in bucket:
-                    bucket.append(target_file_name)
-                    bucket.sort(key=lambda item: item.lower())
             else:
                 self._presets_by_file_name.pop(target_file_name, None)
         except Exception as e:

@@ -1058,12 +1058,6 @@ class PresetManager:
                             self.on_preset_switched(name)
                         except Exception:
                             pass
-                else:
-                    # Keep store active name in sync without emitting preset_switched.
-                    try:
-                        self._get_store().notify_active_name_changed()
-                    except Exception:
-                        pass
 
             return True
 

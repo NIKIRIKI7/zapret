@@ -873,7 +873,7 @@ class DirectPresetFacade:
 
     def get_strategy_selections(self) -> dict:
         if self.launch_method == "direct_zapret2":
-            preset = self.get_active_preset()
+            preset = self.get_selected_source_preset_model()
             if not preset:
                 return {}
             return {
@@ -882,7 +882,7 @@ class DirectPresetFacade:
                 if str(cat_key or "").strip()
             }
         if self.launch_method == "direct_zapret1":
-            preset = self.get_active_preset()
+            preset = self.get_selected_source_preset_model()
             if not preset:
                 return {}
 
@@ -907,7 +907,7 @@ class DirectPresetFacade:
 
     def set_strategy_selections(self, selections: dict, *, save_and_sync: bool = True) -> bool:
         if self.launch_method == "direct_zapret2":
-            preset = self.get_active_preset()
+            preset = self.get_selected_source_preset_model()
             if not preset:
                 return False
 
@@ -924,7 +924,7 @@ class DirectPresetFacade:
             preset.touch()
             return self.save_preset_model(preset) if save_and_sync else True
         if self.launch_method == "direct_zapret1":
-            preset = self.get_active_preset()
+            preset = self.get_selected_source_preset_model()
             if not preset:
                 return False
 
@@ -947,7 +947,7 @@ class DirectPresetFacade:
             normalized_key = str(category_key or "").strip().lower()
             if not normalized_key:
                 return False
-            preset = self.get_active_preset()
+            preset = self.get_selected_source_preset_model()
             if not preset:
                 return False
             category = self.ensure_category(preset, normalized_key)
@@ -961,7 +961,7 @@ class DirectPresetFacade:
             normalized_key = str(category_key or "").strip().lower()
             if not normalized_key:
                 return False
-            preset = self.get_active_preset()
+            preset = self.get_selected_source_preset_model()
             if not preset:
                 return False
             category = self.ensure_category(preset, normalized_key)
@@ -976,12 +976,11 @@ class DirectPresetFacade:
     def get_selected_source_preset(self):
         return self._load_selected_preset_model()
 
-    def get_active_preset(self):
-        """Compatibility alias for get_selected_source_preset()."""
+    def get_selected_source_preset_model(self):
         return self.get_selected_source_preset()
 
     def get_category_filter_mode(self, category_key: str) -> str:
-        preset = self.get_active_preset()
+        preset = self.get_selected_source_preset_model()
         if not preset:
             return "hostlist"
         category = (preset.categories or {}).get(category_key)
@@ -998,7 +997,7 @@ class DirectPresetFacade:
             mode = str(filter_mode or "").strip().lower()
             if mode not in ("hostlist", "ipset"):
                 return False
-            preset = self.get_active_preset()
+            preset = self.get_selected_source_preset_model()
             if not preset:
                 return False
             category = self.ensure_category(preset, category_key)
@@ -1012,7 +1011,7 @@ class DirectPresetFacade:
             mode = str(filter_mode or "").strip().lower()
             if mode not in ("hostlist", "ipset"):
                 return False
-            preset = self.get_active_preset()
+            preset = self.get_selected_source_preset_model()
             if not preset:
                 return False
             category = self.ensure_category(preset, normalized_key)
@@ -1038,7 +1037,7 @@ class DirectPresetFacade:
             from preset_zapret2.strategy_inference import infer_strategy_id_from_args
             from preset_zapret2.txt_preset_parser import parse_preset_content
 
-            preset = self.get_active_preset()
+            preset = self.get_selected_source_preset_model()
             if not preset:
                 return False
 
@@ -1197,7 +1196,7 @@ class DirectPresetFacade:
 
         from preset_zapret2.preset_model import SyndataSettings
 
-        preset = self.get_active_preset()
+        preset = self.get_selected_source_preset_model()
         if not preset:
             return (
                 SyndataSettings.get_defaults()
@@ -1222,7 +1221,7 @@ class DirectPresetFacade:
         if self.launch_method == "direct_zapret2":
             from preset_zapret2.preset_model import SyndataSettings
 
-            preset = self.get_active_preset()
+            preset = self.get_selected_source_preset_model()
             if not preset:
                 return False
             category = self.ensure_category(preset, category_key)
@@ -1253,7 +1252,7 @@ class DirectPresetFacade:
         if self.launch_method == "direct_zapret1":
             return "default"
 
-        preset = self.get_active_preset()
+        preset = self.get_selected_source_preset_model()
         if not preset:
             return "default"
         category = (preset.categories or {}).get(category_key)
@@ -1273,7 +1272,7 @@ class DirectPresetFacade:
             value = str(sort_order or "").strip().lower()
             if value not in ("default", "name_asc", "name_desc"):
                 return False
-            preset = self.get_active_preset()
+            preset = self.get_selected_source_preset_model()
             if not preset:
                 return False
             category = self.ensure_category(preset, category_key)

@@ -384,11 +384,6 @@ class PresetManagerV1:
                             self.on_preset_switched(name)
                         except Exception:
                             pass
-                else:
-                    try:
-                        self._get_store().notify_active_name_changed()
-                    except Exception:
-                        pass
 
             return True
 
