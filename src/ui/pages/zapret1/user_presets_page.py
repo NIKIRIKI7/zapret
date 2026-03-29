@@ -1712,6 +1712,11 @@ class Zapret1UserPresetsPage(BasePage):
 
         return DirectPresetFacade.from_launch_method("direct_zapret1")
 
+    def _get_preset_store(self):
+        from core.services import get_preset_store_v1
+
+        return get_preset_store_v1()
+
     def _is_builtin_preset_file(self, name: str) -> bool:
         candidate = str(name or "").strip()
         if not candidate or not candidate.lower().endswith(".txt"):
@@ -1785,8 +1790,7 @@ class Zapret1UserPresetsPage(BasePage):
         self._apply_page_theme()
 
         try:
-            from preset_zapret1.preset_store import get_preset_store_v1
-            store = get_preset_store_v1()
+            store = self._get_preset_store()
             store.presets_changed.connect(self._on_store_changed)
             store.preset_switched.connect(self._on_store_switched)
             store.preset_updated.connect(lambda _name: self._on_store_changed())
@@ -1855,8 +1859,9 @@ class Zapret1UserPresetsPage(BasePage):
             if self._watcher_active:
                 return
 
-            from preset_zapret1.preset_storage import get_presets_dir_v1
-            presets_dir = get_presets_dir_v1()
+            from core.services import get_app_paths
+
+            presets_dir = get_app_paths().engine_paths("winws1").ensure_directories().presets_dir
             presets_dir.mkdir(parents=True, exist_ok=True)
 
             if not self._file_watcher:
@@ -2278,9 +2283,7 @@ class Zapret1UserPresetsPage(BasePage):
 
         try:
             self._get_direct_facade().create(name, from_current=from_current)
-            from preset_zapret1.preset_store import get_preset_store_v1
-
-            get_preset_store_v1().notify_presets_changed()
+            self._get_preset_store().notify_presets_changed()
             log(f"Создан пресет '{name}'", "INFO")
             self._load_presets()
         except Exception as e:
@@ -2311,11 +2314,9 @@ class Zapret1UserPresetsPage(BasePage):
         try:
             facade = self._get_direct_facade()
             updated = facade.rename_by_file_name(current_name, new_name)
-            from preset_zapret1.preset_store import get_preset_store_v1
-
-            get_preset_store_v1().notify_presets_changed()
+            self._get_preset_store().notify_presets_changed()
             if facade.is_selected_file_name(updated.file_name):
-                get_preset_store_v1().notify_preset_switched(updated.file_name)
+                self._get_preset_store().notify_preset_switched(updated.file_name)
             log(f"Пресет '{display_name}' переименован в '{new_name}'", "INFO")
             self._load_presets()
         except Exception as e:
@@ -2369,9 +2370,7 @@ class Zapret1UserPresetsPage(BasePage):
             facade = self._get_direct_facade()
 
             imported = facade.import_from_file(Path(file_path), name)
-            from preset_zapret1.preset_store import get_preset_store_v1
-
-            get_preset_store_v1().notify_presets_changed()
+            self._get_preset_store().notify_presets_changed()
             log(f"Импортирован пресет '{imported.name}'", "INFO")
             self._show_import_result_infobar(name, imported.name, imported.file_name)
             self._load_presets()
@@ -2393,12 +2392,10 @@ class Zapret1UserPresetsPage(BasePage):
         try:
             facade = self._get_direct_facade()
             success_count, total, failed = facade.reset_all_to_templates()
-            from preset_zapret1.preset_store import get_preset_store_v1
-
-            get_preset_store_v1().notify_presets_changed()
+            self._get_preset_store().notify_presets_changed()
             selected_file_name = facade.get_selected_file_name()
             if selected_file_name:
-                get_preset_store_v1().notify_preset_switched(selected_file_name)
+                self._get_preset_store().notify_preset_switched(selected_file_name)
 
             self._load_presets()
             if failed:
@@ -2553,8 +2550,9 @@ class Zapret1UserPresetsPage(BasePage):
 
             # Update restore-deleted button visibility
             try:
-                from preset_zapret1.preset_defaults import get_deleted_preset_names_v1
-                has_deleted = bool(get_deleted_preset_names_v1())
+                from core.presets.template_support import get_deleted_template_names
+
+                has_deleted = bool(get_deleted_template_names("direct_zapret1"))
                 self._restore_deleted_btn.setVisible(has_deleted)
             except Exception:
                 self._restore_deleted_btn.setVisible(False)
@@ -2634,8 +2632,6 @@ class Zapret1UserPresetsPage(BasePage):
             if not dlg.exec():
                 return
             target_folder_id = dlg.selected_folder_id()
-            from preset_zapret1.preset_store import PresetStoreV1
-
             hierarchy.move_preset_to_folder_end(
                 self._list_preset_entries_light(),
                 name,
@@ -2704,9 +2700,7 @@ class Zapret1UserPresetsPage(BasePage):
         try:
             from core.services import get_direct_flow_coordinator
             get_direct_flow_coordinator().select_preset_file_name("direct_zapret1", name)
-            from preset_zapret1.preset_store import get_preset_store_v1
-
-            get_preset_store_v1().notify_preset_switched(name)
+            self._get_preset_store().notify_preset_switched(name)
             display_name = self._resolve_display_name(name)
             log(f"Активирован пресет '{display_name}'", "INFO")
             self._apply_active_preset_marker()
@@ -2903,9 +2897,7 @@ class Zapret1UserPresetsPage(BasePage):
                 self._get_hierarchy_store().copy_preset_meta_to_new(name, new_name, source_display_name=display_name)
             except Exception:
                 pass
-            from preset_zapret1.preset_store import get_preset_store_v1
-
-            get_preset_store_v1().notify_presets_changed()
+            self._get_preset_store().notify_presets_changed()
             log(f"Пресет '{display_name}' дублирован как '{new_name}'", "INFO")
             self._load_presets()
 
@@ -2943,11 +2935,9 @@ class Zapret1UserPresetsPage(BasePage):
 
             facade = self._get_direct_facade()
             facade.reset_to_template_by_file_name(name)
-            from preset_zapret1.preset_store import get_preset_store_v1
-
-            get_preset_store_v1().notify_preset_saved(name)
+            self._get_preset_store().notify_preset_saved(name)
             if facade.is_selected_file_name(name):
-                get_preset_store_v1().notify_preset_switched(name)
+                self._get_preset_store().notify_preset_switched(name)
 
             log(f"Сброшен пресет '{display_name}' к шаблону", "INFO")
             self._load_presets()
@@ -2999,15 +2989,14 @@ class Zapret1UserPresetsPage(BasePage):
             except Exception:
                 template_origin = ""
             facade.delete_by_file_name(name)
-            from preset_zapret1.preset_store import get_preset_store_v1
-
-            get_preset_store_v1().notify_presets_changed()
+            self._get_preset_store().notify_presets_changed()
             log(f"Удалён пресет '{display_name}'", "INFO")
             # Mark as deleted so it can be restored later (if it has a matching template)
             try:
-                from preset_zapret1.preset_defaults import mark_preset_deleted_v1
+                from core.presets.template_support import mark_deleted_template
+
                 if template_origin:
-                    mark_preset_deleted_v1(template_origin)
+                    mark_deleted_template("direct_zapret1", template_origin)
             except Exception:
                 pass
             self._load_presets()
@@ -3058,12 +3047,10 @@ class Zapret1UserPresetsPage(BasePage):
         try:
             facade = self._get_direct_facade()
             facade.restore_deleted()
-            from preset_zapret1.preset_store import get_preset_store_v1
-
-            get_preset_store_v1().notify_presets_changed()
+            self._get_preset_store().notify_presets_changed()
             selected_file_name = facade.get_selected_file_name()
             if selected_file_name:
-                get_preset_store_v1().notify_preset_switched(selected_file_name)
+                self._get_preset_store().notify_preset_switched(selected_file_name)
             log("Восстановлены удалённые пресеты", "INFO")
             self._load_presets()
         except Exception as e:

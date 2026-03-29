@@ -1020,7 +1020,7 @@ class Zapret2DirectControlPage(BasePage):
                 active_lists: list[str] = []
                 seen_lists: set[str] = set()
 
-                for cat_key in registry.get_all_category_keys_by_command_order():
+                for cat_key in registry.get_all_target_keys_by_command_order():
                     sid = selections.get(cat_key, "none") or "none"
                     if sid == "none":
                         continue

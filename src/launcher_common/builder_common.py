@@ -21,40 +21,40 @@ def _is_direct_source_preset_launch() -> bool:
         return False
 
 
-def calculate_required_filters(category_strategies: dict) -> dict:
+def calculate_required_filters(target_strategies: dict) -> dict:
     """
     Автоматически вычисляет нужные фильтры портов на основе выбранных категорий.
 
     Использует filters_config.py для определения какие фильтры нужны.
 
     Args:
-        category_strategies: dict {category_key: strategy_id}
+        target_strategies: dict {target_key: strategy_id}
 
     Returns:
         dict с флагами фильтров
     """
-    from .port_filters import get_filter_for_category, FILTERS
+    from .port_filters import get_filter_for_target, FILTERS
 
     # Инициализируем все фильтры как False
     filters = {key: False for key in FILTERS.keys()}
 
     none_strategies = registry.get_none_strategies()
 
-    for category_key, strategy_id in category_strategies.items():
+    for target_key, strategy_id in target_strategies.items():
         # Пропускаем неактивные категории
         if not strategy_id:
             continue
-        none_id = none_strategies.get(category_key)
+        none_id = none_strategies.get(target_key)
         if strategy_id == none_id or strategy_id == "none":
             continue
 
         # Получаем информацию о категории
-        category_info = registry.get_category_info(category_key)
-        if not category_info:
+        target_info = registry.get_target_info(target_key)
+        if not target_info:
             continue
 
         # Получаем нужные фильтры через конфиг
-        required_filters = get_filter_for_category(category_info)
+        required_filters = get_filter_for_target(target_info)
         for filter_key in required_filters:
             filters[filter_key] = True
 
@@ -115,34 +115,34 @@ def _clean_spaces(text: str) -> str:
     return ' '.join(text.split())
 
 
-def get_strategy_display_name(category_key: str, strategy_id: str) -> str:
+def get_strategy_display_name(target_key: str, strategy_id: str) -> str:
     """Получает отображаемое имя стратегии"""
     if strategy_id == "none":
         return "Отключено"
 
-    return registry.get_strategy_name_safe(category_key, strategy_id)
+    return registry.get_strategy_name_safe(target_key, strategy_id)
 
 
-def get_active_categories_count(category_strategies: dict) -> int:
+def get_active_targets_count(target_strategies: dict) -> int:
     """Подсчитывает количество активных категорий"""
     none_strategies = registry.get_none_strategies()
     count = 0
 
-    for category_key, strategy_id in category_strategies.items():
-        if strategy_id and strategy_id != none_strategies.get(category_key):
+    for target_key, strategy_id in target_strategies.items():
+        if strategy_id and strategy_id != none_strategies.get(target_key):
             count += 1
 
     return count
 
 
-def validate_category_strategies(category_strategies: dict) -> list:
+def validate_target_strategies(target_strategies: dict) -> list:
     """
     Проверяет корректность выбранных стратегий.
     Возвращает список ошибок (пустой если всё ок).
     """
     errors = []
 
-    for category_key, strategy_id in category_strategies.items():
+    for target_key, strategy_id in target_strategies.items():
         if not strategy_id:
             continue
 
@@ -150,14 +150,14 @@ def validate_category_strategies(category_strategies: dict) -> list:
             continue
 
         # Проверяем существование категории
-        category_info = registry.get_category_info(category_key)
-        if not category_info:
-            errors.append(f"Неизвестная категория: {category_key}")
+        target_info = registry.get_target_info(target_key)
+        if not target_info:
+            errors.append(f"Неизвестная категория: {target_key}")
             continue
 
         # Проверяем существование стратегии
-        args = registry.get_strategy_args_safe(category_key, strategy_id)
+        args = registry.get_strategy_args_safe(target_key, strategy_id)
         if args is None:
-            errors.append(f"Стратегия '{strategy_id}' не найдена в категории '{category_key}'")
+            errors.append(f"Стратегия '{strategy_id}' не найдена в категории '{target_key}'")
 
     return errors

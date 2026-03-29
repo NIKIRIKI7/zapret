@@ -124,26 +124,26 @@ FILTERS = {
 # ФУНКЦИИ ДЛЯ РАБОТЫ С ФИЛЬТРАМИ И КАТЕГОРИЯМИ
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def get_filter_for_category(category_info) -> Set[str]:
+def get_filter_for_target(target_info) -> Set[str]:
     """
     Определяет какие фильтры нужны для данной категории.
 
     Args:
-        category_info: CategoryInfo объект с полями protocol, ports, strategy_type, requires_all_ports
+        target_info: TargetInfo объект с полями protocol, ports, strategy_type, requires_all_ports
 
     Returns:
         Set[str] - множество ключей фильтров (например {'tcp_80', 'tcp_443'})
     """
     required_filters = set()
 
-    if not category_info:
+    if not target_info:
         return required_filters
 
-    protocol = category_info.protocol.upper() if category_info.protocol else ""
-    ports_str = category_info.ports.lower() if category_info.ports else ""
-    strategy_type = category_info.strategy_type if category_info.strategy_type else ""
-    requires_all = getattr(category_info, 'requires_all_ports', False)
-    category_key = category_info.key if hasattr(category_info, 'key') else ""
+    protocol = target_info.protocol.upper() if target_info.protocol else ""
+    ports_str = target_info.ports.lower() if target_info.ports else ""
+    strategy_type = target_info.strategy_type if target_info.strategy_type else ""
+    requires_all = getattr(target_info, 'requires_all_ports', False)
+    target_key = target_info.key if hasattr(target_info, 'key') else ""
 
     # === Raw-фильтры для discord_voice ===
     if strategy_type == "discord_voice":
@@ -158,7 +158,7 @@ def get_filter_for_category(category_info) -> Set[str]:
         return required_filters
 
     # === WARP категории (TCP 443, 853) ===
-    is_warp = "warp" in category_key.lower() or strategy_type == "warp"
+    is_warp = "warp" in target_key.lower() or strategy_type == "warp"
     if is_warp and "TCP" in protocol:
         required_filters.add('tcp_warp')
         required_filters.add('tcp_443')
@@ -171,7 +171,7 @@ def get_filter_for_category(category_info) -> Set[str]:
     # === Парсим порты ===
     has_80 = "80" in ports_str
     has_443 = "443" in ports_str
-    has_6568 = "6568" in ports_str or category_key == "anydesk_tcp"
+    has_6568 = "6568" in ports_str or target_key == "anydesk_tcp"
     has_all_ports = requires_all or "65535" in ports_str or "*" in ports_str
 
     # === Устанавливаем фильтры ===
@@ -194,7 +194,7 @@ def get_filter_for_category(category_info) -> Set[str]:
     return required_filters
 
 
-def get_categories_for_filter(filter_key: str) -> List[str]:
+def get_targets_for_filter(filter_key: str) -> List[str]:
     """
     Возвращает список категорий, которые требуют данный фильтр.
 
@@ -206,70 +206,70 @@ def get_categories_for_filter(filter_key: str) -> List[str]:
     """
     from strategy_menu.strategies_registry import registry
 
-    categories = []
-    all_category_keys = registry.get_all_category_keys()
+    targets = []
+    all_target_keys = registry.get_all_target_keys()
 
-    for category_key in all_category_keys:
-        category_info = registry.get_category_info(category_key)
-        if category_info:
-            required_filters = get_filter_for_category(category_info)
+    for target_key in all_target_keys:
+        target_info = registry.get_target_info(target_key)
+        if target_info:
+            required_filters = get_filter_for_target(target_info)
             if filter_key in required_filters:
-                categories.append(category_key)
+                categories.append(target_key)
 
     return categories
 
 
-def build_filter_to_categories_map() -> Dict[str, List[str]]:
+def build_filter_to_targets_map() -> Dict[str, List[str]]:
     """
     Строит полный маппинг: фильтр → список категорий.
 
     Returns:
-        Dict[str, List[str]] - {filter_key: [category_key, ...]}
+        Dict[str, List[str]] - {filter_key: [target_key, ...]}
     """
     filter_map = {key: [] for key in FILTERS.keys()}
 
     from strategy_menu.strategies_registry import registry
-    all_category_keys = registry.get_all_category_keys()
+    all_target_keys = registry.get_all_target_keys()
 
-    for category_key in all_category_keys:
-        category_info = registry.get_category_info(category_key)
-        if category_info:
-            required_filters = get_filter_for_category(category_info)
+    for target_key in all_target_keys:
+        target_info = registry.get_target_info(target_key)
+        if target_info:
+            required_filters = get_filter_for_target(target_info)
             for filter_key in required_filters:
                 if filter_key in filter_map:
-                    filter_map[filter_key].append(category_key)
+                    filter_map[filter_key].append(target_key)
 
     return filter_map
 
 
-def build_category_to_filters_map() -> Dict[str, Set[str]]:
+def build_target_to_filters_map() -> Dict[str, Set[str]]:
     """
     Строит полный маппинг: категория → набор фильтров.
 
     Returns:
-        Dict[str, Set[str]] - {category_key: {filter_key, ...}}
+        Dict[str, Set[str]] - {target_key: {filter_key, ...}}
     """
     category_map = {}
 
     from strategy_menu.strategies_registry import registry
-    all_category_keys = registry.get_all_category_keys()
+    all_target_keys = registry.get_all_target_keys()
 
-    for category_key in all_category_keys:
-        category_info = registry.get_category_info(category_key)
-        if category_info:
-            category_map[category_key] = get_filter_for_category(category_info)
+    for target_key in all_target_keys:
+        target_info = registry.get_target_info(target_key)
+        if target_info:
+            category_map[target_key] = get_filter_for_target(target_info)
         else:
-            category_map[category_key] = set()
+            category_map[target_key] = set()
 
     return category_map
 
 
 def log_filter_category_map():
     """Выводит в лог полный маппинг фильтров и категорий (для отладки)."""
-    filter_map = build_filter_to_categories_map()
+    filter_map = build_filter_to_targets_map()
 
     log("=== МАППИНГ ФИЛЬТРОВ → КАТЕГОРИИ ===", "DEBUG")
-    for filter_key, categories in filter_map.items():
+    for filter_key, targets in filter_map.items():
         filter_info = FILTERS.get(filter_key, {})
         filter_name = filter_info.get('name', filter_key)
         if categories:

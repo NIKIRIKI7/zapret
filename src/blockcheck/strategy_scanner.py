@@ -489,14 +489,14 @@ class StrategyScanner:
     def _load_catalog_strategies(self) -> list[dict]:
         """Load catalog strategies for current scan protocol."""
         try:
-            from preset_zapret2.catalog import load_strategies
+            from strategy_menu.strategy_loader import load_strategies_as_dict
             if self._scan_protocol == _PROTOCOL_STUN_VOICE:
                 strategy_type = "discord_voice"
             elif self._scan_protocol == _PROTOCOL_UDP_GAMES:
                 strategy_type = "udp"
             else:
                 strategy_type = "tcp"
-            raw = load_strategies(strategy_type, "basic")
+            raw = load_strategies_as_dict(strategy_type, "basic")
             result = []
             for strat_id, data in raw.items():
                 result.append({

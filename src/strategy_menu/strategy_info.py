@@ -237,13 +237,13 @@ class StrategyInfo:
         )
 
     @classmethod
-    def from_json_strategy(cls, data: dict, category_key: str) -> 'StrategyInfo':
+    def from_json_strategy(cls, data: dict, target_key: str) -> 'StrategyInfo':
         """
         Create StrategyInfo from JSON strategy data.
 
         Args:
             data: Dictionary with JSON strategy data
-            category_key: Category key (e.g., "tcp", "quic", "udp")
+            target_key: Target key (e.g., "tcp", "quic", "udp")
 
         Returns:
             StrategyInfo instance
@@ -251,23 +251,23 @@ class StrategyInfo:
         name = data.get('name', data.get('id', 'Unknown'))
         strategy_id = data.get('id', name.lower().replace(' ', '_'))
 
-        # Determine source from category
-        source = f"json_{category_key}" if category_key else "json"
+        # Determine source from target key
+        source = f"json_{target_key}" if target_key else "json"
 
-        # Extract protocols from category or data
+        # Extract protocols from target key or data
         protocols = data.get('protocols', [])
         if not protocols:
-            category_lower = category_key.lower() if category_key else ''
-            if 'tcp' in category_lower:
+            target_lower = target_key.lower() if target_key else ''
+            if 'tcp' in target_lower:
                 protocols = ['TCP']
-            elif 'quic' in category_lower or 'udp' in category_lower:
+            elif 'quic' in target_lower or 'udp' in target_lower:
                 protocols = ['UDP']
 
         # Extract ports
         ports = data.get('ports', [])
         if not ports:
             # Try to infer from other fields
-            if 'quic' in category_key.lower() if category_key else False:
+            if 'quic' in target_key.lower() if target_key else False:
                 ports = [443]
 
         # Extract techniques from args or dedicated field

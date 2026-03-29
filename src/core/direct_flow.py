@@ -169,26 +169,8 @@ class DirectFlowCoordinator:
     @staticmethod
     def _ensure_support_files(launch_method: str) -> None:
         try:
-            if launch_method == "direct_zapret2":
-                from preset_zapret2 import (
-                    ensure_advanced_strategies_exist,
-                    ensure_basic_strategies_exist,
-                    ensure_builtin_presets_exist,
-                )
+            from core.presets.support_files import prepare_direct_support_files
 
-                ensure_builtin_presets_exist()
-                ensure_basic_strategies_exist()
-                ensure_advanced_strategies_exist()
-                return
-
-            from preset_zapret1 import ensure_v1_strategies_exist
-            from preset_zapret1.preset_defaults import (
-                ensure_v1_templates_copied_to_presets,
-                update_changed_v1_templates_in_presets,
-            )
-
-            ensure_v1_strategies_exist()
-            update_changed_v1_templates_in_presets()
-            ensure_v1_templates_copied_to_presets()
+            prepare_direct_support_files(launch_method)
         except Exception as exc:
             log(f"Failed to prepare direct support files for {launch_method}: {exc}", "DEBUG")

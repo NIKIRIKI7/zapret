@@ -125,7 +125,7 @@ class InitializationManager:
             from strategy_menu import get_strategy_launch_method
 
             # Прогреваем кэш отсортированных ключей
-            registry.get_all_category_keys_sorted()
+            registry.get_all_target_keys_sorted()
 
             # Прогреваем кэш выборов стратегий
             get_direct_strategy_selections()

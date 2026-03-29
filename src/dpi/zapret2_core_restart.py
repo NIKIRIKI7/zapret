@@ -8,11 +8,11 @@ dpi/zapret2_core_restart.py - Унифицированный механизм п
     from dpi.zapret2_core_restart import trigger_dpi_reload, DPIReloadDebouncer
 
     # Немедленный перезапуск (для редких действий)
-    trigger_dpi_reload(app, reason="filter_mode_changed", category_key="youtube")
+    trigger_dpi_reload(app, reason="filter_mode_changed", target_key="youtube")
 
     # С debounce (для частых изменений, например SpinBox)
     debouncer = DPIReloadDebouncer(app)
-    debouncer.schedule_reload(reason="syndata_changed", category_key="youtube")
+    debouncer.schedule_reload(reason="syndata_changed", target_key="youtube")
 """
 
 from typing import Optional, TYPE_CHECKING
@@ -86,7 +86,7 @@ def _has_active_strategies() -> bool:
 def trigger_dpi_reload(
     app: 'LupiDPIApp',
     reason: str,
-    category_key: Optional[str] = None,
+    target_key: Optional[str] = None,
 ) -> bool:
     """
     Унифицированный механизм перезагрузки DPI для режима direct_zapret2.
@@ -106,7 +106,7 @@ def trigger_dpi_reload(
             - "send_changed" - изменились настройки send
             - "out_range_changed" - изменился out_range
             - "preset_switched" - переключился пресет
-        category_key: Опциональная категория которая изменилась
+        target_key: Опциональная категория которая изменилась
 
     Returns:
         bool: True если перезапуск запущен, False если DPI не запущен или режим не direct_zapret2
@@ -152,8 +152,8 @@ def trigger_dpi_reload(
     # 5. Hot-reload: ConfigFileWatcher автоматически перезапустит winws2.exe
     #    когда обнаружит изменение launch preset file
     #    Но если нужен немедленный перезапуск - делаем явно
-    category_info = f" [{category_key}]" if category_key else ""
-    log(f"DPI reload{category_info} (причина: {reason}) - hot-reload сработает автоматически", "INFO")
+    target_info = f" [{target_key}]" if target_key else ""
+    log(f"DPI reload{target_info} (причина: {reason}) - hot-reload сработает автоматически", "INFO")
 
     # Для немедленного эффекта можно явно перезапустить
     # (hot-reload имеет задержку ~1 сек)
@@ -188,7 +188,7 @@ class DPIReloadDebouncer:
                 if self._debouncer:
                     self._debouncer.schedule_reload(
                         reason="value_changed",
-                        category_key=self._category_key
+                        target_key=self._target_key
                     )
     """
 
@@ -206,7 +206,7 @@ class DPIReloadDebouncer:
         self._pending_reason: Optional[str] = None
         self._pending_category: Optional[str] = None
 
-    def schedule_reload(self, reason: str, category_key: Optional[str] = None):
+    def schedule_reload(self, reason: str, target_key: Optional[str] = None):
         """
         Планирует перезагрузку DPI с debounce.
 
@@ -216,11 +216,11 @@ class DPIReloadDebouncer:
 
         Args:
             reason: Причина перезагрузки для логирования
-            category_key: Опциональная категория которая изменилась
+            target_key: Опциональная категория которая изменилась
         """
         # Сохраняем параметры последнего вызова
         self._pending_reason = reason
-        self._pending_category = category_key
+        self._pending_category = target_key
 
         # Создаем таймер если его нет
         if self._timer is None:
@@ -240,7 +240,7 @@ class DPIReloadDebouncer:
             trigger_dpi_reload(
                 self._app,
                 reason=self._pending_reason,
-                category_key=self._pending_category
+                target_key=self._pending_category
             )
 
         # Очищаем pending состояние
@@ -289,7 +289,7 @@ def get_global_debouncer(app: 'LupiDPIApp') -> DPIReloadDebouncer:
 def schedule_dpi_reload(
     app: 'LupiDPIApp',
     reason: str,
-    category_key: Optional[str] = None,
+    target_key: Optional[str] = None,
     delay_ms: int = 500
 ):
     """
@@ -301,8 +301,8 @@ def schedule_dpi_reload(
     Args:
         app: Главное приложение
         reason: Причина перезагрузки
-        category_key: Категория которая изменилась
+        target_key: Категория которая изменилась
         delay_ms: Задержка в миллисекундах (игнорируется после первого вызова)
     """
     debouncer = get_global_debouncer(app)
-    debouncer.schedule_reload(reason, category_key)
+    debouncer.schedule_reload(reason, target_key)

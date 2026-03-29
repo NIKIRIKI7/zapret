@@ -232,9 +232,9 @@ class StrategiesPageBase(QWidget):
         self._json_adapter = None
 
         # Кэш данных для Direct режима (для фильтрации)
-        self._all_direct_strategies = {}  # {category_key: strategies_dict}
-        self._all_direct_favorites = {}   # {category_key: favorites_list}
-        self._all_direct_selections = {}  # {category_key: current_selection}
+        self._all_direct_strategies = {}  # {target_key: strategies_dict}
+        self._all_direct_favorites = {}   # {target_key: favorites_list}
+        self._all_direct_selections = {}  # {target_key: current_selection}
 
         from qfluentwidgets import qconfig
         qconfig.themeChanged.connect(lambda _: self._apply_theme())
@@ -673,7 +673,7 @@ class StrategiesPageBase(QWidget):
 
     # ==================== Direct режим: обработчики поиска и фильтрации ====================
 
-    def _convert_direct_dict_to_strategy_info_list(self, strategies_dict: dict, category_key: str) -> List[StrategyInfo]:
+    def _convert_direct_dict_to_strategy_info_list(self, strategies_dict: dict, target_key: str) -> List[StrategyInfo]:
         """Конвертирует dict Direct стратегий в List[StrategyInfo] для фильтрации и сортировки."""
         result = []
 
@@ -686,7 +686,7 @@ class StrategiesPageBase(QWidget):
                 info = StrategyInfo(
                     id=strategy_id,
                     name=strategy_data.get('name', strategy_id),
-                    source=f'json_{category_key}',
+                    source=f'json_{target_key}',
                     description=strategy_data.get('description', ''),
                     author=strategy_data.get('author', ''),
                     version=strategy_data.get('version', ''),
@@ -753,19 +753,19 @@ class StrategiesPageBase(QWidget):
             if not widget:
                 return
 
-            category_key = widget.property("category_key")
-            if not category_key and hasattr(self._strategy_widget, '_tab_category_keys'):
-                keys = self._strategy_widget._tab_category_keys
+            target_key = widget.property("target_key")
+            if not target_key and hasattr(self._strategy_widget, '_tab_target_keys'):
+                keys = self._strategy_widget._tab_target_keys
                 if 0 <= current_index < len(keys):
-                    category_key = keys[current_index]
+                    target_key = keys[current_index]
 
-            if not category_key or category_key not in self._all_direct_strategies:
+            if not target_key or target_key not in self._all_direct_strategies:
                 return
 
             # Получаем оригинальные данные
-            original_strategies = self._all_direct_strategies.get(category_key, {})
-            favorites_list = self._all_direct_favorites.get(category_key, [])
-            current_selection = self._all_direct_selections.get(category_key, None)
+            original_strategies = self._all_direct_strategies.get(target_key, {})
+            favorites_list = self._all_direct_favorites.get(target_key, [])
+            current_selection = self._all_direct_selections.get(target_key, None)
 
             # Применяем текстовый фильтр
             query = self.search_bar.get_query() if self.search_bar else None
@@ -779,7 +779,7 @@ class StrategiesPageBase(QWidget):
             for strategy_id, strategy_data in filtered_strategies.items():
                 strategy_data['is_favorite'] = strategy_id in favorites_set
 
-            strategy_info_list = self._convert_direct_dict_to_strategy_info_list(filtered_strategies, category_key)
+            strategy_info_list = self._convert_direct_dict_to_strategy_info_list(filtered_strategies, target_key)
 
             # Сортируем используя filter_engine
             sorted_strategies = self.filter_engine.sort_strategies(strategy_info_list, sort_key, reverse)
@@ -796,13 +796,13 @@ class StrategiesPageBase(QWidget):
 
             # Пересоздаём UI с отсортированными данными
             widget._loaded = False
-            self._build_category_ui(widget, current_index, category_key, sorted_dict, favorites_list, current_selection, skip_grouping=skip_grouping)
+            self._build_category_ui(widget, current_index, target_key, sorted_dict, favorites_list, current_selection, skip_grouping=skip_grouping)
 
             # Обновляем счётчик
             if self.search_bar:
                 self.search_bar.set_result_count(len(sorted_dict))
 
-            log(f"Direct фильтрация+сортировка {category_key}: {len(sorted_dict)} из {len(original_strategies)} (sort={sort_key}, reverse={reverse})", "DEBUG")
+            log(f"Direct фильтрация+сортировка {target_key}: {len(sorted_dict)} из {len(original_strategies)} (sort={sort_key}, reverse={reverse})", "DEBUG")
 
         except Exception as e:
             log(f"Ошибка фильтрации Direct стратегий: {e}", "ERROR")
@@ -863,18 +863,18 @@ class StrategiesPageBase(QWidget):
             if not widget:
                 return
 
-            category_key = widget.property("category_key")
-            if not category_key and hasattr(self._strategy_widget, '_tab_category_keys'):
-                keys = self._strategy_widget._tab_category_keys
+            target_key = widget.property("target_key")
+            if not target_key and hasattr(self._strategy_widget, '_tab_target_keys'):
+                keys = self._strategy_widget._tab_target_keys
                 if 0 <= current_index < len(keys):
-                    category_key = keys[current_index]
+                    target_key = keys[current_index]
 
-            if not category_key or category_key not in self._all_direct_strategies:
+            if not target_key or target_key not in self._all_direct_strategies:
                 return
 
-            original_strategies = self._all_direct_strategies.get(category_key, {})
-            favorites_list = self._all_direct_favorites.get(category_key, [])
-            current_selection = self._all_direct_selections.get(category_key, None)
+            original_strategies = self._all_direct_strategies.get(target_key, {})
+            favorites_list = self._all_direct_favorites.get(target_key, [])
+            current_selection = self._all_direct_selections.get(target_key, None)
 
             filtered_strategies = self._filter_direct_strategies(original_strategies, query)
 
@@ -885,7 +885,7 @@ class StrategiesPageBase(QWidget):
             for strategy_id, strategy_data in filtered_strategies.items():
                 strategy_data['is_favorite'] = strategy_id in favorites_set
 
-            strategy_info_list = self._convert_direct_dict_to_strategy_info_list(filtered_strategies, category_key)
+            strategy_info_list = self._convert_direct_dict_to_strategy_info_list(filtered_strategies, target_key)
             sorted_strategies = self.filter_engine.sort_strategies(strategy_info_list, sort_key, reverse)
 
             sorted_dict = {}
@@ -896,9 +896,9 @@ class StrategiesPageBase(QWidget):
 
             skip_grouping = sort_key in ("name", "rating")
             widget._loaded = False
-            self._build_category_ui(widget, current_index, category_key, sorted_dict, favorites_list, current_selection, skip_grouping=skip_grouping)
+            self._build_category_ui(widget, current_index, target_key, sorted_dict, favorites_list, current_selection, skip_grouping=skip_grouping)
 
-            log(f"Direct внешняя фильтрация {category_key}: {len(sorted_dict)} из {len(original_strategies)}", "DEBUG")
+            log(f"Direct внешняя фильтрация {target_key}: {len(sorted_dict)} из {len(original_strategies)}", "DEBUG")
 
         except Exception as e:
             log(f"Ошибка применения внешнего фильтра Direct: {e}", "ERROR")
@@ -916,7 +916,7 @@ class StrategiesPageBase(QWidget):
 
     # ==================== Методы для Direct режима (категории, вкладки) ====================
 
-    def _build_category_ui(self, widget, index, category_key, strategies_dict, favorites_list, current_selection, skip_grouping=False):
+    def _build_category_ui(self, widget, index, target_key, strategies_dict, favorites_list, current_selection, skip_grouping=False):
         """Создаёт UI элементы категории из загруженных данных - STUB, переопределяется в наследниках"""
         pass
 

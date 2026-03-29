@@ -1442,11 +1442,11 @@ class StrategyScanPage(BasePage):
     def _on_apply_strategy(self, strategy_args: str, strategy_name: str):
         """Copy the working strategy into the selected source preset."""
         try:
-            from core.services import get_direct_flow_coordinator
-            from preset_zapret2 import PresetManager
+            from core.presets.direct_facade import DirectPresetFacade
+            from core.services import get_preset_store
 
-            coordinator = get_direct_flow_coordinator()
-            selected_file_name = (coordinator.get_selected_source_file_name("direct_zapret2") or "").strip()
+            facade = DirectPresetFacade.from_launch_method("direct_zapret2")
+            selected_file_name = str(facade.get_selected_file_name() or "").strip()
             if not selected_file_name:
                 InfoBarHelper.warning(
                     self.window(),
@@ -1454,7 +1454,6 @@ class StrategyScanPage(BasePage):
                     "Не удалось определить выбранный пресет",
                 )
                 return
-            preset_path = coordinator.get_selected_source_path("direct_zapret2")
 
             target = self._scan_target or self._default_target_for_protocol(self._scan_protocol)
 
@@ -1504,10 +1503,7 @@ class StrategyScanPage(BasePage):
                 ]
                 applied_target = normalized_target
 
-            try:
-                existing_content = preset_path.read_text(encoding="utf-8")
-            except FileNotFoundError:
-                existing_content = ""
+            existing_content = facade.read_selected_source_text()
 
             updated_content = self._prepend_strategy_block(
                 existing_content=existing_content,
@@ -1515,7 +1511,8 @@ class StrategyScanPage(BasePage):
                 blob_lines=blob_lines,
             )
 
-            preset_path.write_text(updated_content, encoding="utf-8")
+            facade.save_source_text_by_file_name(selected_file_name, updated_content)
+            get_preset_store().notify_preset_saved(selected_file_name)
 
             InfoBarHelper.success(
                 self.window(),

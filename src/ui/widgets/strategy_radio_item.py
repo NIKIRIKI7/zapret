@@ -1,6 +1,6 @@
 # ui/widgets/strategy_radio_item.py
 """
-Карточка категории для выбора стратегии — использует CardWidget из qfluentwidgets
+Карточка target для выбора стратегии — использует CardWidget из qfluentwidgets
 для нативной hover-анимации и внешнего вида Windows 11 Fluent Design.
 """
 
@@ -27,24 +27,24 @@ except ImportError:
 
 class StrategyRadioItem(CardWidget):
     """
-    Карточка категории для выбора стратегии.
+    Карточка target для выбора стратегии.
 
     Структура:
     ┌─────────────────────────────────────────────────────────────────┐
     │ 🎬 YouTube TCP  |  TCP 443  |  ● Default Strategy              │
     └─────────────────────────────────────────────────────────────────┘
 
-    При клике эмитит item_activated(category_key).
+    При клике эмитит item_activated(target_key).
 
     Signals:
-        item_activated(str): category_key при клике
+        item_activated(str): target_key при клике
     """
 
     item_activated = pyqtSignal(str)
 
     def __init__(
         self,
-        category_key: str,
+        target_key: str,
         name: str,
         description: str = "",
         icon_name: Optional[str] = None,
@@ -54,7 +54,7 @@ class StrategyRadioItem(CardWidget):
         parent=None
     ):
         super().__init__(parent)
-        self._category_key = category_key
+        self._target_key = target_key
         self._name = name
         self._description = description
         self._icon_name = icon_name
@@ -80,11 +80,11 @@ class StrategyRadioItem(CardWidget):
             set_tooltip(self, self._tooltip.replace('\n', '<br>'))
 
     def _emit_item_activated(self):
-        self.item_activated.emit(self._category_key)
+        self.item_activated.emit(self._target_key)
 
     @property
-    def category_key(self) -> str:
-        return self._category_key
+    def target_key(self) -> str:
+        return self._target_key
 
     def _build_ui(self):
         self.setMinimumHeight(44)
@@ -96,7 +96,7 @@ class StrategyRadioItem(CardWidget):
         layout.setSpacing(10)
         self._layout = layout
 
-        # Иконка категории (опционально)
+        # Иконка target (опционально)
         if self._icon_name:
             try:
                 self._icon_label = QLabel()
@@ -107,7 +107,7 @@ class StrategyRadioItem(CardWidget):
             except Exception:
                 pass
 
-        # Название категории
+        # Название target
         self._name_label = BodyLabel(self._name)
         layout.addWidget(self._name_label)
 

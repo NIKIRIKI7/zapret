@@ -1,0 +1,408 @@
+from __future__ import annotations
+
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
+
+from core.paths import AppPaths
+
+from .common.preset_editor import replace_profile_action_lines, replace_profile_selector_line, split_profile_for_target
+from .common.projector import build_target_views
+from .common.source_preset_models import (
+    OutRangeSettings,
+    PresetTargetDetails,
+    SendSettings,
+    SourcePreset,
+    SyndataSettings,
+    TargetContext,
+    TargetProfileSnapshot,
+)
+from .common.strategy_catalogs import StrategyEntry, load_strategy_catalogs
+from .common.target_registry_service import TargetRegistryService
+from .engines import winws1_classifier, winws1_parser, winws1_rules, winws1_serializer
+from .engines import winws2_classifier, winws2_parser, winws2_rules, winws2_serializer
+
+
+class DirectPresetService:
+    def __init__(self, paths: AppPaths, engine: str):
+        self._paths = paths
+        self._engine = str(engine or "").strip().lower()
+        self._registry = TargetRegistryService()
+
+    def read_source_preset(self, path: Path) -> SourcePreset:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+        return self._parser().parse(text)
+
+    def write_source_preset(self, path: Path, source: SourcePreset) -> None:
+        content = self._serializer().serialize(source)
+        Path(path).write_text(content, encoding="utf-8")
+
+    def remove_placeholder_profiles(self, source: SourcePreset) -> bool:
+        kept_profiles = [profile for profile in source.profiles if not self._profile_uses_placeholder_unknown(profile)]
+        if len(kept_profiles) == len(source.profiles):
+            return False
+        source.profiles = kept_profiles
+        return True
+
+    def collect_target_contexts(self, source: SourcePreset) -> dict[str, TargetContext]:
+        related_profiles: dict[str, list[TargetProfileSnapshot]] = {}
+        canonical_indices: dict[str, int] = {}
+        canonical_profiles: dict[str, Any] = {}
+
+        for index, profile in enumerate(source.profiles):
+            target_keys = self._classifier().classify(profile)
+            profile.canonical_target_keys = tuple(target_keys)
+            snapshot = TargetProfileSnapshot(
+                profile_index=index,
+                protocol_kind=profile.protocol_kind,
+                match_lines=tuple(profile.match_lines),
+                action_lines=tuple(profile.action_lines),
+                target_keys=tuple(target_keys),
+            )
+            for target_key in target_keys:
+                related_profiles.setdefault(target_key, []).append(snapshot)
+                canonical_indices.setdefault(target_key, index)
+                canonical_profiles.setdefault(target_key, profile)
+
+        contexts: dict[str, TargetContext] = {}
+        for target_key, index in canonical_indices.items():
+            profile = canonical_profiles[target_key]
+            metadata = self._registry.get_metadata(target_key)
+            contexts[target_key] = TargetContext(
+                target_key=target_key,
+                profile_index=index,
+                display_name=metadata.display_name,
+                protocol_kind=profile.protocol_kind,
+                filter_mode=self._detect_filter_mode(profile),
+                selector_family=self._selector_family(profile, target_key),
+                selector_value=self._selector_value(profile, target_key),
+                strategy_candidates=tuple(self._candidate_catalog_names(profile.protocol_kind)),
+                related_profiles=tuple(related_profiles.get(target_key, [])),
+                metadata=metadata,
+            )
+        return contexts
+
+    def build_target_views(self, source: SourcePreset):
+        return build_target_views(self.collect_target_contexts(source))
+
+    def build_ui_items(self, source: SourcePreset) -> dict[str, Any]:
+        items: dict[str, Any] = {}
+        for target_key in self.collect_target_contexts(source):
+            items[target_key] = self._registry.build_ui_item(target_key)
+        return items
+
+    def get_target_details(self, source: SourcePreset, target_key: str) -> PresetTargetDetails | None:
+        contexts = self.collect_target_contexts(source)
+        ctx = contexts.get(str(target_key or "").strip().lower())
+        if ctx is None:
+            return None
+        profile = source.profiles[ctx.profile_index]
+        strategy_id = self._infer_strategy_id(profile.action_lines, ctx.strategy_candidates)
+        out_range = self._rules().parse_out_range(profile.action_lines)
+        send = self._rules().parse_send(profile.action_lines)
+        syndata = self._rules().parse_syndata(profile.action_lines)
+        warnings: list[str] = []
+        if len(ctx.related_profiles) > 1:
+            warnings.append("target appears in multiple profiles; basic UI edits only the first profile")
+        return PresetTargetDetails(
+            target_key=ctx.target_key,
+            display_name=ctx.display_name,
+            current_strategy=strategy_id,
+            out_range_settings=out_range,
+            send_settings=send,
+            syndata_settings=syndata,
+            warnings=tuple(warnings),
+            protocol_kind=ctx.protocol_kind,
+            filter_mode=ctx.filter_mode,
+            raw_action_lines=tuple(profile.action_lines),
+        )
+
+    def get_strategy_selections(self, source: SourcePreset) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for target_key in self.collect_target_contexts(source):
+            details = self.get_target_details(source, target_key)
+            out[target_key] = details.current_strategy if details else "none"
+        return out
+
+    def get_filter_mode(self, source: SourcePreset, target_key: str) -> str:
+        ctx = self.collect_target_contexts(source).get(str(target_key or "").strip().lower())
+        return ctx.filter_mode if ctx else "hostlist"
+
+    def update_filter_mode(self, source: SourcePreset, target_key: str, filter_mode: str) -> bool:
+        normalized_key = str(target_key or "").strip().lower()
+        normalized_mode = str(filter_mode or "").strip().lower()
+        if normalized_mode not in ("hostlist", "ipset"):
+            return False
+        contexts = self.collect_target_contexts(source)
+        ctx = contexts.get(normalized_key)
+        if ctx is None:
+            return False
+        profile_index = split_profile_for_target(source, ctx.profile_index, normalized_key)
+        base_key = self._registry.base_key_from_target_key(normalized_key)
+        new_line = f"--{normalized_mode}=lists/{'ipset-' if normalized_mode == 'ipset' else ''}{base_key}.txt"
+        replace_profile_selector_line(source, profile_index, normalized_key, new_line, normalized_mode)
+        return True
+
+    def update_strategy_selection(self, source: SourcePreset, target_key: str, strategy_id: str) -> bool:
+        normalized_key = str(target_key or "").strip().lower()
+        contexts = self.collect_target_contexts(source)
+        ctx = contexts.get(normalized_key)
+        if ctx is None:
+            return False
+        profile_index = split_profile_for_target(source, ctx.profile_index, normalized_key)
+        details = self.get_target_details(source, normalized_key) or PresetTargetDetails(
+            target_key=normalized_key,
+            display_name=ctx.display_name,
+            current_strategy="none",
+            out_range_settings=OutRangeSettings(),
+            send_settings=SendSettings(),
+            syndata_settings=SyndataSettings(),
+        )
+        strategy_args = self._strategy_args_by_id(str(strategy_id or "").strip(), ctx.strategy_candidates)
+        action_lines = self._rules().compose_action_lines(
+            strategy_args,
+            details.out_range_settings,
+            details.send_settings,
+            details.syndata_settings,
+        )
+        replace_profile_action_lines(source, profile_index, action_lines)
+        return True
+
+    def update_raw_args(self, source: SourcePreset, target_key: str, raw_args: str) -> bool:
+        normalized_key = str(target_key or "").strip().lower()
+        contexts = self.collect_target_contexts(source)
+        ctx = contexts.get(normalized_key)
+        if ctx is None:
+            return False
+        profile_index = split_profile_for_target(source, ctx.profile_index, normalized_key)
+        action_lines = [line.strip() for line in str(raw_args or "").splitlines() if line.strip()]
+        replace_profile_action_lines(source, profile_index, action_lines)
+        return True
+
+    def get_raw_args(self, source: SourcePreset, target_key: str) -> str:
+        details = self.get_target_details(source, target_key)
+        if not details:
+            return ""
+        return "\n".join(self._rules().strip_helper_lines(list(details.raw_action_lines))).strip()
+
+    def update_syndata(self, source: SourcePreset, target_key: str, syndata: SyndataSettings) -> bool:
+        normalized_key = str(target_key or "").strip().lower()
+        details = self.get_target_details(source, normalized_key)
+        contexts = self.collect_target_contexts(source)
+        ctx = contexts.get(normalized_key)
+        if ctx is None or details is None:
+            return False
+        profile_index = split_profile_for_target(source, ctx.profile_index, normalized_key)
+        action_lines = self._rules().compose_action_lines(
+            self._rules().strip_helper_lines(list(details.raw_action_lines)),
+            details.out_range_settings,
+            details.send_settings,
+            syndata,
+        )
+        replace_profile_action_lines(source, profile_index, action_lines)
+        return True
+
+    def update_target_settings(
+        self,
+        source: SourcePreset,
+        target_key: str,
+        *,
+        out_range: OutRangeSettings | None = None,
+        send: SendSettings | None = None,
+        syndata: SyndataSettings | None = None,
+    ) -> bool:
+        normalized_key = str(target_key or "").strip().lower()
+        details = self.get_target_details(source, normalized_key)
+        contexts = self.collect_target_contexts(source)
+        ctx = contexts.get(normalized_key)
+        if ctx is None or details is None:
+            return False
+        profile_index = split_profile_for_target(source, ctx.profile_index, normalized_key)
+        action_lines = self._rules().compose_action_lines(
+            self._rules().strip_helper_lines(list(details.raw_action_lines)),
+            out_range or details.out_range_settings,
+            send or details.send_settings,
+            syndata or details.syndata_settings,
+        )
+        replace_profile_action_lines(source, profile_index, action_lines)
+        return True
+
+    def reset_target_from_template(self, current: SourcePreset, template: SourcePreset, target_key: str) -> bool:
+        template_details = self.get_target_details(template, target_key)
+        if template_details is None:
+            return False
+        normalized_key = str(target_key or "").strip().lower()
+        current_ctx = self.collect_target_contexts(current).get(normalized_key)
+        if current_ctx is None:
+            return False
+        profile_index = split_profile_for_target(current, current_ctx.profile_index, normalized_key)
+        replace_profile_action_lines(current, profile_index, list(template_details.raw_action_lines))
+        if template_details.filter_mode != current_ctx.filter_mode:
+            self.update_filter_mode(current, normalized_key, template_details.filter_mode)
+        return True
+
+    def target_info(self, source: SourcePreset, target_key: str):
+        contexts = self.collect_target_contexts(source)
+        if target_key not in contexts:
+            return None
+        return self._registry.build_ui_item(target_key)
+
+    def get_strategy_entries(self, source: SourcePreset, target_key: str) -> dict[str, dict[str, str]]:
+        contexts = self.collect_target_contexts(source)
+        ctx = contexts.get(str(target_key or "").strip().lower())
+        if ctx is None:
+            return {}
+        entries: dict[str, dict[str, str]] = {}
+        for catalog_name in ctx.strategy_candidates:
+            for entry in self._strategy_catalogs().get(catalog_name, {}).values():
+                entries.setdefault(
+                    entry.strategy_id,
+                    {
+                        "id": entry.strategy_id,
+                        "name": entry.name,
+                        "args": entry.args,
+                    },
+                )
+        return entries
+
+    def collect_missing_out_range_warning_labels(self, source: SourcePreset) -> list[str]:
+        labels: list[str] = []
+        seen: set[str] = set()
+        contexts = self.collect_target_contexts(source)
+
+        for index, profile in enumerate(source.profiles):
+            if self._profile_has_explicit_out_range(profile):
+                continue
+
+            label = self._warning_label_for_profile(profile, contexts, index)
+            dedupe_key = label.strip().lower()
+            if not dedupe_key or dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            labels.append(label)
+
+        return labels
+
+    def _target_occurrence_count(self, source: SourcePreset, target_key: str) -> int:
+        count = 0
+        for profile in source.profiles:
+            if target_key in profile.canonical_target_keys:
+                count += 1
+        return count
+
+    def _candidate_catalog_names(self, protocol_kind: str) -> tuple[str, ...]:
+        if self._engine == "winws2":
+            if protocol_kind in ("udp", "l7"):
+                return ("udp", "voice")
+            return ("tcp", "http80", "voice")
+        if protocol_kind in ("udp", "l7"):
+            return ("udp", "voice", "http80")
+        return ("tcp", "http80", "voice")
+
+    def _strategy_catalogs(self) -> dict[str, dict[str, StrategyEntry]]:
+        return load_strategy_catalogs(self._paths, self._engine)
+
+    def _strategy_args_by_id(self, strategy_id: str, candidates: tuple[str, ...]) -> list[str]:
+        sid = str(strategy_id or "").strip()
+        if not sid or sid == "none":
+            return []
+        for name in candidates:
+            entry = self._strategy_catalogs().get(name, {}).get(sid)
+            if entry is not None:
+                return [line.strip() for line in entry.args.splitlines() if line.strip()]
+        return []
+
+    def _infer_strategy_id(self, action_lines: list[str], candidates: tuple[str, ...]) -> str:
+        normalized = self._normalize_args(self._rules().strip_helper_lines(action_lines))
+        if not normalized:
+            return "none"
+        for name in candidates:
+            for entry in self._strategy_catalogs().get(name, {}).values():
+                if self._normalize_args(entry.args.splitlines()) == normalized:
+                    return entry.strategy_id
+        return "custom"
+
+    @staticmethod
+    def _normalize_args(lines: list[str] | tuple[str, ...]) -> str:
+        return "\n".join(sorted(str(line).strip().lower() for line in lines if str(line).strip()))
+
+    @staticmethod
+    def _detect_filter_mode(profile) -> str:
+        for line in profile.match_lines:
+            lowered = line.strip().lower()
+            if lowered.startswith("--ipset="):
+                return "ipset"
+            if lowered.startswith("--hostlist="):
+                return "hostlist"
+        return "hostlist"
+
+    @staticmethod
+    def _selector_family(profile, target_key: str) -> str:
+        for segment in profile.segments:
+            if target_key in segment.target_keys and segment.selector_is_positive:
+                return segment.selector_family
+        return ""
+
+    @staticmethod
+    def _selector_value(profile, target_key: str) -> str:
+        for segment in profile.segments:
+            if target_key in segment.target_keys and segment.selector_is_positive:
+                return segment.selector_value
+        return ""
+
+    def _parser(self):
+        return winws2_parser if self._engine == "winws2" else winws1_parser
+
+    def _classifier(self):
+        return winws2_classifier if self._engine == "winws2" else winws1_classifier
+
+    def _serializer(self):
+        return winws2_serializer if self._engine == "winws2" else winws1_serializer
+
+    def _rules(self):
+        return winws2_rules if self._engine == "winws2" else winws1_rules
+
+    @staticmethod
+    def _profile_uses_placeholder_unknown(profile) -> bool:
+        for segment in getattr(profile, "segments", ()) or ():
+            if getattr(segment, "kind", "") != "match":
+                continue
+            family = str(getattr(segment, "selector_family", "") or "").strip().lower()
+            if family not in {"hostlist", "ipset"}:
+                continue
+            value = str(getattr(segment, "selector_value", "") or "").strip().lower().replace("\\", "/")
+            if value.endswith("/unknown.txt") or value == "lists/unknown.txt":
+                return True
+            if value.endswith("/ipset-unknown.txt") or value == "lists/ipset-unknown.txt":
+                return True
+        return False
+
+    @staticmethod
+    def _profile_has_explicit_out_range(profile) -> bool:
+        for line in getattr(profile, "action_lines", ()) or ():
+            lowered = str(line or "").strip().lower()
+            if lowered.startswith("--out-range="):
+                return True
+            if ":out_range=" in lowered:
+                return True
+        return False
+
+    def _warning_label_for_profile(self, profile, contexts: dict[str, TargetContext], profile_index: int) -> str:
+        target_keys = tuple(getattr(profile, "canonical_target_keys", ()) or ())
+        if target_keys:
+            first_key = target_keys[0]
+            ctx = contexts.get(first_key)
+            if ctx is not None:
+                proto = str(ctx.protocol_kind or "tcp").strip().lower() or "tcp"
+                return f"{ctx.target_key}/{proto}"
+
+        for segment in getattr(profile, "segments", ()) or ():
+            if getattr(segment, "kind", "") != "match":
+                continue
+            family = str(getattr(segment, "selector_family", "") or "").strip().lower()
+            value = str(getattr(segment, "selector_value", "") or "").strip()
+            if family in {"hostlist", "ipset"} and value:
+                return f"{value}/{getattr(profile, 'protocol_kind', 'tcp') or 'tcp'}"
+
+        proto = str(getattr(profile, "protocol_kind", "") or "tcp").strip().lower() or "tcp"
+        return f"profile{profile_index + 1}/{proto}"

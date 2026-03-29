@@ -643,9 +643,12 @@ class DPIController:
             return []
 
         try:
-            from preset_zapret2.out_range_warnings import collect_missing_out_range_labels_from_file
+            from core.direct_preset_core.service import DirectPresetService
+            from core.services import get_app_paths
 
-            labels = collect_missing_out_range_labels_from_file(preset_path)
+            service = DirectPresetService(get_app_paths(), "winws2")
+            source = service.read_source_preset(Path(preset_path))
+            labels = service.collect_missing_out_range_warning_labels(source)
         except Exception as e:
             log(f"Не удалось собрать предупреждения out-range для запуска: {e}", "DEBUG")
             return []
@@ -810,15 +813,18 @@ class DPIController:
                                         parse_preset_file,
                                         generate_preset_file,
                                     )
+                                    data = parse_preset_file(preset_path)
+                                    if generate_preset_file(data, preset_path, atomic=True):
+                                        content = preset_path.read_text(encoding="utf-8").strip()
                                 else:
-                                    from preset_zapret2.txt_preset_parser import (
-                                        parse_preset_file,
-                                        generate_preset_file,
-                                    )
+                                    from core.direct_preset_core.service import DirectPresetService
+                                    from core.services import get_app_paths
 
-                                data = parse_preset_file(preset_path)
-                                if generate_preset_file(data, preset_path, atomic=True):
-                                    content = preset_path.read_text(encoding="utf-8").strip()
+                                    service = DirectPresetService(get_app_paths(), "winws2")
+                                    source = service.read_source_preset(preset_path)
+                                    if service.remove_placeholder_profiles(source):
+                                        service.write_source_preset(preset_path, source)
+                                        content = preset_path.read_text(encoding="utf-8").strip()
                             except Exception as e:
                                 log(f"Ошибка очистки preset файла от unknown.txt: {e}", "DEBUG")
                     # Проверяем наличие WinDivert фильтров

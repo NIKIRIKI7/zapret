@@ -10,7 +10,6 @@ from uuid import uuid4
 
 from config import get_zapret_userdata_dir
 
-
 ROOT_FOLDER_ID = "__root__"
 STOCK_REGULAR_ID = "__stock_regular__"
 STOCK_GAMES_ID = "__stock_games__"

@@ -19,7 +19,7 @@ from .ui_prefs_store import (
     set_keep_dialog_open,
 )
 from .marks_store_bridge import (
-    get_favorites_for_category,
+    get_favorites_for_target,
     invalidate_favorites_cache,
     get_favorite_strategies,
     add_favorite_strategy,
@@ -38,21 +38,21 @@ from .marks_store_bridge import (
 from .direct_selection_store import (
     get_direct_strategy_selections,
     set_direct_strategy_selections,
-    get_direct_strategy_for_category,
-    set_direct_strategy_for_category,
+    get_direct_strategy_for_target,
+    set_direct_strategy_for_target,
     invalidate_direct_selections_cache,
 )
 from .strategies_registry import (
     registry,
     get_strategies_registry,
-    get_category_strategies,
-    get_category_info,
+    get_target_strategies,
+    get_target_info,
     get_tab_names,
     get_tab_tooltips,
     get_default_selections,
-    get_category_icon,
-    CategoryInfo,
-    reload_categories,
+    get_target_icon,
+    TargetInfo,
+    reload_targets,
 )
 
 
@@ -69,7 +69,7 @@ def clear_direct_zapret2_orchestra_strategies() -> bool:
             return False
 
         manager = PresetManager()
-        selections = {category_key: "none" for category_key in registry.get_all_category_keys()}
+        selections = {target_key: "none" for target_key in registry.get_all_target_keys()}
         manager.set_strategy_selections(selections, save_and_sync=True)
         invalidate_direct_selections_cache()
 
@@ -182,14 +182,14 @@ __all__ = [
     # Реестр стратегий
     "registry",
     "get_strategies_registry",
-    "get_category_strategies",
-    "get_category_info",
+    "get_target_strategies",
+    "get_target_info",
     "get_tab_names",
     "get_tab_tooltips",
     "get_default_selections",
-    "get_category_icon",
-    "CategoryInfo",
-    "reload_categories",
+    "get_target_icon",
+    "TargetInfo",
+    "reload_targets",
 
     # Launch method
     "get_strategy_launch_method",
@@ -204,7 +204,7 @@ __all__ = [
     "set_keep_dialog_open",
 
     # Marks / favorites / ratings bridge
-    "get_favorites_for_category",
+    "get_favorites_for_target",
     "invalidate_favorites_cache",
     "get_favorite_strategies",
     "add_favorite_strategy",

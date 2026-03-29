@@ -11,6 +11,7 @@ from typing import Iterable
 import zipfile
 
 from core.paths import AppPaths
+from .template_support import template_canonical_name as _template_support_canonical_name
 
 from .models import PresetManifest
 
@@ -266,21 +267,7 @@ class PresetRepository:
 
     @staticmethod
     def _template_canonical_name(engine: str, template_origin: str) -> str | None:
-        value = str(template_origin or "").strip()
-        if not value:
-            return None
-        try:
-            if engine == "winws2":
-                from preset_zapret2.preset_defaults import get_template_canonical_name
-
-                return get_template_canonical_name(value)
-            if engine == "winws1":
-                from preset_zapret1.preset_defaults import get_template_canonical_name_v1
-
-                return get_template_canonical_name_v1(value)
-        except Exception:
-            return None
-        return None
+        return _template_support_canonical_name(engine, template_origin)
 
     @classmethod
     def _infer_kind(cls, engine: str, file_name: str, template_origin: str | None) -> str:

@@ -81,12 +81,12 @@ def connect_lazy_page_signals(window, page_name: PageName, page: QWidget) -> Non
                 window._on_strategy_selected_from_page,
             )
 
-    if page_name == PageName.ZAPRET2_DIRECT and hasattr(page, "open_category_detail"):
+    if page_name == PageName.ZAPRET2_DIRECT and hasattr(page, "open_target_detail"):
         connect_signal_once(
             window,
-            "z2_direct.open_category_detail",
-            page.open_category_detail,
-            window._on_open_category_detail,
+            "z2_direct.open_target_detail",
+            page.open_target_detail,
+            window._on_open_target_detail,
         )
 
     if page_name in (PageName.ZAPRET2_DIRECT, PageName.ZAPRET2_USER_PRESETS, PageName.BLOBS) and hasattr(page, "back_clicked"):
@@ -248,12 +248,12 @@ def connect_lazy_page_signals(window, page_name: PageName, page: QWidget) -> Non
                 window._on_direct_mode_changed,
             )
 
-    if page_name == PageName.ZAPRET1_DIRECT and hasattr(page, "category_clicked"):
+    if page_name == PageName.ZAPRET1_DIRECT and hasattr(page, "target_clicked"):
         connect_signal_once(
             window,
-            "z1_direct.category_clicked",
-            page.category_clicked,
-            window._open_zapret1_category_detail,
+            "z1_direct.target_clicked",
+            page.target_clicked,
+            window._open_zapret1_target_detail,
         )
 
     if page_name == PageName.ZAPRET1_STRATEGY_DETAIL:
@@ -395,8 +395,8 @@ def ensure_page(window, name: PageName) -> QWidget | None:
                 "Zapret2DirectControlPage",
             ),
             PageName.ZAPRET2_ORCHESTRA_USER_PRESETS: (
-                "ui.pages.zapret2.user_presets_page",
-                "Zapret2UserPresetsPage",
+                "ui.pages.orchestra_zapret2.user_presets_page",
+                "OrchestraZapret2UserPresetsPage",
             ),
             PageName.ZAPRET2_ORCHESTRA_STRATEGY_DETAIL: (
                 "ui.pages.zapret2.strategy_detail_page",

@@ -4,7 +4,6 @@
 Поддерживает прямой запуск (direct_zapret1/2/orchestra) и оркестр
 """
 
-import os
 from typing import Dict, List
 from log import log
 from strategy_menu import get_strategy_launch_method
@@ -56,46 +55,41 @@ class StrategyChecker:
     def _check_direct_strategy(self) -> Dict:
         """Проверка стратегии в direct режиме"""
         try:
-            # Получаем выборы категорий
+            if self.launch_method in ("direct_zapret1", "direct_zapret2"):
+                return self._check_direct_source_preset()
+
+            # Оркестр пока остаётся на legacy launcher path.
             from strategy_menu import get_direct_strategy_selections
-            selections = get_direct_strategy_selections()
-            
-            # Это комбинированная стратегия
             from launcher_common import combine_strategies
             from strategy_menu.strategies_registry import registry
-            
-            # Получаем комбинированную конфигурацию
+
+            selections = get_direct_strategy_selections()
             combined = combine_strategies(**selections)
-            
-            # Формируем детали
-            active_categories = []
+
+            active_targets = []
             strategy_names = []
-            
-            for category_key in registry.get_all_category_keys():
-                strategy_id = selections.get(category_key)
-                
-                # Проверяем, что стратегия активна (не "none" и не пустая)
-                if strategy_id and strategy_id != "none":
-                    category_info = registry.get_category_info(category_key)
-                    strategy_name = registry.get_strategy_name_safe(category_key, strategy_id)
-                    
-                    if category_info:
-                        active_categories.append(category_info.full_name)
-                        strategy_names.append(f"{category_info.full_name}: {strategy_name}")
-            
-            # Подсчитываем параметры
+
+            for target_key in registry.get_all_target_keys():
+                strategy_id = selections.get(target_key)
+                if not strategy_id or strategy_id == "none":
+                    continue
+
+                target_info = registry.get_target_info(target_key)
+                strategy_name = registry.get_strategy_name_safe(target_key, strategy_id)
+                if target_info:
+                    active_targets.append(target_info.full_name)
+                    strategy_names.append(f"{target_info.full_name}: {strategy_name}")
+
             args_list = combined['args'].split() if combined['args'] else []
-            
-            # Анализируем флаги
             flags_analysis = self._analyze_strategy_flags(args_list)
-            
+
             return {
                 'name': combined['description'],
                 'type': 'combined',
-                'method': 'direct',
+                'method': self.launch_method,
                 'file_status': 'N/A',
                 'details': {
-                    'active_categories': active_categories,
+                    'active_targets': active_targets,
                     'strategy_names': strategy_names,
                     'selections': selections,
                     'args_count': len(args_list),
@@ -106,7 +100,7 @@ class StrategyChecker:
                     'special_params': flags_analysis.get('special_params', [])
                 }
             }
-            
+
         except Exception as e:
             log(f"Ошибка проверки direct стратегии: {e}", "DEBUG")
             return {
@@ -116,6 +110,64 @@ class StrategyChecker:
                 'file_status': 'error',
                 'details': {'error': str(e)}
             }
+
+    def _check_direct_source_preset(self) -> Dict:
+        """Проверка нового direct flow через выбранный source preset."""
+        from core.presets.direct_facade import DirectPresetFacade
+        from core.services import get_direct_flow_coordinator
+
+        facade = DirectPresetFacade.from_launch_method(self.launch_method)
+        profile = get_direct_flow_coordinator().ensure_launch_profile(self.launch_method, require_filters=False)
+        source_text = facade.read_selected_source_text()
+        selections = facade.get_strategy_selections() or {}
+        target_items = facade.get_target_ui_items() or {}
+
+        ordered_targets = sorted(
+            target_items.items(),
+            key=lambda item: (
+                getattr(item[1], "order", 999),
+                str(getattr(item[1], "full_name", item[0]) or item[0]).lower(),
+                item[0],
+            ),
+        )
+
+        active_targets: list[str] = []
+        strategy_names: list[str] = []
+        for target_key, target_info in ordered_targets:
+            strategy_id = selections.get(target_key, "none") or "none"
+            if strategy_id == "none":
+                continue
+            active_targets.append(getattr(target_info, "full_name", None) or target_key)
+            strategies = facade.get_target_strategies(target_key) or {}
+            strategy_entry = strategies.get(strategy_id) or {}
+            strategy_label = str(strategy_entry.get("name") or strategy_id)
+            strategy_names.append(f"{active_targets[-1]}: {strategy_label}")
+
+        args_list = [
+            line.strip()
+            for line in str(source_text or "").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        flags_analysis = self._analyze_strategy_flags(args_list)
+
+        return {
+            'name': profile.display_name,
+            'type': 'preset',
+            'method': self.launch_method,
+            'file_status': 'found' if profile.launch_config_path.exists() else 'not_found',
+            'details': {
+                'preset_file': profile.preset_file_name,
+                'active_targets': active_targets,
+                'strategy_names': strategy_names,
+                'selections': selections,
+                'args_count': len(args_list),
+                'hostlists': flags_analysis.get('hostlists', []),
+                'ipsets': flags_analysis.get('ipsets', []),
+                'filters': flags_analysis.get('filters', []),
+                'dpi_techniques': flags_analysis.get('dpi_techniques', []),
+                'special_params': flags_analysis.get('special_params', []),
+            }
+        }
     
     def _analyze_strategy_flags(self, args_list: List[str]) -> Dict:
         """Анализирует флаги стратегии zapret/winws"""
@@ -165,6 +217,9 @@ class StrategyChecker:
             elif arg.startswith('--dpi-desync='):
                 technique = arg.split('=', 1)[1]
                 analysis['dpi_techniques'].append(f"desync:{technique}")
+            elif arg.startswith('--lua-desync='):
+                technique = arg.split('=', 1)[1]
+                analysis['dpi_techniques'].append(f"lua-desync:{technique}")
             elif arg.startswith('--dpi-desync-split-pos='):
                 pos = arg.split('=', 1)[1]
                 analysis['dpi_techniques'].append(f"split-pos:{pos}")
@@ -206,6 +261,8 @@ class StrategyChecker:
                 analysis['special_params'].append(f"dup-fooling:{fooling}")
             elif arg == '--new':
                 analysis['special_params'].append("--new (multi-strategy)")
+            elif arg.startswith('--debug='):
+                analysis['special_params'].append("debug-log")
             
             i += 1
         
@@ -226,18 +283,19 @@ class StrategyChecker:
         
         details = info.get('details', {})
         
-        # Для комбинированных стратегий
-        if info['type'] == 'combined' and details:
-            if details.get('active_categories'):
-                lines.append(f"   Активные категории ({len(details['active_categories'])}):")
-                for cat in details['active_categories']:
-                    lines.append(f"      • {cat}")
-            
+        active_targets = details.get('active_targets') or details.get('active_categories') or []
+        if active_targets:
+            lines.append(f"   Активные target'ы ({len(active_targets)}):")
+            for target_name in active_targets:
+                lines.append(f"      • {target_name}")
+
+        # Для комбинированных стратегий и source preset удобно отдельно показать список стратегий.
+        if info['type'] in ('combined', 'preset') and details:
             if details.get('strategy_names'):
                 lines.append("   Используемые стратегии:")
                 for name in details['strategy_names']:
                     lines.append(f"      • {name}")
-            
+
             if details.get('args_count'):
                 lines.append(f"   Количество аргументов: {details['args_count']}")
         
@@ -316,7 +374,10 @@ def get_strategy_summary() -> str:
     info = checker.check_current_strategy()
     
     if info['type'] == 'combined':
-        active_count = len(info['details'].get('active_categories', []))
-        return f"🔀 Комбинированная ({active_count} категорий)"
+        active_count = len(info['details'].get('active_targets', []) or info['details'].get('active_categories', []))
+        return f"🔀 Комбинированная ({active_count} target'ов)"
+    if info['type'] == 'preset':
+        active_count = len(info['details'].get('active_targets', []))
+        return f"📋 Source preset ({active_count} target'ов)"
     else:
         return f"{info['name']}"

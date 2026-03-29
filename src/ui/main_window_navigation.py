@@ -171,23 +171,17 @@ def navigate_to_strategies(window) -> None:
         elif method == "direct_zapret2_orchestra":
             target_page = PageName.ZAPRET2_ORCHESTRA_CONTROL
         elif method == "direct_zapret2":
-            last_key = getattr(window, "_direct_zapret2_last_opened_category_key", None)
+            last_key = getattr(window, "_direct_zapret2_last_opened_target_key", None)
             want_restore = bool(getattr(window, "_direct_zapret2_restore_detail_on_open", False))
 
             if want_restore and last_key:
                 try:
-                    from strategy_menu.strategies_registry import registry
-                    category_info = registry.get_category_info(last_key)
-                    detail_page = window._ensure_page(PageName.ZAPRET2_STRATEGY_DETAIL)
-                    if category_info and detail_page and hasattr(detail_page, "show_category"):
-                        try:
-                            from core.presets.direct_facade import DirectPresetFacade
+                    from core.presets.direct_facade import DirectPresetFacade
 
-                            selections = DirectPresetFacade.from_launch_method("direct_zapret2").get_strategy_selections() or {}
-                            current_strategy_id = selections.get(last_key, "none")
-                        except Exception:
-                            current_strategy_id = "none"
-                        detail_page.show_category(last_key, category_info, current_strategy_id)
+                    detail_page = window._ensure_page(PageName.ZAPRET2_STRATEGY_DETAIL)
+                    facade = DirectPresetFacade.from_launch_method("direct_zapret2")
+                    if facade.get_target_ui_item(last_key) and detail_page and hasattr(detail_page, "show_target"):
+                        detail_page.show_target(last_key)
                         target_page = PageName.ZAPRET2_STRATEGY_DETAIL
                     else:
                         target_page = PageName.ZAPRET2_DIRECT_CONTROL

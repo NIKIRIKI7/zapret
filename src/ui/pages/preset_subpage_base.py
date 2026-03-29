@@ -605,11 +605,11 @@ class PresetSubpageBase(BasePage):
             return
         try:
             if method == "direct_zapret2":
-                from preset_zapret2.preset_store import get_preset_store
+                from core.services import get_preset_store
 
                 get_preset_store().notify_preset_switched(self._preset_file_name)
             elif method == "direct_zapret1":
-                from preset_zapret1.preset_store import get_preset_store_v1
+                from core.services import get_preset_store_v1
 
                 get_preset_store_v1().notify_preset_switched(self._preset_file_name)
         except Exception:
@@ -619,11 +619,11 @@ class PresetSubpageBase(BasePage):
         try:
             method = self._direct_launch_method()
             if method == "direct_zapret2":
-                from preset_zapret2.preset_store import get_preset_store
+                from core.services import get_preset_store
 
                 get_preset_store().notify_preset_saved(file_name)
             elif method == "direct_zapret1":
-                from preset_zapret1.preset_store import get_preset_store_v1
+                from core.services import get_preset_store_v1
 
                 get_preset_store_v1().notify_preset_saved(file_name)
         except Exception:
@@ -633,11 +633,11 @@ class PresetSubpageBase(BasePage):
         try:
             method = self._direct_launch_method()
             if method == "direct_zapret2":
-                from preset_zapret2.preset_store import get_preset_store
+                from core.services import get_preset_store
 
                 get_preset_store().notify_presets_changed()
             elif method == "direct_zapret1":
-                from preset_zapret1.preset_store import get_preset_store_v1
+                from core.services import get_preset_store_v1
 
                 get_preset_store_v1().notify_presets_changed()
         except Exception:

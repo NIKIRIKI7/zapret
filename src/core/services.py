@@ -34,16 +34,16 @@ def get_direct_flow_coordinator() -> DirectFlowCoordinator:
 
 @lru_cache(maxsize=1)
 def get_preset_store():
-    from preset_zapret2.preset_store import PresetStore
+    from .presets.runtime_store import DirectRuntimePresetStore
 
-    return PresetStore()
+    return DirectRuntimePresetStore("winws2")
 
 
 @lru_cache(maxsize=1)
 def get_preset_store_v1():
-    from preset_zapret1.preset_store import PresetStoreV1
+    from .presets.runtime_store import DirectRuntimePresetStore
 
-    return PresetStoreV1()
+    return DirectRuntimePresetStore("winws1")
 
 
 def reset_cached_services() -> None:

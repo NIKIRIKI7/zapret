@@ -132,14 +132,14 @@ class CategoryTabLoader(QObject):
     Загружает стратегии, избранные и текущий выбор в фоновом потоке.
     """
 
-    # category_key, strategies_dict, favorites_list, current_selection
+    # target_key, strategies_dict, favorites_list, current_selection
     finished = pyqtSignal(str, dict, list, str)
-    # category_key, error_message
+    # target_key, error_message
     error = pyqtSignal(str, str)
 
-    def __init__(self, category_key: str):
+    def __init__(self, target_key: str):
         super().__init__()
-        self.category_key = category_key
+        self.target_key = target_key
 
     def run(self):
         """Загружает данные категории в фоновом потоке"""
@@ -149,25 +149,25 @@ class CategoryTabLoader(QObject):
             from strategy_menu.marks_store_bridge import get_favorite_strategies
 
             # Загружаем стратегии для категории
-            strategies_dict = registry.get_category_strategies(self.category_key)
+            strategies_dict = registry.get_target_strategies(self.target_key)
 
             # Загружаем избранные
-            favorites_list = get_favorite_strategies(self.category_key) or []
+            favorites_list = get_favorite_strategies(self.target_key) or []
 
             # Загружаем текущий выбор
             selections = get_direct_strategy_selections()
-            current_selection = selections.get(self.category_key, "none")
+            current_selection = selections.get(self.target_key, "none")
 
-            log(f"Категория {self.category_key}: загружено {len(strategies_dict)} стратегий", "DEBUG")
+            log(f"Категория {self.target_key}: загружено {len(strategies_dict)} стратегий", "DEBUG")
 
             self.finished.emit(
-                self.category_key,
+                self.target_key,
                 strategies_dict,
                 favorites_list,
                 current_selection
             )
 
         except Exception as e:
-            error_msg = f"Ошибка загрузки категории {self.category_key}: {e}"
+            error_msg = f"Ошибка загрузки категории {self.target_key}: {e}"
             log(error_msg, "ERROR")
-            self.error.emit(self.category_key, str(e))
+            self.error.emit(self.target_key, str(e))

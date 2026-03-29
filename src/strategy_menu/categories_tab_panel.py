@@ -48,7 +48,7 @@ class CategoriesTabPanel(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._tab_category_keys = []
+        self._tab_target_keys = []
         self._tab_icons = {}  # {index: (icon_name, icon_color)}
         self._build_ui()
         
@@ -185,12 +185,12 @@ class CategoriesTabPanel(QWidget):
             """
         )
 
-        for index, category_key in enumerate(self._tab_category_keys):
-            if not category_key:
+        for index, target_key in enumerate(self._tab_target_keys):
+            if not target_key:
                 continue
             icon_meta = self._tab_icons.get(index)
             is_inactive = bool(icon_meta[2]) if icon_meta and len(icon_meta) >= 3 else False
-            self._set_tab_icon(index, category_key, is_inactive=is_inactive)
+            self._set_tab_icon(index, target_key, is_inactive=is_inactive)
         
     def _restore_selection(self, index):
         """Восстанавливает выделение на указанной вкладке"""
@@ -206,7 +206,7 @@ class CategoriesTabPanel(QWidget):
             self.stack_widget.setCurrentIndex(index)
             self.currentChanged.emit(index)
     
-    def addTab(self, widget, label, category_key=None):
+    def addTab(self, widget, label, target_key=None):
         """Добавляет новую вкладку"""
         index = self.stack_widget.addWidget(widget)
         
@@ -214,23 +214,23 @@ class CategoriesTabPanel(QWidget):
         item.setFont(QFont("Segoe UI", 9))
         self.list_widget.addItem(item)
         
-        # Сохраняем category_key
-        if len(self._tab_category_keys) <= index:
-            self._tab_category_keys.append(category_key)
+        # Сохраняем target_key
+        if len(self._tab_target_keys) <= index:
+            self._tab_target_keys.append(target_key)
         
-        # Добавляем иконку если есть category_key
-        if category_key:
-            self._set_tab_icon(index, category_key)
+        # Добавляем иконку если есть target_key
+        if target_key:
+            self._set_tab_icon(index, target_key)
         
         return index
     
-    def _set_tab_icon(self, index, category_key, is_inactive=False):
+    def _set_tab_icon(self, index, target_key, is_inactive=False):
         """Устанавливает иконку для вкладки"""
         try:
             from strategy_menu.strategies_registry import registry
             tokens = get_theme_tokens()
 
-            cat_info = registry.get_category_info(category_key)
+            cat_info = registry.get_target_info(target_key)
             if cat_info:
                 icon_name = cat_info.icon_name or 'fa5s.globe'
                 icon_color = tokens.icon_fg_faint if is_inactive else (cat_info.icon_color or tokens.accent_hex)
@@ -246,16 +246,16 @@ class CategoriesTabPanel(QWidget):
 
     def update_tab_icon_color(self, index, is_inactive=False):
         """Обновляет цвет иконки вкладки"""
-        if 0 <= index < len(self._tab_category_keys):
-            category_key = self._tab_category_keys[index]
-            if category_key:
-                self._set_tab_icon(index, category_key, is_inactive)
+        if 0 <= index < len(self._tab_target_keys):
+            target_key = self._tab_target_keys[index]
+            if target_key:
+                self._set_tab_icon(index, target_key, is_inactive)
 
     def update_all_tab_icons(self, selections_dict):
         """Обновляет цвета всех иконок на основе выборов"""
-        for index, category_key in enumerate(self._tab_category_keys):
-            if category_key:
-                strategy_id = selections_dict.get(category_key, "none")
+        for index, target_key in enumerate(self._tab_target_keys):
+            if target_key:
+                strategy_id = selections_dict.get(target_key, "none")
                 is_inactive = (strategy_id == "none" or not strategy_id)
                 self.update_tab_icon_color(index, is_inactive=is_inactive)
     
@@ -274,7 +274,7 @@ class CategoriesTabPanel(QWidget):
             self.stack_widget.removeWidget(widget)
             if widget:
                 widget.deleteLater()
-        self._tab_category_keys = []
+        self._tab_target_keys = []
         self._tab_icons = {}
     
     def count(self):

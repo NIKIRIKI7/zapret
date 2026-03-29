@@ -156,8 +156,8 @@ _PAGE_CLASS_SPECS: dict[PageName, tuple[str, str, str]] = {
     ),
     PageName.ZAPRET2_ORCHESTRA_USER_PRESETS: (
         "orchestra_zapret2_user_presets_page",
-        "ui.pages.zapret2.user_presets_page",
-        "Zapret2UserPresetsPage",
+        "ui.pages.orchestra_zapret2.user_presets_page",
+        "OrchestraZapret2UserPresetsPage",
     ),
     PageName.ZAPRET2_ORCHESTRA_STRATEGY_DETAIL: (
         "orchestra_strategy_detail_page",
@@ -447,8 +447,8 @@ class MainWindowUI:
         self._log_startup_page_init_summary()
 
         # Session memory
-        if not hasattr(self, "_direct_zapret2_last_opened_category_key"):
-            self._direct_zapret2_last_opened_category_key = None
+        if not hasattr(self, "_direct_zapret2_last_opened_target_key"):
+            self._direct_zapret2_last_opened_target_key = None
         if not hasattr(self, "_direct_zapret2_restore_detail_on_open"):
             self._direct_zapret2_restore_detail_on_open = False
 
@@ -910,28 +910,23 @@ class MainWindowUI:
         if hasattr(self, 'parent_app') and hasattr(self.parent_app, 'on_strategy_selected_from_dialog'):
             self.parent_app.on_strategy_selected_from_dialog(strategy_id, strategy_name)
 
-    def _on_open_category_detail(self, category_key: str, current_strategy_id: str):
+    def _on_open_target_detail(self, target_key: str, current_strategy_id: str):
         from log import log
-        from strategy_menu.strategies_registry import registry
 
         try:
-            category_info = registry.get_category_info(category_key)
-            if not category_info:
-                return
-
             detail_page = self._ensure_page(PageName.ZAPRET2_STRATEGY_DETAIL)
-            if detail_page and hasattr(detail_page, 'show_category'):
-                detail_page.show_category(category_key, category_info, current_strategy_id)
+            if detail_page and hasattr(detail_page, 'show_target'):
+                detail_page.show_target(target_key)
 
             self.show_page(PageName.ZAPRET2_STRATEGY_DETAIL)
 
             try:
-                self._direct_zapret2_last_opened_category_key = category_key
+                self._direct_zapret2_last_opened_target_key = target_key
                 self._direct_zapret2_restore_detail_on_open = True
             except Exception:
                 pass
         except Exception as e:
-            log(f"Error opening category detail: {e}", "ERROR")
+            log(f"Error opening target detail: {e}", "ERROR")
 
     def _on_strategy_detail_back(self):
         from strategy_menu import get_strategy_launch_method
@@ -946,22 +941,22 @@ class MainWindowUI:
         else:
             self.show_page(PageName.CONTROL)
 
-    def _on_strategy_detail_selected(self, category_key: str, strategy_id: str):
+    def _on_strategy_detail_selected(self, target_key: str, strategy_id: str):
         from log import log
-        log(f"Strategy selected from detail: {category_key} = {strategy_id}", "INFO")
+        log(f"Strategy selected from detail: {target_key} = {strategy_id}", "INFO")
         if hasattr(self, 'zapret2_strategies_page') and hasattr(self.zapret2_strategies_page, 'apply_strategy_selection'):
-            self.zapret2_strategies_page.apply_strategy_selection(category_key, strategy_id)
+            self.zapret2_strategies_page.apply_strategy_selection(target_key, strategy_id)
 
-    def _on_strategy_detail_filter_mode_changed(self, category_key: str, filter_mode: str):
+    def _on_strategy_detail_filter_mode_changed(self, target_key: str, filter_mode: str):
         try:
             if hasattr(self, 'zapret2_strategies_page') and hasattr(self.zapret2_strategies_page, 'apply_filter_mode_change'):
-                self.zapret2_strategies_page.apply_filter_mode_change(category_key, filter_mode)
+                self.zapret2_strategies_page.apply_filter_mode_change(target_key, filter_mode)
         except Exception:
             pass
 
     # ── Zapret 1 strategy detail ────────────────────────────────────────────
 
-    def _open_zapret1_category_detail(self, category_key: str, category_info: dict) -> None:
+    def _open_zapret1_target_detail(self, target_key: str, target_info: dict) -> None:
         from log import log
         try:
             detail_page = self._ensure_page(PageName.ZAPRET1_STRATEGY_DETAIL)
@@ -983,14 +978,15 @@ class MainWindowUI:
                 "direct_zapret1",
                 on_dpi_reload_needed=_reload_dpi,
             )
-            detail_page.set_category(category_key, category_info, manager)
+            _ = target_info
+            detail_page.show_target(target_key, manager)
             self.show_page(PageName.ZAPRET1_STRATEGY_DETAIL)
         except Exception as e:
-            log(f"Error opening V1 category detail: {e}", "ERROR")
+            log(f"Error opening V1 target detail: {e}", "ERROR")
 
-    def _on_z1_strategy_detail_selected(self, category_key: str, strategy_id: str) -> None:
+    def _on_z1_strategy_detail_selected(self, target_key: str, strategy_id: str) -> None:
         from log import log
-        log(f"V1 strategy detail selected: {category_key} = {strategy_id}", "INFO")
+        log(f"V1 strategy detail selected: {target_key} = {strategy_id}", "INFO")
         # Обновить субтитры карточек на странице списка категорий
         page = getattr(self, "zapret1_strategies_page", None)
         if page and hasattr(page, "_refresh_subtitles"):

@@ -9,7 +9,7 @@ from config import get_zapret_userdata_dir
 from log import log
 
 
-MarkKey = Tuple[str, str]  # (category_key, strategy_id)
+MarkKey = Tuple[str, str]  # (target_key, strategy_id)
 
 
 def _get_marks_dir() -> Path:
@@ -80,18 +80,18 @@ class DirectZapret2MarksStore:
 
         self._notwork.difference_update(self._work)
 
-    def get_mark(self, category_key: str, strategy_id: str) -> Optional[bool]:
+    def get_mark(self, target_key: str, strategy_id: str) -> Optional[bool]:
         self._ensure_loaded()
-        key = (category_key, strategy_id)
+        key = (target_key, strategy_id)
         if key in self._work:
             return True
         if key in self._notwork:
             return False
         return None
 
-    def set_mark(self, category_key: str, strategy_id: str, is_working: Optional[bool]) -> None:
+    def set_mark(self, target_key: str, strategy_id: str, is_working: Optional[bool]) -> None:
         self._ensure_loaded()
-        key = (category_key, strategy_id)
+        key = (target_key, strategy_id)
         self._work.discard(key)
         self._notwork.discard(key)
         if is_working is True:
@@ -158,20 +158,20 @@ class DirectZapret2FavoritesStore:
         if self.favorites_path.exists():
             self._favorites = _parse_marks_lines(self.favorites_path.read_text(encoding="utf-8", errors="ignore").splitlines())
 
-    def get_favorites(self, category_key: str) -> Set[str]:
+    def get_favorites(self, target_key: str) -> Set[str]:
         self._ensure_loaded()
-        cat = (category_key or "").strip()
+        cat = (target_key or "").strip()
         if not cat:
             return set()
         return {sid for c, sid in (self._favorites or set()) if c == cat}
 
-    def is_favorite(self, category_key: str, strategy_id: str) -> bool:
+    def is_favorite(self, target_key: str, strategy_id: str) -> bool:
         self._ensure_loaded()
-        return (category_key, strategy_id) in (self._favorites or set())
+        return (target_key, strategy_id) in (self._favorites or set())
 
-    def set_favorite(self, category_key: str, strategy_id: str, favorite: bool) -> None:
+    def set_favorite(self, target_key: str, strategy_id: str, favorite: bool) -> None:
         self._ensure_loaded()
-        key = ((category_key or "").strip(), (strategy_id or "").strip())
+        key = ((target_key or "").strip(), (strategy_id or "").strip())
         if not key[0] or not key[1]:
             return
         if favorite:
@@ -197,9 +197,9 @@ class DirectZapret2FavoritesStore:
                     self._favorites.add((cat, sid.strip()))
         self._save()
 
-    def clear_category(self, category_key: str) -> None:
+    def clear_category(self, target_key: str) -> None:
         self._ensure_loaded()
-        cat = str(category_key or "").strip()
+        cat = str(target_key or "").strip()
         if not cat:
             return
         self._favorites = {(stored_cat, sid) for stored_cat, sid in (self._favorites or set()) if stored_cat != cat}
@@ -237,9 +237,9 @@ def _favorites_store() -> DirectZapret2FavoritesStore:
     return _FAVORITES_STORE
 
 
-def get_favorites_for_category(category_key):
-    """Получает избранные стратегии для категории."""
-    return _favorites_store().get_favorites(category_key)
+def get_favorites_for_target(target_key):
+    """Получает избранные стратегии для target."""
+    return _favorites_store().get_favorites(target_key)
 
 
 def invalidate_favorites_cache():
@@ -247,59 +247,59 @@ def invalidate_favorites_cache():
     _FAVORITES_STORE = None
 
 
-def get_favorite_strategies(category=None):
+def get_favorite_strategies(target=None):
     """Получает избранные стратегии."""
     favorites = _favorites_store().export_favorites()
-    if category:
-        return favorites.get(category, [])
+    if target:
+        return favorites.get(target, [])
     return favorites
 
 
-def add_favorite_strategy(strategy_id, category):
+def add_favorite_strategy(strategy_id, target):
     try:
-        before = _favorites_store().is_favorite(category, strategy_id)
-        _favorites_store().set_favorite(category, strategy_id, True)
+        before = _favorites_store().is_favorite(target, strategy_id)
+        _favorites_store().set_favorite(target, strategy_id, True)
         if not before:
-            log(f"Стратегия {strategy_id} добавлена в избранные ({category})", "DEBUG")
+            log(f"Стратегия {strategy_id} добавлена в избранные ({target})", "DEBUG")
         return not before
     except Exception as e:
         log(f"Ошибка добавления в избранные: {e}", "ERROR")
         return False
 
 
-def remove_favorite_strategy(strategy_id, category):
+def remove_favorite_strategy(strategy_id, target):
     try:
-        before = _favorites_store().is_favorite(category, strategy_id)
-        _favorites_store().set_favorite(category, strategy_id, False)
+        before = _favorites_store().is_favorite(target, strategy_id)
+        _favorites_store().set_favorite(target, strategy_id, False)
         if before:
-            log(f"Стратегия {strategy_id} удалена из избранных ({category})", "DEBUG")
+            log(f"Стратегия {strategy_id} удалена из избранных ({target})", "DEBUG")
         return before
     except Exception as e:
         log(f"Ошибка удаления из избранных: {e}", "ERROR")
         return False
 
 
-def is_favorite_strategy(strategy_id, category=None):
+def is_favorite_strategy(strategy_id, target=None):
     sid = str(strategy_id or "").strip()
     if not sid:
         return False
-    if category:
-        return _favorites_store().is_favorite(category, sid)
+    if target:
+        return _favorites_store().is_favorite(target, sid)
     return sid in _favorites_store().all_strategy_ids()
 
 
-def toggle_favorite_strategy(strategy_id, category):
-    if is_favorite_strategy(strategy_id, category):
-        remove_favorite_strategy(strategy_id, category)
+def toggle_favorite_strategy(strategy_id, target):
+    if is_favorite_strategy(strategy_id, target):
+        remove_favorite_strategy(strategy_id, target)
         return False
-    add_favorite_strategy(strategy_id, category)
+    add_favorite_strategy(strategy_id, target)
     return True
 
 
-def clear_favorite_strategies(category=None):
+def clear_favorite_strategies(target=None):
     try:
-        if category:
-            _favorites_store().clear_category(category)
+        if target:
+            _favorites_store().clear_target(target)
         else:
             _favorites_store().clear_all()
         return True
@@ -321,13 +321,13 @@ def get_all_strategy_ratings() -> dict:
     return _marks_store().export_ratings()
 
 
-def get_strategy_rating(strategy_id: str, category_key: str = None) -> str:
+def get_strategy_rating(strategy_id: str, target_key: str = None) -> str:
     sid = str(strategy_id or "").strip()
     if not sid:
         return None
     store = _marks_store()
-    if category_key:
-        mark = store.get_mark(category_key, sid)
+    if target_key:
+        mark = store.get_mark(target_key, sid)
         if mark is True:
             return "working"
         if mark is False:
@@ -340,9 +340,9 @@ def get_strategy_rating(strategy_id: str, category_key: str = None) -> str:
     return None
 
 
-def set_strategy_rating(strategy_id: str, rating: str, category_key: str = None) -> bool:
-    if not category_key:
-        log("⚠️ set_strategy_rating вызван без category_key", "WARNING")
+def set_strategy_rating(strategy_id: str, rating: str, target_key: str = None) -> bool:
+    if not target_key:
+        log("⚠️ set_strategy_rating вызван без target_key", "WARNING")
         return False
     try:
         normalized = str(rating or "").strip().lower()
@@ -356,22 +356,22 @@ def set_strategy_rating(strategy_id: str, rating: str, category_key: str = None)
         else:
             log(f"⚠️ set_strategy_rating получил неизвестную оценку: {rating}", "WARNING")
             return False
-        _marks_store().set_mark(category_key, strategy_id, mark)
+        _marks_store().set_mark(target_key, strategy_id, mark)
         return True
     except Exception as e:
         log(f"Ошибка сохранения оценок стратегий: {e}", "❌ ERROR")
         return False
 
 
-def toggle_strategy_rating(strategy_id: str, rating: str, category_key: str = None) -> str:
-    if not category_key:
-        log("⚠️ toggle_strategy_rating вызван без category_key", "WARNING")
+def toggle_strategy_rating(strategy_id: str, rating: str, target_key: str = None) -> str:
+    if not target_key:
+        log("⚠️ toggle_strategy_rating вызван без target_key", "WARNING")
         return None
-    current = get_strategy_rating(strategy_id, category_key)
+    current = get_strategy_rating(strategy_id, target_key)
     if current == rating:
-        set_strategy_rating(strategy_id, None, category_key)
+        set_strategy_rating(strategy_id, None, target_key)
         return None
-    set_strategy_rating(strategy_id, rating, category_key)
+    set_strategy_rating(strategy_id, rating, target_key)
     return rating
 
 

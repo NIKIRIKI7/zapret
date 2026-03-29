@@ -21,8 +21,8 @@ from launcher_common.builder_common import (
     _apply_settings,
     _clean_spaces,
     get_strategy_display_name,
-    get_active_categories_count,
-    validate_category_strategies
+    get_active_targets_count,
+    validate_target_strategies
 )
 from launcher_common.blobs import build_args_with_deduped_blobs
 
@@ -201,7 +201,7 @@ def combine_strategies_v1(**kwargs) -> dict:
     - --wf-udp= instead of --wf-udp-out=
 
     Args:
-        **kwargs: Category selections {category_key: strategy_id}
+        **kwargs: Category selections {target_key: strategy_id}
 
     Returns:
         Combined strategy dict with 'args', 'name', 'description', etc.
@@ -215,10 +215,10 @@ def combine_strategies_v1(**kwargs) -> dict:
     # Determine category selections source
     if kwargs:
         log("[V1] Using provided category strategies", "DEBUG")
-        category_strategies = kwargs
+        target_strategies = kwargs
     else:
         log("[V1] Using default selections", "DEBUG")
-        category_strategies = registry.get_default_selections()
+        target_strategies = registry.get_default_selections()
 
     # ==================== BASE ARGUMENTS ====================
     from strategy_menu import get_debug_log_enabled, get_strategy_launch_method
@@ -227,7 +227,7 @@ def combine_strategies_v1(**kwargs) -> dict:
     # NO Lua initialization for V1 - winws.exe doesn't support Lua
 
     # Auto-detect required filters based on selected categories
-    filters = calculate_required_filters(category_strategies)
+    filters = calculate_required_filters(target_strategies)
 
     # Build base arguments from auto-detected filters (V1 syntax)
     # Note: V1 does NOT support raw filters (discord, stun, wireguard)
@@ -243,51 +243,51 @@ def combine_strategies_v1(**kwargs) -> dict:
     )
 
     # ==================== COLLECT ACTIVE CATEGORIES ====================
-    category_keys_ordered = registry.get_all_category_keys_by_command_order()
+    target_keys_ordered = registry.get_all_target_keys_by_command_order()
     none_strategies = registry.get_none_strategies()
 
     # Collect active categories with their arguments
-    active_categories = []  # [(category_key, args, category_info), ...]
+    active_categories = []  # [(target_key, args, target_info), ...]
     descriptions = []
 
-    for category_key in category_keys_ordered:
-        strategy_id = category_strategies.get(category_key)
+    for target_key in target_keys_ordered:
+        strategy_id = target_strategies.get(target_key)
 
         if not strategy_id:
             continue
 
         # Skip "none" strategies
-        none_id = none_strategies.get(category_key)
+        none_id = none_strategies.get(target_key)
         if strategy_id == none_id:
             continue
 
         # Get full arguments via registry (base_filter + technique)
-        args = registry.get_strategy_args_safe(category_key, strategy_id)
+        args = registry.get_strategy_args_safe(target_key, strategy_id)
         if args:
             # Sanitize args for V1 compatibility
             # Removes --lua-init, converts V2 syntax
             args = _sanitize_args_for_v1(args)
 
-            category_info = registry.get_category_info(category_key)
-            active_categories.append((category_key, args, category_info))
+            target_info = registry.get_target_info(target_key)
+            active_categories.append((target_key, args, target_info))
 
             # Add to description
-            strategy_name = registry.get_strategy_name_safe(category_key, strategy_id)
-            if category_info:
-                descriptions.append(f"{category_info.full_name}: {strategy_name}")
+            strategy_name = registry.get_strategy_name_safe(target_key, strategy_id)
+            if target_info:
+                descriptions.append(f"{target_info.full_name}: {strategy_name}")
 
     # ==================== BUILD COMMAND LINE ====================
     # Collect category arguments with --new separators
     category_args_parts = []
 
-    for i, (category_key, args, category_info) in enumerate(active_categories):
+    for i, (target_key, args, target_info) in enumerate(active_categories):
         category_args_parts.append(args)
 
         # Add --new only if:
         # 1. Category requires separator (needs_new_separator=True)
         # 2. And this is NOT the last active category
         is_last = (i == len(active_categories) - 1)
-        if category_info and category_info.needs_new_separator and not is_last:
+        if target_info and target_info.needs_new_separator and not is_last:
             category_args_parts.append("--new")
 
     # Deduplicate blobs: extract all --blob=... from categories,
@@ -348,7 +348,7 @@ def combine_strategies_v1(**kwargs) -> dict:
         "_is_v1": True,
         "_is_orchestra": False,  # V1 never supports orchestra
         "_active_categories": len(active_categories),
-        **{f"_{key}_id": strategy_id for key, strategy_id in category_strategies.items()}
+        **{f"_{key}_id": strategy_id for key, strategy_id in target_strategies.items()}
     }
 
 
@@ -363,8 +363,8 @@ __all__ = [
 
     # Helper functions (from common)
     'get_strategy_display_name',
-    'get_active_categories_count',
-    'validate_category_strategies',
+    'get_active_targets_count',
+    'validate_target_strategies',
 
     # V1-specific internal (for testing)
     '_build_base_args_v1',

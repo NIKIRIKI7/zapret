@@ -700,9 +700,9 @@ class Zapret2OrchestraStrategiesPage(BasePage):
 
         self.show_loading()
         try:
-            from strategy_menu import set_direct_strategy_for_category
+            from strategy_menu import set_direct_strategy_for_target
 
-            ok = set_direct_strategy_for_category(category_key, sid)
+            ok = set_direct_strategy_for_target(category_key, sid)
             if not ok:
                 raise RuntimeError("Не удалось сохранить выбор")
 

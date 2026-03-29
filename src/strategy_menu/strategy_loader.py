@@ -429,9 +429,9 @@ def _load_strategy_file(directory: Path, basename: str) -> Optional[Dict]:
 
 def _external_strategy_basenames(category: str, strategy_set_key: str) -> List[str]:
     # Strict mapping: only explicitly listed filenames are supported.
-    category_key = (category or "").strip().lower()
+    target_key = (category or "").strip().lower()
     set_key = (strategy_set_key or "").strip().lower()
-    mapped = _EXTERNAL_STRATEGY_BASENAME_MAP.get(set_key, {}).get(category_key)
+    mapped = _EXTERNAL_STRATEGY_BASENAME_MAP.get(set_key, {}).get(target_key)
     return [mapped] if mapped else []
 
 
@@ -618,11 +618,11 @@ def _parse_categories_txt_content(content: str, *, source_name: str) -> Optional
                 # Normalize keys to lower-case so categories match preset parsing logic
                 # (preset blocks infer category keys in lower-case from filter tokens/filenames).
                 raw_key = line[1:-1].strip()
-                category_key = raw_key.lower()
+                target_key = raw_key.lower()
                 section_index += 1
                 current_category = {
-                    'key': category_key,
-                    'full_name': raw_key or category_key,  # По умолчанию имя = исходный key
+                    'key': target_key,
+                    'full_name': raw_key or target_key,  # По умолчанию имя = исходный key
                     '_file_order': section_index,
                 }
                 continue

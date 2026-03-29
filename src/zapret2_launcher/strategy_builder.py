@@ -89,40 +89,40 @@ HARDCODED_BLOBS = (
 
 # ==================== COMMON UTILITIES ====================
 
-def calculate_required_filters(category_strategies: dict) -> dict:
+def calculate_required_filters(target_strategies: dict) -> dict:
     """
     Automatically calculates required port filters based on selected categories.
 
     Uses filters_config.py to determine which filters are needed.
 
     Args:
-        category_strategies: dict {category_key: strategy_id}
+        target_strategies: dict {target_key: strategy_id}
 
     Returns:
         dict with filter flags
     """
-    from launcher_common.port_filters import get_filter_for_category, FILTERS
+    from launcher_common.port_filters import get_filter_for_target, FILTERS
 
     # Initialize all filters as False
     filters = {key: False for key in FILTERS.keys()}
 
     none_strategies = registry.get_none_strategies()
 
-    for category_key, strategy_id in category_strategies.items():
+    for target_key, strategy_id in target_strategies.items():
         # Skip inactive categories
         if not strategy_id:
             continue
-        none_id = none_strategies.get(category_key)
+        none_id = none_strategies.get(target_key)
         if strategy_id == none_id or strategy_id == "none":
             continue
 
         # Get category info
-        category_info = registry.get_category_info(category_key)
-        if not category_info:
+        target_info = registry.get_target_info(target_key)
+        if not target_info:
             continue
 
         # Get required filters via config
-        required_filters = get_filter_for_category(category_info)
+        required_filters = get_filter_for_target(target_info)
         for filter_key in required_filters:
             filters[filter_key] = True
 
@@ -298,7 +298,7 @@ def combine_strategies_v2(is_orchestra: bool = False, **kwargs) -> dict:
 
     Args:
         is_orchestra: If True, enables orchestra mode with --wf-tcp-in=
-        **kwargs: Category selections {category_key: strategy_id}
+        **kwargs: Category selections {target_key: strategy_id}
 
     Returns:
         Combined strategy dict with 'args', 'name', 'description', etc.
@@ -312,10 +312,10 @@ def combine_strategies_v2(is_orchestra: bool = False, **kwargs) -> dict:
     # Determine category selections source
     if kwargs:
         log("[V2] Using provided category strategies", "DEBUG")
-        category_strategies = kwargs
+        target_strategies = kwargs
     else:
         log("[V2] Using default selections", "DEBUG")
-        category_strategies = registry.get_default_selections()
+        target_strategies = registry.get_default_selections()
 
     # ==================== BASE ARGUMENTS ====================
     from strategy_menu import get_debug_log_enabled, get_strategy_launch_method
@@ -336,7 +336,7 @@ def combine_strategies_v2(is_orchestra: bool = False, **kwargs) -> dict:
     LUA_INIT = f'--lua-init=@{lua_lib_path} --lua-init=@{lua_antidpi_path} --lua-init=@{lua_auto_path} --lua-init=@{custom_funcs_path} --lua-init=@{zapret_multishake_path}'
 
     # Auto-detect required filters based on selected categories
-    filters = calculate_required_filters(category_strategies)
+    filters = calculate_required_filters(target_strategies)
 
     # Build base arguments from auto-detected filters (V2 syntax)
     base_args = _build_base_args_v2(
@@ -356,28 +356,28 @@ def combine_strategies_v2(is_orchestra: bool = False, **kwargs) -> dict:
     )
 
     # ==================== COLLECT ACTIVE CATEGORIES ====================
-    category_keys_ordered = registry.get_all_category_keys_by_command_order()
+    target_keys_ordered = registry.get_all_target_keys_by_command_order()
     none_strategies = registry.get_none_strategies()
 
     # Collect active categories with their arguments
-    active_categories = []  # [(category_key, args, category_info), ...]
+    active_categories = []  # [(target_key, args, target_info), ...]
     descriptions = []
 
-    for category_key in category_keys_ordered:
-        strategy_id = category_strategies.get(category_key)
+    for target_key in target_keys_ordered:
+        strategy_id = target_strategies.get(target_key)
 
         if not strategy_id:
             continue
 
         # Skip "none" strategies
-        none_id = none_strategies.get(category_key)
+        none_id = none_strategies.get(target_key)
         if strategy_id == none_id:
             continue
 
         # Get full arguments via registry (base_filter + technique)
-        args = registry.get_strategy_args_safe(category_key, strategy_id)
+        args = registry.get_strategy_args_safe(target_key, strategy_id)
         if args:
-            category_info = registry.get_category_info(category_key)
+            target_info = registry.get_target_info(target_key)
 
             # ==================== SYNDATA/SEND INJECTION ====================
             # Apply syndata and send settings from UI (if enabled for this category)
@@ -388,13 +388,13 @@ def combine_strategies_v2(is_orchestra: bool = False, **kwargs) -> dict:
             #   --filter-tcp=80,443 --hostlist=youtube.txt --out-range=-n8 --lua-desync=send:repeats=2 --lua-desync=syndata:blob=tls7 --lua-desync=multisplit:pos=1,midsld
             #   ├─ base_filter ─────────────────────────┤├─ out_range ─┤├─ send ────────────────────┤├─ syndata ─────────────────┤├─ strategy ──────────────────────────┤
             #
-            proto_raw = str(getattr(category_info, "protocol", "") or "").upper()
+            proto_raw = str(getattr(target_info, "protocol", "") or "").upper()
             is_udp_like = ("UDP" in proto_raw) or ("QUIC" in proto_raw) or ("L7" in proto_raw)
             protocol_key = "udp" if is_udp_like else "tcp"
 
-            out_range_args = get_out_range_args(category_key, protocol=protocol_key)
-            send_args = build_send_args(category_key, protocol=protocol_key)
-            syndata_args = build_syndata_args(category_key, protocol=protocol_key)
+            out_range_args = get_out_range_args(target_key, protocol=protocol_key)
+            send_args = build_send_args(target_key, protocol=protocol_key)
+            syndata_args = build_syndata_args(target_key, protocol=protocol_key)
 
             # Если есть что вставить - разделяем args на base_filter и strategy части
             if syndata_args or out_range_args or send_args:
@@ -413,40 +413,40 @@ def combine_strategies_v2(is_orchestra: bool = False, **kwargs) -> dict:
 
                 if out_range_args:
                     result_parts.append(out_range_args)
-                    log(f"[V2] Applied out_range for '{category_key}': {out_range_args}", "DEBUG")
+                    log(f"[V2] Applied out_range for '{target_key}': {out_range_args}", "DEBUG")
 
                 if send_args:
                     result_parts.append(send_args)
-                    log(f"[V2] Applied send for '{category_key}': {send_args}", "DEBUG")
+                    log(f"[V2] Applied send for '{target_key}': {send_args}", "DEBUG")
 
                 if syndata_args:
                     result_parts.append(syndata_args)
-                    log(f"[V2] Applied syndata for '{category_key}': {syndata_args}", "DEBUG")
+                    log(f"[V2] Applied syndata for '{target_key}': {syndata_args}", "DEBUG")
 
                 if strategy_part:
                     result_parts.append(strategy_part)
 
                 args = " ".join(result_parts)
 
-            active_categories.append((category_key, args, category_info))
+            active_categories.append((target_key, args, target_info))
 
             # Add to description
-            strategy_name = registry.get_strategy_name_safe(category_key, strategy_id)
-            if category_info:
-                descriptions.append(f"{category_info.full_name}: {strategy_name}")
+            strategy_name = registry.get_strategy_name_safe(target_key, strategy_id)
+            if target_info:
+                descriptions.append(f"{target_info.full_name}: {strategy_name}")
 
     # ==================== BUILD COMMAND LINE ====================
     # Collect category arguments with --new separators
     category_args_parts = []
 
-    for i, (category_key, args, category_info) in enumerate(active_categories):
+    for i, (target_key, args, target_info) in enumerate(active_categories):
         category_args_parts.append(args)
 
         # Add --new only if:
         # 1. Category requires separator (needs_new_separator=True)
         # 2. And this is NOT the last active category
         is_last = (i == len(active_categories) - 1)
-        if category_info and category_info.needs_new_separator and not is_last:
+        if target_info and target_info.needs_new_separator and not is_last:
             category_args_parts.append("--new")
 
     # ==================== БЛОБЫ И АРГУМЕНТЫ КАТЕГОРИЙ ====================
@@ -516,40 +516,40 @@ def combine_strategies_v2(is_orchestra: bool = False, **kwargs) -> dict:
         "_is_v2": True,
         "_is_orchestra": is_orchestra,
         "_active_categories": len(active_categories),
-        **{f"_{key}_id": strategy_id for key, strategy_id in category_strategies.items()}
+        **{f"_{key}_id": strategy_id for key, strategy_id in target_strategies.items()}
     }
 
 
 # ==================== HELPER FUNCTIONS ====================
 
-def get_strategy_display_name(category_key: str, strategy_id: str) -> str:
+def get_strategy_display_name(target_key: str, strategy_id: str) -> str:
     """Gets display name for a strategy"""
     if strategy_id == "none":
         return "Disabled"
 
-    return registry.get_strategy_name_safe(category_key, strategy_id)
+    return registry.get_strategy_name_safe(target_key, strategy_id)
 
 
-def get_active_categories_count(category_strategies: dict) -> int:
+def get_active_targets_count(target_strategies: dict) -> int:
     """Counts the number of active categories"""
     none_strategies = registry.get_none_strategies()
     count = 0
 
-    for category_key, strategy_id in category_strategies.items():
-        if strategy_id and strategy_id != none_strategies.get(category_key):
+    for target_key, strategy_id in target_strategies.items():
+        if strategy_id and strategy_id != none_strategies.get(target_key):
             count += 1
 
     return count
 
 
-def validate_category_strategies(category_strategies: dict) -> list:
+def validate_target_strategies(target_strategies: dict) -> list:
     """
     Validates selected strategies.
     Returns list of errors (empty if all ok).
     """
     errors = []
 
-    for category_key, strategy_id in category_strategies.items():
+    for target_key, strategy_id in target_strategies.items():
         if not strategy_id:
             continue
 
@@ -557,15 +557,15 @@ def validate_category_strategies(category_strategies: dict) -> list:
             continue
 
         # Check category exists
-        category_info = registry.get_category_info(category_key)
-        if not category_info:
-            errors.append(f"Unknown category: {category_key}")
+        target_info = registry.get_target_info(target_key)
+        if not target_info:
+            errors.append(f"Unknown category: {target_key}")
             continue
 
         # Check strategy exists
-        args = registry.get_strategy_args_safe(category_key, strategy_id)
+        args = registry.get_strategy_args_safe(target_key, strategy_id)
         if args is None:
-            errors.append(f"Strategy '{strategy_id}' not found in category '{category_key}'")
+            errors.append(f"Strategy '{strategy_id}' not found in category '{target_key}'")
 
     return errors
 
@@ -581,8 +581,8 @@ __all__ = [
 
     # Helper functions
     'get_strategy_display_name',
-    'get_active_categories_count',
-    'validate_category_strategies',
+    'get_active_targets_count',
+    'validate_target_strategies',
 
     # Internal (for testing)
     '_build_base_args_v2',

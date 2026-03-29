@@ -54,77 +54,54 @@ def get_direct_strategy_selections() -> dict:
     ):
         return _direct_selections_cache.copy()
 
-    from .strategies_registry import registry
-
     try:
         selections: dict[str, str] = {}
-        default_selections = registry.get_default_selections()
+        default_selections: dict[str, str] = {}
 
         if method == "direct_zapret2":
             try:
-                from core.services import get_direct_flow_coordinator
-                from preset_zapret2.preset_manager import PresetManager
+                from core.presets.direct_facade import DirectPresetFacade
 
-                coordinator = get_direct_flow_coordinator()
-                selected_file_name = (coordinator.get_selected_source_file_name("direct_zapret2") or "").strip()
-                selections = {k: "none" for k in registry.get_all_category_keys()}
-                if selected_file_name:
-                    preset_path = coordinator.get_selected_source_path("direct_zapret2")
-                    if preset_path.exists():
-                        preset = PresetManager().get_selected_source_preset()
-                        if preset is not None:
-                            selections.update(
-                                {
-                                    k: (getattr(v, "strategy_id", "") or "none")
-                                    for k, v in (preset.categories or {}).items()
-                                }
-                            )
+                selections = DirectPresetFacade.from_launch_method("direct_zapret2").get_strategy_selections() or {}
             except Exception as e:
                 log(f"Ошибка чтения selected source preset для выбора стратегий direct_zapret2: {e}", "DEBUG")
-                selections = {k: "none" for k in registry.get_all_category_keys()}
+                selections = {}
         elif method == "direct_zapret1":
             try:
-                from core.services import get_direct_flow_coordinator
-                from preset_zapret1.preset_manager import PresetManagerV1
+                from core.presets.direct_facade import DirectPresetFacade
 
-                coordinator = get_direct_flow_coordinator()
-                selected_file_name = (coordinator.get_selected_source_file_name("direct_zapret1") or "").strip()
-                selections = {k: "none" for k in registry.get_all_category_keys()}
-                if selected_file_name:
-                    preset_path = coordinator.get_selected_source_path("direct_zapret1")
-                    if preset_path.exists():
-                        preset = PresetManagerV1().get_selected_source_preset()
-                        if preset is not None:
-                            selections.update(
-                                {
-                                    k: (getattr(v, "strategy_id", "") or "none")
-                                    for k, v in (preset.categories or {}).items()
-                                }
-                            )
+                selections = DirectPresetFacade.from_launch_method("direct_zapret1").get_strategy_selections() or {}
             except Exception as e:
                 log(f"Ошибка чтения selected source preset для выбора стратегий direct_zapret1: {e}", "DEBUG")
-                selections = {k: "none" for k in registry.get_all_category_keys()}
+                selections = {}
         elif method == "direct_zapret2_orchestra":
             try:
+                from .strategies_registry import registry
                 from preset_orchestra_zapret2 import PresetManager, ensure_default_preset_exists
 
                 ensure_default_preset_exists()
                 preset_manager = PresetManager()
                 preset_selections = preset_manager.get_strategy_selections() or {}
-                selections = {k: "none" for k in registry.get_all_category_keys()}
+                default_selections = registry.get_default_selections()
+                selections = {k: "none" for k in registry.get_all_target_keys()}
                 selections.update({k: (v or "none") for k, v in preset_selections.items()})
             except Exception as e:
                 log(f"Ошибка чтения preset-zapret2-orchestra.txt для выбора стратегий: {e}", "DEBUG")
-                selections = {k: "none" for k in registry.get_all_category_keys()}
+                from .strategies_registry import registry
+
+                selections = {k: "none" for k in registry.get_all_target_keys()}
         else:
+            from .strategies_registry import registry
+
+            default_selections = registry.get_default_selections()
             selections = dict(default_selections)
 
         for key, default_value in default_selections.items():
             if key not in selections:
                 if method == "direct_zapret2_orchestra":
                     selections[key] = "none"
-                elif method == "direct_zapret1":
-                    selections[key] = "none"
+                elif method in ("direct_zapret1", "direct_zapret2"):
+                    continue
                 else:
                     selections[key] = default_value
 
@@ -137,14 +114,14 @@ def get_direct_strategy_selections() -> dict:
         log(f"Ошибка загрузки выборов стратегий: {e}", "❌ ERROR")
         import traceback
         log(traceback.format_exc(), "DEBUG")
+        if method in ("direct_zapret1", "direct_zapret2"):
+            return {}
         from .strategies_registry import registry
         return registry.get_default_selections()
 
 
 def set_direct_strategy_selections(selections: dict) -> bool:
     """Сохраняет выборы стратегий для прямого запуска."""
-    from .strategies_registry import registry
-
     try:
         method = get_strategy_launch_method()
         if method == "direct_zapret2":
@@ -152,9 +129,9 @@ def set_direct_strategy_selections(selections: dict) -> bool:
 
             facade = DirectPresetFacade.from_launch_method("direct_zapret2")
             payload = {
-                category_key: strategy_id
-                for category_key, strategy_id in (selections or {}).items()
-                if category_key in registry.get_all_category_keys()
+                target_key: strategy_id
+                for target_key, strategy_id in (selections or {}).items()
+                if str(target_key or "").strip()
             }
             facade.set_strategy_selections(payload, save_and_sync=True)
             invalidate_direct_selections_cache()
@@ -166,9 +143,9 @@ def set_direct_strategy_selections(selections: dict) -> bool:
 
             facade = DirectPresetFacade.from_launch_method("direct_zapret1")
             payload = {
-                category_key: strategy_id
-                for category_key, strategy_id in (selections or {}).items()
-                if category_key in registry.get_all_category_keys()
+                target_key: strategy_id
+                for target_key, strategy_id in (selections or {}).items()
+                if str(target_key or "").strip()
             }
             success = bool(facade.set_strategy_selections(payload, save_and_sync=True))
             invalidate_direct_selections_cache()
@@ -176,6 +153,7 @@ def set_direct_strategy_selections(selections: dict) -> bool:
             return success
 
         if method == "direct_zapret2_orchestra":
+            from .strategies_registry import registry
             from preset_orchestra_zapret2 import PresetManager, ensure_default_preset_exists
 
             if not ensure_default_preset_exists():
@@ -183,8 +161,8 @@ def set_direct_strategy_selections(selections: dict) -> bool:
 
             preset_manager = PresetManager()
             payload = {
-                category_key: (str((selections or {}).get(category_key) or "none").strip() or "none")
-                for category_key in registry.get_all_category_keys()
+                target_key: (str((selections or {}).get(target_key) or "none").strip() or "none")
+                for target_key in registry.get_all_target_keys()
             }
             preset_manager.set_strategy_selections(payload, save_and_sync=True)
             invalidate_direct_selections_cache()
@@ -197,23 +175,23 @@ def set_direct_strategy_selections(selections: dict) -> bool:
         return False
 
 
-def get_direct_strategy_for_category(category_key: str) -> str:
-    """Получает выбранную стратегию для конкретной категории."""
-    from .strategies_registry import registry
-
+def get_direct_strategy_for_target(target_key: str) -> str:
+    """Получает выбранную стратегию для конкретного target."""
     method = get_strategy_launch_method()
     if method in ("direct_zapret2", "direct_zapret1", "direct_zapret2_orchestra"):
         selections = get_direct_strategy_selections()
-        return selections.get(category_key, "none") or "none"
+        return selections.get(target_key, "none") or "none"
 
-    category_info = registry.get_category_info(category_key)
-    if category_info:
-        return category_info.default_strategy
+    from .strategies_registry import registry
+
+    target_info = registry.get_target_info(target_key)
+    if target_info:
+        return target_info.default_strategy
     return "none"
 
 
-def set_direct_strategy_for_category(category_key: str, strategy_id: str) -> bool:
-    """Сохраняет выбранную стратегию для категории."""
+def set_direct_strategy_for_target(target_key: str, strategy_id: str) -> bool:
+    """Сохраняет выбранную стратегию для target."""
     method = get_strategy_launch_method()
 
     if method == "direct_zapret2":
@@ -221,7 +199,7 @@ def set_direct_strategy_for_category(category_key: str, strategy_id: str) -> boo
             from core.presets.direct_facade import DirectPresetFacade
 
             DirectPresetFacade.from_launch_method("direct_zapret2").set_strategy_selection(
-                category_key,
+                target_key,
                 strategy_id,
                 save_and_sync=True,
             )
@@ -236,7 +214,7 @@ def set_direct_strategy_for_category(category_key: str, strategy_id: str) -> boo
             from core.presets.direct_facade import DirectPresetFacade
 
             DirectPresetFacade.from_launch_method("direct_zapret1").set_strategy_selection(
-                category_key,
+                target_key,
                 strategy_id,
                 save_and_sync=True,
             )
@@ -254,7 +232,7 @@ def set_direct_strategy_for_category(category_key: str, strategy_id: str) -> boo
                 return False
 
             preset_manager = PresetManager()
-            preset_manager.set_strategy_selection(category_key, strategy_id or "none", save_and_sync=True)
+            preset_manager.set_strategy_selection(target_key, strategy_id or "none", save_and_sync=True)
             invalidate_direct_selections_cache()
             return True
         except Exception as e:

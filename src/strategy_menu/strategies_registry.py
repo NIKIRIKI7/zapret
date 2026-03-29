@@ -93,8 +93,9 @@ def _load_strategies_from_json(strategy_type: str, strategy_set: Optional[str] =
         strategy_set: Набор стратегий (например: basic/advanced/orchestra, None = стандартный)
     """
     try:
-        from preset_zapret2.catalog import load_strategies
-        strategies = load_strategies(strategy_type, strategy_set)
+        from .strategy_loader import load_strategies_as_dict
+
+        strategies = load_strategies_as_dict(strategy_type, strategy_set)
         if strategies:
             set_name = strategy_set or "стандартный"
             log(f"Загружено {len(strategies)} стратегий типа '{strategy_type}' (набор: {set_name})", "DEBUG")
@@ -156,7 +157,7 @@ def _lazy_import_all_strategies() -> Dict[str, Dict]:
 
 # ==================== МЕТАДАННЫЕ КАТЕГОРИЙ ====================
 @dataclass
-class CategoryInfo:
+class TargetInfo:
     """Информация о категории стратегий"""
     key: str
     full_name: str
@@ -191,22 +192,22 @@ class CategoryInfo:
     _source: str = field(default='builtin', repr=False)
 
 
-def _load_categories_from_json() -> Dict[str, CategoryInfo]:
+def _load_categories_from_json() -> Dict[str, TargetInfo]:
     """
-    Загружает категории из JSON файлов и конвертирует в CategoryInfo.
+    Загружает категории из JSON файлов и конвертирует в TargetInfo.
     
     Returns:
-        Словарь {category_key: CategoryInfo}
+        Словарь {target_key: TargetInfo}
     """
     try:
-        from preset_zapret2.catalog import load_categories
+        from .strategy_loader import load_categories
 
-        raw_categories = load_categories()
+        raw_categories = load_targets()
         result = {}
         
         for key, data in raw_categories.items():
             try:
-                cat_info = CategoryInfo(
+                cat_info = TargetInfo(
                     key=data.get('key', key),
                     full_name=data.get('full_name', key),
                     description=data.get('description', ''),
@@ -245,11 +246,11 @@ def _load_categories_from_json() -> Dict[str, CategoryInfo]:
 
 
 # Кеш загруженных категорий
-_categories_cache: Dict[str, CategoryInfo] = {}
+_categories_cache: Dict[str, TargetInfo] = {}
 _categories_loaded = False
 
 
-def _get_categories() -> Dict[str, CategoryInfo]:
+def _get_targets() -> Dict[str, TargetInfo]:
     """Получает категории из JSON"""
     global _categories_cache, _categories_loaded
     
@@ -267,26 +268,26 @@ def _get_categories() -> Dict[str, CategoryInfo]:
     return _categories_cache
 
 
-def reload_categories():
+def reload_targets():
     """Перезагружает категории из JSON"""
     global _categories_cache, _categories_loaded
     _categories_cache = {}
     _categories_loaded = False
-    return _get_categories()
+    return _get_targets()
 
-def get_category_icon(category_key: str):
+def get_target_icon(target_key: str):
     """Возвращает Font Awesome иконку для категории"""
     import qtawesome as qta
     
-    categories = _get_categories()
-    category = categories.get(category_key)
+    targets = _get_targets()
+    category = categories.get(target_key)
     if category:
         try:
             icon_name = category.icon_name
             if icon_name and icon_name.startswith(('fa5s.', 'fa5b.', 'fa.', 'mdi.')):
                 return qta.icon(icon_name, color=category.icon_color)
         except Exception as e:
-            log(f"Ошибка создания иконки для {category_key}: {e}", "⚠ WARNING")
+            log(f"Ошибка создания иконки для {target_key}: {e}", "⚠ WARNING")
     
     # Безопасный fallback
     try:
@@ -306,9 +307,9 @@ class StrategiesRegistry:
         self._sorted_keys_by_command_cache = None
 
     @property
-    def _categories(self) -> Dict[str, CategoryInfo]:
+    def _targets(self) -> Dict[str, TargetInfo]:
         """Получает категории (загружаются из JSON)"""
-        return _get_categories()
+        return _get_targets()
 
     def reload_strategies(self):
         """
@@ -329,7 +330,7 @@ class StrategiesRegistry:
         self._sorted_keys_by_command_cache = None
 
         # Перезагружаем категории
-        reload_categories()
+        reload_targets()
 
         # Получаем текущий набор стратегий
         strategy_set = get_current_strategy_set()
@@ -350,27 +351,27 @@ class StrategiesRegistry:
     def strategies(self) -> Dict[str, Dict]:
         """
         Получение всех стратегий (загружает ВСЕ типы)
-        ⚠️ Используйте get_category_strategies() для лучшей производительности
+        ⚠️ Используйте get_target_strategies() для лучшей производительности
         """
         return _lazy_import_all_strategies()
     
     @property
-    def categories(self) -> Dict[str, CategoryInfo]:
+    def targets(self) -> Dict[str, TargetInfo]:
         """Получение всех категорий"""
         return self._categories
 
-    def get_category_strategies(self, category_key: str) -> Dict[str, Any]:
+    def get_target_strategies(self, target_key: str) -> Dict[str, Any]:
         """Получить стратегии для категории"""
-        category_info = self._categories.get(category_key)
-        if not category_info:
+        target_info = self._categories.get(target_key)
+        if not target_info:
             return {}
-        return _lazy_import_base_strategies(category_info.strategy_type)
+        return _lazy_import_base_strategies(target_info.strategy_type)
     
-    def get_category_info(self, category_key: str) -> Optional[CategoryInfo]:
+    def get_target_info(self, target_key: str) -> Optional[TargetInfo]:
         """Получить информацию о категории"""
-        return self._categories.get(category_key)
+        return self._categories.get(target_key)
 
-    def get_strategy_args_safe(self, category_key: str, strategy_id: str) -> Optional[str]:
+    def get_strategy_args_safe(self, target_key: str, strategy_id: str) -> Optional[str]:
         """
         Получить полные аргументы стратегии.
 
@@ -385,27 +386,27 @@ class StrategiesRegistry:
         if strategy_id == "none":
             return ""
 
-        category_info = self.get_category_info(category_key)
-        if not category_info:
-            log(f"Категория {category_key} не найдена", "⚠ WARNING")
+        target_info = self.get_target_info(target_key)
+        if not target_info:
+            log(f"Категория {target_key} не найдена", "⚠ WARNING")
             return None
 
-        strategy_type = category_info.strategy_type
+        strategy_type = target_info.strategy_type
 
         # Выбираем base_filter на основе filter_mode из настроек (per-category)
         from strategy_menu.command_builder import get_filter_mode
-        filter_mode = get_filter_mode(category_key)  # "hostlist" или "ipset"
+        filter_mode = get_filter_mode(target_key)  # "hostlist" или "ipset"
 
         # Определяем какой фильтр использовать
-        if category_info.base_filter_ipset and category_info.base_filter_hostlist:
+        if target_info.base_filter_ipset and target_info.base_filter_hostlist:
             # Есть выбор между режимами - используем в зависимости от filter_mode
             if filter_mode == "hostlist":
-                base_filter = category_info.base_filter_hostlist
+                base_filter = target_info.base_filter_hostlist
             else:
-                base_filter = category_info.base_filter_ipset
+                base_filter = target_info.base_filter_ipset
         else:
             # Нет выбора - используем base_filter (единственный вариант)
-            base_filter = category_info.base_filter
+            base_filter = target_info.base_filter
         
         # Получаем стратегию из BASE файла
         base_strategies = _lazy_import_base_strategies(strategy_type)
@@ -428,7 +429,7 @@ class StrategiesRegistry:
         # ✅ Если strip_payload=True - убираем --payload= из аргументов
         # Это нужно для IPset категорий без фильтра портов,
         # чтобы стратегия применялась ко ВСЕМУ трафику, а не только к TLS
-        if category_info.strip_payload:
+        if target_info.strip_payload:
             # Lazy import для избежания циклического импорта
             from strategy_menu.command_builder import strip_payload_from_args
             base_args = strip_payload_from_args(base_args)
@@ -448,23 +449,23 @@ class StrategiesRegistry:
         else:
             return base_args
 
-    def get_strategy_name_safe(self, category_key: str, strategy_id: str) -> str:
+    def get_strategy_name_safe(self, target_key: str, strategy_id: str) -> str:
         """Получить имя стратегии"""
         if strategy_id == "none":
             return "⛔ Отключено"
         if strategy_id == "custom":
             return "Свой набор"
         
-        category_info = self.get_category_info(category_key)
-        if not category_info:
+        target_info = self.get_target_info(target_key)
+        if not target_info:
             return strategy_id or "Unknown"
         
-        base_strategies = _lazy_import_base_strategies(category_info.strategy_type)
+        base_strategies = _lazy_import_base_strategies(target_info.strategy_type)
         strategy = base_strategies.get(strategy_id)
         
         # TCP multi-phase UI can store a strategy_id from tcp_fake.txt (e.g., hostfakesplit_multi).
         # Provide a name fallback so main lists don't show raw ids or "custom" unnecessarily.
-        if not strategy and category_info.strategy_type == "tcp":
+        if not strategy and target_info.strategy_type == "tcp":
             try:
                 from strategy_menu.strategy_loader import load_strategies_as_dict
                 # В advanced-режиме tcp_fake берётся из advanced_strategies;
@@ -495,7 +496,7 @@ class StrategiesRegistry:
             for key in self._categories.keys()
         }
 
-    def get_all_category_keys(self) -> List[str]:
+    def get_all_target_keys(self) -> List[str]:
         """Получить все ключи категорий в порядке сортировки"""
         return sorted(self._categories.keys(), key=lambda k: self._categories[k].order)
     
@@ -513,14 +514,14 @@ class StrategiesRegistry:
             for key, info in self._categories.items()
         }
     
-    def get_category_colors_dict(self) -> Dict[str, str]:
-        """Получить словарь цветов для категорий"""
+    def get_target_colors_dict(self) -> Dict[str, str]:
+        """Получить словарь цветов для target."""
         return {
             key: info.color
             for key, info in self._categories.items()
         }
 
-    def get_all_category_keys_by_command_order(self) -> List[str]:
+    def get_all_target_keys_by_command_order(self) -> List[str]:
         """Получить все ключи категорий в порядке командной строки (с кэшем)"""
         if self._sorted_keys_by_command_cache is None:
             self._sorted_keys_by_command_cache = sorted(
@@ -529,7 +530,7 @@ class StrategiesRegistry:
             )
         return self._sorted_keys_by_command_cache
 
-    def get_all_category_keys_sorted(self) -> List[str]:
+    def get_all_target_keys_sorted(self) -> List[str]:
         """
         Получить все ключи категорий, отсортированных по order (с кэшем).
         Теперь все категории показываются, но некоторые могут быть заблокированы.
@@ -555,13 +556,13 @@ def get_strategies_registry() -> StrategiesRegistry:
     """Получить глобальный экземпляр реестра"""
     return registry
 
-def get_category_strategies(category_key: str) -> Dict[str, Any]:
+def get_target_strategies(target_key: str) -> Dict[str, Any]:
     """Совместимость: получить стратегии категории"""
-    return registry.get_category_strategies(category_key)
+    return registry.get_target_strategies(target_key)
 
-def get_category_info(category_key: str) -> Optional[CategoryInfo]:
+def get_target_info(target_key: str) -> Optional[TargetInfo]:
     """Совместимость: получить информацию о категории"""
-    return registry.get_category_info(category_key)
+    return registry.get_target_info(target_key)
 
 def get_all_strategies() -> Dict[str, Dict]:
     """Совместимость: получить все стратегии"""
@@ -583,17 +584,17 @@ def get_default_selections() -> Dict[str, str]:
 
 __all__ = [
     'StrategiesRegistry',
-    'CategoryInfo',
+    'TargetInfo',
     'registry',
     'get_strategies_registry',
-    'get_category_strategies',
-    'get_category_info',
+    'get_target_strategies',
+    'get_target_info',
     'get_all_strategies',
     'get_tab_names',
     'get_tab_tooltips',
     'get_default_selections',
-    'get_category_icon',
-    'reload_categories',
+    'get_target_icon',
+    'reload_targets',
     # Strategy set
     'get_current_strategy_set',
     'set_strategy_set',

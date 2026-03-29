@@ -1,7 +1,7 @@
 # ui/pages/zapret2/direct_zapret2_page.py
 """
 Страница выбора стратегий для режима direct_zapret2 (preset-based).
-При клике на категорию открывается отдельная страница StrategyDetailPage.
+При клике на target открывается отдельная страница StrategyDetailPage.
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize
@@ -28,16 +28,16 @@ except ImportError:
 
 class Zapret2StrategiesPageNew(BasePage):
     """
-    Страница выбора стратегий с единым списком категорий.
+    Страница выбора стратегий с единым списком target'ов.
 
-    При клике на категорию эмитит сигнал open_category_detail для навигации
+    При клике на target эмитит сигнал open_target_detail для навигации
     к отдельной странице StrategyDetailPage.
     """
 
-    strategy_selected = pyqtSignal(str, str)  # category_key, strategy_id
+    strategy_selected = pyqtSignal(str, str)  # target_key, strategy_id
     strategies_changed = pyqtSignal(dict)  # все выборы
     launch_method_changed = pyqtSignal(str)  # для совместимости
-    open_category_detail = pyqtSignal(str, str)  # category_key, current_strategy_id
+    open_target_detail = pyqtSignal(str, str)  # target_key, current_strategy_id
     back_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -84,7 +84,7 @@ class Zapret2StrategiesPageNew(BasePage):
             except Exception:
                 pass
 
-        self.category_selections = {}
+        self.target_selections = {}
         self._unified_list = None
         self._built = False
         self._build_scheduled = False
@@ -137,11 +137,11 @@ class Zapret2StrategiesPageNew(BasePage):
         super().showEvent(event)
         self._rebuild_breadcrumb()  # Fix state if user navigated away via breadcrumb
 
-        # If the global direct_zapret2 mode (Basic/Advanced) changed elsewhere
-        # (e.g. on the management page), rebuild this list on next show.
+        # Если режим direct_zapret2 (basic/advanced) переключился в другом месте,
+        # перестраиваем список при следующем показе страницы.
         try:
-            from strategy_menu.strategies_registry import get_current_strategy_set
-            current_set = get_current_strategy_set()
+            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
+            current_set = get_direct_zapret2_ui_mode()
         except Exception:
             current_set = None
 
@@ -169,18 +169,14 @@ class Zapret2StrategiesPageNew(BasePage):
             if self._built:
                 return
 
-            from strategy_menu.strategies_registry import registry
             from strategy_menu.direct_selection_store import get_direct_strategy_selections
-            from preset_zapret2.preset_store import get_preset_store
+            from core.presets.direct_facade import DirectPresetFacade
 
             # Загружаем выборы из selected source preset
-            self.category_selections = get_direct_strategy_selections() or {}
-            store = get_preset_store()
-            active_file_name = store.get_selected_source_preset_file_name() or ""
-            preset = store.get_preset_by_file_name(active_file_name) if active_file_name else None
-            filter_modes = {}
-            if preset:
-                filter_modes = {k: v.filter_mode for k, v in preset.categories.items()}
+            self.target_selections = get_direct_strategy_selections() or {}
+            facade = DirectPresetFacade.from_launch_method("direct_zapret2")
+            targets = facade.get_target_ui_items() or {}
+            filter_modes = {key: facade.get_target_filter_mode(key) for key in targets.keys()}
 
             # Карточка с кнопкой Telegram (выделенная, акцентная)
             telegram_card = SettingsCard()
@@ -193,8 +189,8 @@ class Zapret2StrategiesPageNew(BasePage):
                 "page.z2_direct.telegram.hint",
                 language=self._ui_language,
                 default=(
-                    "Хотите добавить свою категорию? Напишите нам! Запрос на добавление своих сайтов "
-                    "можно сделать во вкладке на сайте-форуме через категорию для Zapret GUI."
+                    "Хотите добавить новый сайт или сервис в direct preset? Напишите нам. "
+                    "Запрос можно оставить на сайте-форуме в разделе Zapret GUI."
                 ),
             )
             telegram_hint = CaptionLabel(_hint_text)
@@ -259,21 +255,21 @@ class Zapret2StrategiesPageNew(BasePage):
 
             # Выборы уже загружены в начале _build_content()
 
-            # Список категорий (без правой панели - теперь отдельная страница)
-            self._unified_list = UnifiedStrategiesList(self)
-            self._unified_list.strategy_selected.connect(self._on_category_clicked)
+            # Список target'ов (без правой панели - теперь отдельная страница)
+            self._unified_list = UnifiedStrategiesList(self, strategy_name_resolver=self._strategy_name)
+            self._unified_list.strategy_selected.connect(self._on_target_clicked)
             self._unified_list.selections_changed.connect(self._on_selections_changed)
 
             # Строим список
-            categories = registry.categories
-            self._unified_list.build_list(categories, self.category_selections, filter_modes=filter_modes)
+            self._unified_list.build_list(targets, self.target_selections, filter_modes=filter_modes)
 
             self.content_layout.addWidget(self._unified_list, 1)
 
-            # Remember current strategy_set snapshot for showEvent rebuilds.
+            # Запоминаем текущий UI-режим direct_zapret2, чтобы понимать,
+            # нужно ли перестраивать страницу после возврата.
             try:
-                from strategy_menu.strategies_registry import get_current_strategy_set
-                self._strategy_set_snapshot = get_current_strategy_set()
+                from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
+                self._strategy_set_snapshot = get_direct_zapret2_ui_mode()
             except Exception:
                 self._strategy_set_snapshot = None
 
@@ -286,17 +282,17 @@ class Zapret2StrategiesPageNew(BasePage):
             import traceback
             log(traceback.format_exc(), "DEBUG")
 
-    def _on_category_clicked(self, category_key: str, strategy_id: str):
-        """Обработчик клика по категории - открывает страницу выбора стратегий"""
+    def _on_target_clicked(self, target_key: str, strategy_id: str):
+        """Обработчик клика по target - открывает страницу выбора стратегий"""
         try:
-            current_strategy = self.category_selections.get(category_key, 'none')
+            current_strategy = self.target_selections.get(target_key, 'none')
             # Defer navigation to the next event loop tick: prevents page switch
             # while Qt is still processing the mouse event (can break hover/cursor updates).
-            QTimer.singleShot(0, lambda ck=category_key, cs=current_strategy: self.open_category_detail.emit(ck, cs))
+            QTimer.singleShot(0, lambda tk=target_key, cs=current_strategy: self.open_target_detail.emit(tk, cs))
         except Exception as e:
             log(f"Ошибка открытия детальной страницы: {e}", "ERROR")
 
-    def apply_strategy_selection(self, category_key: str, strategy_id: str):
+    def apply_strategy_selection(self, target_key: str, strategy_id: str):
         """Применяет выбор стратегии (вызывается из StrategyDetailPage)"""
         try:
             from core.presets.direct_facade import DirectPresetFacade
@@ -305,9 +301,9 @@ class Zapret2StrategiesPageNew(BasePage):
             # Multi-phase TCP UI persists args directly (strategy_detail_page.py).
             # Avoid clobbering preset args by re-applying a non-existent single strategy.
             if (strategy_id or "").strip().lower() == "custom":
-                self.category_selections[category_key] = "custom"
+                self.target_selections[target_key] = "custom"
                 if self._unified_list:
-                    self._unified_list.update_selection(category_key, "custom")
+                    self._unified_list.update_selection(target_key, "custom")
                 return
 
             # Сохраняем в preset файл
@@ -318,34 +314,34 @@ class Zapret2StrategiesPageNew(BasePage):
                     reason="strategy_changed"
                 )
             )
-            preset_manager.set_strategy_selection(category_key, strategy_id, save_and_sync=True)
+            preset_manager.set_strategy_selection(target_key, strategy_id, save_and_sync=True)
 
-            self.category_selections[category_key] = strategy_id
+            self.target_selections[target_key] = strategy_id
 
             # Обновляем UI
             if self._unified_list:
-                self._unified_list.update_selection(category_key, strategy_id)
+                self._unified_list.update_selection(target_key, strategy_id)
 
             # Эмитим сигналы
-            self.strategy_selected.emit(category_key, strategy_id)
-            self.strategies_changed.emit(self.category_selections)
+            self.strategy_selected.emit(target_key, strategy_id)
+            self.strategies_changed.emit(self.target_selections)
 
-            log(f"Выбрана стратегия: {category_key} = {strategy_id}", "INFO")
+            log(f"Выбрана стратегия: {target_key} = {strategy_id}", "INFO")
 
         except Exception as e:
             log(f"Ошибка сохранения выбора: {e}", "ERROR")
 
-    def apply_filter_mode_change(self, category_key: str, filter_mode: str):
+    def apply_filter_mode_change(self, target_key: str, filter_mode: str):
         """Обновляет badge Hostlist/IPset на главной странице без перестроения списка."""
         try:
             if self._unified_list:
-                self._unified_list.update_filter_mode(category_key, filter_mode)
+                self._unified_list.update_filter_mode(target_key, filter_mode)
         except Exception as e:
             log(f"Ошибка обновления filter_mode: {e}", "DEBUG")
 
     def _on_selections_changed(self, selections: dict):
         """Обработчик изменения выборов"""
-        self.category_selections = selections
+        self.target_selections = selections
         self.strategies_changed.emit(selections)
 
     def _apply_changes(self):
@@ -361,11 +357,6 @@ class Zapret2StrategiesPageNew(BasePage):
         if hasattr(self, '_reload_btn'):
             self._reload_btn.set_loading(True)
         try:
-            from strategy_menu.strategies_registry import registry
-
-            # Перезагружаем реестр стратегий
-            registry.reload_strategies()
-
             # Перестраиваем UI
             self._built = False
             self._build_scheduled = False
@@ -404,27 +395,20 @@ class Zapret2StrategiesPageNew(BasePage):
         """
         try:
             from strategy_menu.direct_selection_store import get_direct_strategy_selections
-            from strategy_menu.strategies_registry import registry
-            from preset_zapret2.preset_store import get_preset_store
+            from core.presets.direct_facade import DirectPresetFacade
 
-            self.category_selections = get_direct_strategy_selections() or {}
-            store = get_preset_store()
-            active_file_name = store.get_selected_source_preset_file_name() or ""
-            preset = store.get_preset_by_file_name(active_file_name) if active_file_name else None
-            filter_modes = {}
-            if preset:
-                try:
-                    filter_modes = {k: v.filter_mode for k, v in (preset.categories or {}).items()}
-                except Exception:
-                    filter_modes = {}
+            self.target_selections = get_direct_strategy_selections() or {}
+            facade = DirectPresetFacade.from_launch_method("direct_zapret2")
+            targets = facade.get_target_ui_items() or {}
+            filter_modes = {key: facade.get_target_filter_mode(key) for key in targets.keys()}
 
             if self._unified_list:
-                self._unified_list.set_selections(self.category_selections)
+                self._unified_list.set_selections(self.target_selections)
 
-                # Sync badges for ALL categories so stale/invalid badges disappear.
-                for cat_key in (getattr(registry, "categories", {}) or {}).keys():
+                # Sync badges for ALL targets so stale/invalid badges disappear.
+                for target_key in targets.keys():
                     try:
-                        self._unified_list.update_filter_mode(cat_key, (filter_modes or {}).get(cat_key))
+                        self._unified_list.update_filter_mode(target_key, (filter_modes or {}).get(target_key))
                     except Exception:
                         continue
 
@@ -433,6 +417,21 @@ class Zapret2StrategiesPageNew(BasePage):
 
         except Exception as e:
             log(f"Ошибка refresh_from_preset_switch: {e}", "DEBUG")
+
+    def _strategy_name(self, target_key: str, strategy_id: str) -> str:
+        sid = (strategy_id or "").strip() or "none"
+        if sid == "none":
+            return tr_catalog("page.z2_direct.strategy.off", language=self._ui_language, default="Отключено")
+        if sid == "custom":
+            return tr_catalog("page.z2_direct.strategy.custom", language=self._ui_language, default="Свой набор")
+        try:
+            from core.presets.direct_facade import DirectPresetFacade
+
+            strategies = DirectPresetFacade.from_launch_method("direct_zapret2").get_target_strategies(target_key) or {}
+            entry = strategies.get(sid) or {}
+            return str(entry.get("name") or sid)
+        except Exception:
+            return sid
 
     def _expand_all(self):
         """Разворачивает все группы"""
@@ -491,7 +490,7 @@ class Zapret2StrategiesPageNew(BasePage):
         pass
 
     def disable_categories_for_filter(self, filter_key: str):
-        """Совместимость: отключает категории для фильтра"""
+        """Совместимость: отключает элементы списка для фильтра."""
         log(f"disable_categories_for_filter: {filter_key}", "DEBUG")
         # В новой версии фильтры работают иначе
 
@@ -527,10 +526,10 @@ class Zapret2StrategiesPageNew(BasePage):
             "page.z2_direct.info.body",
             language=self._ui_language,
             default=(
-                "Здесь Вы можете ТОНКО изменить стратегию для каждой категории. "
+                "Здесь Вы можете тонко изменить стратегию для каждого target'а, который найден в выбранном source preset. "
                 "Всего существует несколько фаз дурения (send, syndata, fake, multisplit и т.д.). "
                 "Последовательность сама определяется программой.\n\n"
-                "Вы можете писать свои пресеты ручками через txt файл или выбирать готовые стратегии в этом меню. "
+                "Вы можете править пресет вручную через txt-файл или выбирать готовые стратегии в этом меню. "
                 "Каждая стратегия — это всего лишь набор аргументов, то есть техник (дурения или фуллинга) для того "
                 "чтобы изменить содержимое пакетов по модели TCP/IP, которое отправляет Ваше устройство. "
                 "Чтобы алгоритмы ТСПУ провайдера сбились и не заметили (или пропустили) запрещённый контент."
@@ -552,8 +551,8 @@ class Zapret2StrategiesPageNew(BasePage):
                     "page.z2_direct.telegram.hint",
                     language=self._ui_language,
                     default=(
-                        "Хотите добавить свою категорию? Напишите нам! Запрос на добавление своих сайтов "
-                        "можно сделать во вкладке на сайте-форуме через категорию для Zapret GUI."
+                        "Хотите добавить новый сайт или сервис в direct preset? Напишите нам. "
+                        "Запрос можно оставить на сайте-форуме в разделе Zapret GUI."
                     ),
                 )
             )

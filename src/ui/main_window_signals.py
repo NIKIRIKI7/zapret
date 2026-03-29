@@ -21,8 +21,8 @@ def connect_main_window_page_signals(window) -> None:
     if hasattr(window, 'zapret2_strategies_page') and hasattr(window.zapret2_strategies_page, 'strategy_selected'):
         window.zapret2_strategies_page.strategy_selected.connect(window._on_strategy_selected_from_page)
 
-    if hasattr(window, 'zapret2_strategies_page') and hasattr(window.zapret2_strategies_page, 'open_category_detail'):
-        window.zapret2_strategies_page.open_category_detail.connect(window._on_open_category_detail)
+    if hasattr(window, 'zapret2_strategies_page') and hasattr(window.zapret2_strategies_page, 'open_target_detail'):
+        window.zapret2_strategies_page.open_target_detail.connect(window._on_open_target_detail)
 
     if hasattr(window, 'strategy_detail_page'):
         if hasattr(window.strategy_detail_page, 'back_clicked'):
@@ -193,7 +193,7 @@ def connect_main_window_page_signals(window) -> None:
         window.orchestra_page.clear_learned_requested.connect(window._on_clear_learned_requested)
 
     try:
-        from preset_zapret2.preset_store import get_preset_store
+        from core.services import get_preset_store
         store = get_preset_store()
         store.preset_switched.connect(window._preset_runtime_coordinator.handle_preset_switched)
     except Exception:
@@ -208,7 +208,7 @@ def connect_main_window_page_signals(window) -> None:
         pass
 
     try:
-        from preset_zapret1.preset_store import get_preset_store_v1
+        from core.services import get_preset_store_v1
         store_v1 = get_preset_store_v1()
         store_v1.preset_switched.connect(window._preset_runtime_coordinator.handle_preset_switched)
     except Exception:

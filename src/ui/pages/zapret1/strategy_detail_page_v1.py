@@ -169,7 +169,7 @@ class _ArgsEditorDialog(MessageBoxBase):  # type: ignore[misc, valid-type]
 class Zapret1StrategyDetailPage(BasePage):
     """Страница выбора стратегии для одной категории Zapret 1."""
 
-    strategy_selected = pyqtSignal(str, str)  # category_key, strategy_id
+    strategy_selected = pyqtSignal(str, str)  # target_key, strategy_id
     back_clicked = pyqtSignal()  # go to categories list
     navigate_to_control = pyqtSignal()  # go to control page
 
@@ -177,8 +177,8 @@ class Zapret1StrategyDetailPage(BasePage):
         super().__init__(title="", subtitle="", parent=parent)
         self.parent_app = parent
 
-        self._category_key: str = ""
-        self._category_info: dict[str, Any] = {}
+        self._target_key: str = ""
+        self._target_info: dict[str, Any] = {}
         self._preset_manager = None
 
         self._strategies: dict[str, dict] = {}
@@ -353,7 +353,7 @@ class Zapret1StrategyDetailPage(BasePage):
         controls_row.setSpacing(8)
 
         self._refresh_btn = RefreshButton()
-        self._refresh_btn.clicked.connect(self._reload_category)
+        self._refresh_btn.clicked.connect(self._reload_target)
         controls_row.addWidget(self._refresh_btn)
 
         self._search_edit = LineEdit()
@@ -451,7 +451,7 @@ class Zapret1StrategyDetailPage(BasePage):
         if self._breadcrumb is None:
             return
 
-        cat_name = self._category_info.get("full_name", self._category_key) if self._category_key else "Категория"
+        cat_name = self._target_info.get("full_name", self._target_key) if self._target_key else "Категория"
         self._breadcrumb.blockSignals(True)
         try:
             self._breadcrumb.clear()
@@ -478,34 +478,39 @@ class Zapret1StrategyDetailPage(BasePage):
     # Public API
     # ------------------------------------------------------------------
 
-    def set_category(self, category_key: str, category_info: dict, preset_manager) -> None:
-        self._category_key = str(category_key or "").strip().lower()
-        self._category_info = self._normalize_category_info(category_key, category_info)
+    def show_target(self, target_key: str, preset_manager) -> None:
+        self._target_key = str(target_key or "").strip().lower()
         self._preset_manager = preset_manager
+        target_info = None
+        try:
+            target_info = preset_manager.get_target_ui_item(self._target_key)
+        except Exception:
+            target_info = None
+        self._target_info = self._normalize_target_info(target_key, target_info)
         self._current_strategy_id = self._load_current_strategy_id()
         if self._current_strategy_id and self._current_strategy_id != "none":
             self._last_enabled_strategy_id = self._current_strategy_id
 
         self._update_header_labels()
         self._rebuild_breadcrumb()
-        self._reload_category()
+        self._reload_target()
 
     def showEvent(self, event):
         super().showEvent(event)
         self._rebuild_breadcrumb()
-        if self._category_key:
-            QTimer.singleShot(0, self._reload_category)
+        if self._target_key:
+            QTimer.singleShot(0, self._reload_target)
 
     # ------------------------------------------------------------------
     # Data mapping / loading
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _normalize_category_info(category_key: str, category_info: Any) -> dict[str, Any]:
-        if isinstance(category_info, dict):
-            info = dict(category_info)
-            info.setdefault("key", category_key)
-            info.setdefault("full_name", category_key)
+    def _normalize_target_info(target_key: str, target_info: Any) -> dict[str, Any]:
+        if isinstance(target_info, dict):
+            info = dict(target_info)
+            info.setdefault("key", target_key)
+            info.setdefault("full_name", target_key)
             info.setdefault("description", "")
             info.setdefault("base_filter", "")
             info.setdefault("base_filter_hostlist", "")
@@ -513,45 +518,55 @@ class Zapret1StrategyDetailPage(BasePage):
             return info
 
         return {
-            "key": getattr(category_info, "key", category_key),
-            "full_name": getattr(category_info, "full_name", category_key),
-            "description": getattr(category_info, "description", ""),
-            "protocol": getattr(category_info, "protocol", ""),
-            "ports": getattr(category_info, "ports", ""),
-            "icon_name": getattr(category_info, "icon_name", ""),
-            "icon_color": getattr(category_info, "icon_color", "#909090"),
-            "base_filter": getattr(category_info, "base_filter", ""),
-            "base_filter_hostlist": getattr(category_info, "base_filter_hostlist", ""),
-            "base_filter_ipset": getattr(category_info, "base_filter_ipset", ""),
+            "key": getattr(target_info, "key", target_key),
+            "full_name": getattr(target_info, "full_name", target_key),
+            "description": getattr(target_info, "description", ""),
+            "protocol": getattr(target_info, "protocol", ""),
+            "ports": getattr(target_info, "ports", ""),
+            "icon_name": getattr(target_info, "icon_name", ""),
+            "icon_color": getattr(target_info, "icon_color", "#909090"),
+            "base_filter": getattr(target_info, "base_filter", ""),
+            "base_filter_hostlist": getattr(target_info, "base_filter_hostlist", ""),
+            "base_filter_ipset": getattr(target_info, "base_filter_ipset", ""),
         }
 
     def _load_current_strategy_id(self) -> str:
-        if not self._preset_manager or not self._category_key:
+        if not self._preset_manager or not self._target_key:
             return "none"
         try:
+            details = self._get_target_details(self._target_key)
+            if details is not None:
+                return (str(details.current_strategy or "none").strip() or "none")
             selections = self._preset_manager.get_strategy_selections() or {}
-            return (selections.get(self._category_key) or "none").strip() or "none"
+            return (selections.get(self._target_key) or "none").strip() or "none"
         except Exception:
             return "none"
 
-    def _reload_category(self, *_args) -> None:
-        if not self._category_key:
+    def _get_target_details(self, target_key: str | None = None):
+        key = str(target_key or self._target_key or "").strip().lower()
+        if not key or not getattr(self, "_preset_manager", None):
+            return None
+        try:
+            return self._preset_manager.get_target_details(key)
+        except Exception:
+            return None
+
+    def _reload_target(self, *_args) -> None:
+        if not self._target_key:
             return
         if self._refresh_btn:
             self._refresh_btn.set_loading(True)
 
         self.show_loading()
         try:
-            from preset_zapret1.strategies_loader import load_v1_strategies
-
-            self._strategies = load_v1_strategies(self._category_key) or {}
+            self._strategies = self._preset_manager.get_target_strategies(self._target_key) or {}
             self._current_strategy_id = self._load_current_strategy_id()
             if self._current_strategy_id and self._current_strategy_id != "none":
                 self._last_enabled_strategy_id = self._current_strategy_id
             self._rebuild_tree_rows()
             self._refresh_args_preview()
             self._update_selected_label()
-            self._sync_category_controls()
+            self._sync_target_controls()
             self.show_success()
         except Exception as e:
             log(f"Zapret1StrategyDetailPage: cannot load strategies: {e}", "ERROR")
@@ -559,7 +574,7 @@ class Zapret1StrategyDetailPage(BasePage):
             self._rebuild_tree_rows()
             self._refresh_args_preview()
             self._update_selected_label()
-            self._sync_category_controls()
+            self._sync_target_controls()
             self._hide_success()
         finally:
             if self._refresh_btn:
@@ -643,10 +658,10 @@ class Zapret1StrategyDetailPage(BasePage):
     # ------------------------------------------------------------------
 
     def _update_header_labels(self) -> None:
-        full_name = self._category_info.get("full_name", self._category_key) or self._category_key
-        description = self._category_info.get("description", "")
-        protocol = self._category_info.get("protocol", "")
-        ports = self._category_info.get("ports", "")
+        full_name = self._target_info.get("full_name", self._target_key) or self._target_key
+        description = self._target_info.get("description", "")
+        protocol = self._target_info.get("protocol", "")
+        ports = self._target_info.get("ports", "")
 
         if self._title_label is not None:
             self._title_label.setText(full_name)
@@ -711,12 +726,12 @@ class Zapret1StrategyDetailPage(BasePage):
         if self._tree:
             self._tree.apply_filter(self._search_text, set())
 
-    def _category_supports_filter_switch(self) -> bool:
-        host = str(self._category_info.get("base_filter_hostlist") or "").strip()
-        ipset = str(self._category_info.get("base_filter_ipset") or "").strip()
+    def _target_supports_filter_switch(self) -> bool:
+        host = str(self._target_info.get("base_filter_hostlist") or "").strip()
+        ipset = str(self._target_info.get("base_filter_ipset") or "").strip()
         return bool(host and ipset)
 
-    def _sync_category_controls(self) -> None:
+    def _sync_target_controls(self) -> None:
         enabled = (self._current_strategy_id or "none") != "none"
 
         if self._enable_toggle is not None:
@@ -729,28 +744,31 @@ class Zapret1StrategyDetailPage(BasePage):
             self._edit_args_btn.setEnabled(enabled)
 
         if self._filter_mode_frame is not None:
-            can_switch = self._category_supports_filter_switch()
+            can_switch = self._target_supports_filter_switch()
             self._filter_mode_frame.setVisible(can_switch)
             if can_switch and self._filter_mode_selector is not None:
-                saved_mode = self._load_category_filter_mode(self._category_key)
+                saved_mode = self._load_target_filter_mode(self._target_key)
                 self._filter_mode_selector.blockSignals(True)
                 self._filter_mode_selector.setChecked(saved_mode == "ipset")
                 self._filter_mode_selector.blockSignals(False)
 
-    def _load_category_filter_mode(self, category_key: str) -> str:
+    def _load_target_filter_mode(self, target_key: str) -> str:
         if not self._preset_manager:
             return "hostlist"
         try:
-            return self._preset_manager.get_category_filter_mode(category_key)
+            details = self._get_target_details(target_key)
+            if details is not None:
+                return str(details.filter_mode or "hostlist")
+            return self._preset_manager.get_target_filter_mode(target_key)
         except Exception:
             return "hostlist"
 
     def _on_filter_mode_changed(self, new_mode: str) -> None:
-        if not self._preset_manager or not self._category_key:
+        if not self._preset_manager or not self._target_key:
             return
         try:
-            ok = self._preset_manager.update_category_filter_mode(
-                self._category_key,
+            ok = self._preset_manager.update_target_filter_mode(
+                self._target_key,
                 new_mode,
                 save_and_sync=True,
             )
@@ -761,7 +779,7 @@ class Zapret1StrategyDetailPage(BasePage):
                         "Не удалось сохранить режим фильтрации",
                     )
                 )
-            log(f"V1 filter mode set: {self._category_key} = {new_mode}", "INFO")
+            log(f"V1 filter mode set: {self._target_key} = {new_mode}", "INFO")
             if _HAS_FLUENT and InfoBar is not None:
                 InfoBar.success(
                     title=self._tr("page.z1_strategy_detail.infobar.filter_mode.title", "Режим фильтрации"),
@@ -779,7 +797,7 @@ class Zapret1StrategyDetailPage(BasePage):
                     content=str(e),
                     parent=self.window(),
                 )
-            self._sync_category_controls()
+            self._sync_target_controls()
 
     def _default_strategy_id(self) -> str:
         for item in self._sorted_strategy_items():
@@ -789,7 +807,7 @@ class Zapret1StrategyDetailPage(BasePage):
         return "none"
 
     def _on_enable_toggled(self, enabled: bool) -> None:
-        if not self._preset_manager or not self._category_key:
+        if not self._preset_manager or not self._target_key:
             return
 
         if enabled:
@@ -801,7 +819,7 @@ class Zapret1StrategyDetailPage(BasePage):
                     self._enable_toggle.blockSignals(True)
                     self._enable_toggle.setChecked(False)
                     self._enable_toggle.blockSignals(False)
-                self._sync_category_controls()
+                self._sync_target_controls()
                 return
             self._on_strategy_selected(strategy_id)
             return
@@ -815,14 +833,14 @@ class Zapret1StrategyDetailPage(BasePage):
     # ------------------------------------------------------------------
 
     def _on_strategy_selected(self, strategy_id: str) -> None:
-        if not self._preset_manager or not self._category_key:
+        if not self._preset_manager or not self._target_key:
             return
 
         sid = (strategy_id or "none").strip() or "none"
         self.show_loading()
         try:
             ok = self._preset_manager.set_strategy_selection(
-                self._category_key,
+                self._target_key,
                 sid,
                 save_and_sync=True,
             )
@@ -834,13 +852,13 @@ class Zapret1StrategyDetailPage(BasePage):
                 self._last_enabled_strategy_id = sid
             self._update_selected_label()
             self._refresh_args_preview()
-            self._sync_category_controls()
+            self._sync_target_controls()
 
             if self._tree and self._tree.has_strategy(sid):
                 self._tree.set_selected_strategy(sid)
 
-            self.strategy_selected.emit(self._category_key, sid)
-            log(f"V1 strategy set: {self._category_key} = {sid}", "INFO")
+            self.strategy_selected.emit(self._target_key, sid)
+            log(f"V1 strategy set: {self._target_key} = {sid}", "INFO")
 
             if _HAS_FLUENT and InfoBar is not None:
                 InfoBar.success(
@@ -856,7 +874,7 @@ class Zapret1StrategyDetailPage(BasePage):
             log(f"V1 strategy selection error: {e}", "ERROR")
             if _HAS_FLUENT and InfoBar is not None:
                 InfoBar.error(title="Ошибка", content=str(e), parent=self.window())
-            self._reload_category()
+            self._reload_target()
 
     def _strategy_display_name(self, strategy_id: str) -> str:
         sid = (strategy_id or "").strip()
@@ -893,16 +911,10 @@ class Zapret1StrategyDetailPage(BasePage):
         self._args_preview_label.setText(preview)
 
     def _get_current_args(self) -> str:
-        if not self._preset_manager or not self._category_key:
+        if not self._preset_manager or not self._target_key:
             return ""
         try:
-            preset = self._preset_manager.get_selected_source_preset()
-            if not preset:
-                return ""
-            cat = (preset.categories or {}).get(self._category_key)
-            if not cat:
-                return ""
-            return (cat.tcp_args or cat.udp_args or "").strip()
+            return (self._preset_manager.get_target_raw_args_text(self._target_key) or "").strip()
         except Exception:
             return ""
 
@@ -921,44 +933,23 @@ class Zapret1StrategyDetailPage(BasePage):
             log(f"Zapret1StrategyDetailPage: args editor error: {e}", "ERROR")
 
     def _save_custom_args(self, args_text: str) -> None:
-        if not self._preset_manager or not self._category_key:
+        if not self._preset_manager or not self._target_key:
             return
 
         try:
-            from preset_zapret1.preset_model import CategoryConfigV1
-
-            preset = self._preset_manager.get_selected_source_preset()
-            if not preset:
+            if not self._preset_manager.update_target_raw_args_text(
+                self._target_key,
+                args_text,
+                save_and_sync=True,
+            ):
                 return
-
-            if self._category_key not in preset.categories:
-                preset.categories[self._category_key] = CategoryConfigV1(name=self._category_key)
-
-            cat = preset.categories[self._category_key]
-
-            protocol = (self._category_info.get("protocol") or "").upper()
-            is_udp = any(token in protocol for token in ("UDP", "QUIC", "L7", "RAW"))
-
-            if is_udp:
-                cat.udp_args = args_text
-                cat.tcp_args = ""
-            else:
-                cat.tcp_args = args_text
-                cat.udp_args = ""
-
-            cat.strategy_id = "custom" if args_text else "none"
-            preset.touch()
-
-            if hasattr(self._preset_manager, "_save_and_sync_category"):
-                self._preset_manager.save_category_preserving_layout(preset, self._category_key)
-            else:
-                self._preset_manager.save_preset_model(preset)
-
-            self._current_strategy_id = cat.strategy_id
+            self._current_strategy_id = (
+                self._preset_manager.get_strategy_selections().get(self._target_key, "none") or "none"
+            )
             if self._current_strategy_id != "none":
                 self._last_enabled_strategy_id = self._current_strategy_id
-            self.strategy_selected.emit(self._category_key, self._current_strategy_id)
-            self._sync_category_controls()
+            self.strategy_selected.emit(self._target_key, self._current_strategy_id)
+            self._sync_target_controls()
 
             if _HAS_FLUENT and InfoBar is not None:
                 if args_text:
@@ -982,7 +973,7 @@ class Zapret1StrategyDetailPage(BasePage):
                         duration=1800,
                     )
 
-            self._reload_category()
+            self._reload_target()
 
         except Exception as e:
             log(f"V1 save custom args error: {e}", "ERROR")
@@ -1040,7 +1031,7 @@ class Zapret1StrategyDetailPage(BasePage):
                 self._tr("page.z1_strategy_detail.back.strategies", "← Стратегии Zapret 1")
             )
 
-        if self._title_label is not None and not self._category_key:
+        if self._title_label is not None and not self._target_key:
             self._title_label.setText(
                 self._tr("page.z1_strategy_detail.header.category_fallback", "Категория")
             )

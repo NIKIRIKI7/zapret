@@ -51,8 +51,10 @@ def complete_main_window_method_switch(window, method: str) -> None:
 
     can_autostart = True
     if method == "direct_zapret2":
-        from preset_zapret2 import ensure_default_preset_exists
-        if not ensure_default_preset_exists():
+        from core.services import get_direct_flow_coordinator
+        try:
+            get_direct_flow_coordinator().ensure_launch_profile("direct_zapret2", require_filters=False)
+        except Exception:
             log("direct_zapret2: выбранный source-пресет не подготовлен", "ERROR")
             try:
                 window.set_status("Ошибка: отсутствует Default.txt (built-in пресет)")
@@ -72,12 +74,12 @@ def complete_main_window_method_switch(window, method: str) -> None:
 
     elif method == "direct_zapret1":
         try:
-            from preset_zapret1 import ensure_default_preset_exists_v1
-            if not ensure_default_preset_exists_v1():
-                log("direct_zapret1: выбранный source-пресет не подготовлен", "ERROR")
-                can_autostart = False
+            from core.services import get_direct_flow_coordinator
+
+            get_direct_flow_coordinator().ensure_launch_profile("direct_zapret1", require_filters=False)
         except Exception as e:
             log(f"direct_zapret1: ошибка инициализации пресета: {e}", "WARNING")
+            can_autostart = False
 
     try:
         window._preset_runtime_coordinator.setup_active_preset_file_watcher()

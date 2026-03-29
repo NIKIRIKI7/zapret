@@ -719,11 +719,11 @@ class ControlPage(BasePage):
 
                 selections = get_direct_strategy_selections() or {}
                 active_names: list[str] = []
-                for cat_key in registry.get_all_category_keys_by_command_order():
+                for cat_key in registry.get_all_target_keys_by_command_order():
                     sid = selections.get(cat_key, "none") or "none"
                     if sid == "none":
                         continue
-                    info = registry.get_category_info(cat_key)
+                    info = registry.get_target_info(cat_key)
                     active_names.append(getattr(info, "full_name", None) or cat_key)
 
                 if not active_names:

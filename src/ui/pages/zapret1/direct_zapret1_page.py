@@ -1,5 +1,5 @@
 # ui/pages/zapret1/direct_zapret1_page.py
-"""Zapret 1 categories page with Zapret 2-style interface."""
+"""Zapret 1 target page with Zapret 2-style interface."""
 
 from __future__ import annotations
 
@@ -30,19 +30,20 @@ except ImportError:
 
 
 _INFO_TEXT = (
-    "Здесь выбирается стратегия обхода DPI для каждой категории сайтов.\n\n"
-    "Интерфейс и категории синхронизированы с Zapret 2: используется единый "
-    "каталог categories.txt.\n\n"
-    "Откройте категорию и выберите стратегию Zapret 1. "
+    "Здесь выбирается стратегия обхода DPI для каждого target'а, который реально найден "
+    "в выбранном source preset.\n\n"
+    "То есть список строится не из старого реестра как источника истины, а из самого "
+    "текущего пресета. Внешние метаданные используются только для красивых названий и иконок.\n\n"
+    "Откройте target и выберите стратегию Zapret 1. "
     "Если стратегия не подходит — попробуйте другую или задайте аргументы вручную "
-    "в карточке категории."
+    "в карточке target'а."
 )
 
 
 class Zapret1StrategiesPage(BasePage):
-    """Список категорий Zapret 1 с breadcrumb-навигацией."""
+    """Список target'ов Zapret 1 с breadcrumb-навигацией."""
 
-    category_clicked = pyqtSignal(str, dict)  # category_key, category_info
+    target_clicked = pyqtSignal(str, dict)  # target_key, target_info
     back_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -58,8 +59,8 @@ class Zapret1StrategiesPage(BasePage):
         self._breadcrumb = None
         self._back_btn = None
         self._unified_list: UnifiedStrategiesList | None = None
-        self.category_selections: dict[str, str] = {}
-        self._categories: dict[str, Any] = {}
+        self.target_selections: dict[str, str] = {}
+        self._targets: dict[str, Any] = {}
         self._expand_btn = None
         self._collapse_btn = None
         self._info_btn = None
@@ -150,39 +151,35 @@ class Zapret1StrategiesPage(BasePage):
 
         self._build_toolbar()
 
-        self._categories = self._load_categories()
-        if not self._categories:
+        self._targets = self._load_targets()
+        if not self._targets:
             self._empty_state_label = BodyLabel(
                 tr_catalog(
                     "page.z1_direct.empty.no_categories",
                     language=self._ui_language,
-                    default="Категории не найдены. Проверьте наличие json/strategies/builtin/categories.txt",
+                    default="Target'ы не найдены. Проверьте выбранный source preset и его содержимое.",
                 )
             )
             self.add_widget(self._empty_state_label)
             return
 
-        self.category_selections = self._load_current_selections()
-        self.category_selections = {
-            key: self.category_selections.get(key, "none")
-            for key in self._categories.keys()
+        self.target_selections = self._load_current_selections()
+        self.target_selections = {
+            key: self.target_selections.get(key, "none")
+            for key in self._targets.keys()
         }
 
         filter_modes = self._load_filter_modes()
 
-        self._unified_list = UnifiedStrategiesList(self)
-        self._unified_list.strategy_selected.connect(self._on_category_clicked)
+        self._unified_list = UnifiedStrategiesList(self, strategy_name_resolver=self._strategy_name_for_list)
+        self._unified_list.strategy_selected.connect(self._on_target_clicked)
         self._unified_list.selections_changed.connect(self._on_selections_changed)
         self._unified_list.build_list(
-            self._categories,
-            self.category_selections,
+            self._targets,
+            self.target_selections,
             filter_modes=filter_modes,
         )
         self.add_widget(self._unified_list, 1)
-
-        # UnifiedStrategiesList показывает названия через registry (Zapret 2).
-        # Для Zapret 1 нужно подставить названия из load_v1_strategies().
-        self._apply_v1_strategy_names()
 
     def _build_toolbar(self) -> None:
         actions_card = SettingsCard()
@@ -227,23 +224,11 @@ class Zapret1StrategiesPage(BasePage):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _load_categories() -> dict[str, Any]:
+    def _load_targets() -> dict[str, Any]:
         try:
-            from strategy_menu.strategies_registry import registry
+            from core.presets.direct_facade import DirectPresetFacade
 
-            categories = dict(registry.categories or {})
-            if categories:
-                return categories
-
-            # If categories cache was filled before catalog became available,
-            # force one reload to avoid showing an empty page.
-            try:
-                registry.reload_strategies()
-                categories = dict(registry.categories or {})
-            except Exception:
-                pass
-
-            return categories
+            return DirectPresetFacade.from_launch_method("direct_zapret1").get_target_ui_items() or {}
         except Exception:
             return {}
 
@@ -259,27 +244,20 @@ class Zapret1StrategiesPage(BasePage):
     @staticmethod
     def _load_filter_modes() -> dict[str, str]:
         try:
-            from preset_zapret1.preset_store import get_preset_store_v1
+            from core.presets.direct_facade import DirectPresetFacade
 
-            store = get_preset_store_v1()
-            selected_file_name = store.get_selected_source_preset_file_name() or ""
-            preset = store.get_preset_by_file_name(selected_file_name) if selected_file_name else None
-            if not preset:
-                return {}
-            return {
-                key: (cat.filter_mode or "")
-                for key, cat in (preset.categories or {}).items()
-                if getattr(cat, "filter_mode", None)
-            }
+            facade = DirectPresetFacade.from_launch_method("direct_zapret1")
+            targets = facade.get_target_ui_items() or {}
+            return {key: facade.get_target_filter_mode(key) for key in targets.keys()}
         except Exception:
             return {}
 
     @staticmethod
-    def _category_info_to_dict(category_key: str, category_info: Any) -> dict:
-        if isinstance(category_info, dict):
-            data = dict(category_info)
-            data.setdefault("key", category_key)
-            data.setdefault("full_name", data.get("name", category_key))
+    def _target_info_to_dict(target_key: str, target_info: Any) -> dict:
+        if isinstance(target_info, dict):
+            data = dict(target_info)
+            data.setdefault("key", target_key)
+            data.setdefault("full_name", data.get("name", target_key))
             data.setdefault("description", "")
             data.setdefault("base_filter", data.get("base_filter", ""))
             data.setdefault("base_filter_hostlist", data.get("base_filter_hostlist", ""))
@@ -287,34 +265,34 @@ class Zapret1StrategiesPage(BasePage):
             return data
 
         data = {
-            "key": getattr(category_info, "key", category_key),
-            "full_name": getattr(category_info, "full_name", category_key),
-            "description": getattr(category_info, "description", ""),
-            "protocol": getattr(category_info, "protocol", ""),
-            "ports": getattr(category_info, "ports", ""),
-            "icon_name": getattr(category_info, "icon_name", ""),
-            "icon_color": getattr(category_info, "icon_color", "#909090"),
-            "command_group": getattr(category_info, "command_group", "default"),
-            "base_filter": getattr(category_info, "base_filter", ""),
-            "base_filter_hostlist": getattr(category_info, "base_filter_hostlist", ""),
-            "base_filter_ipset": getattr(category_info, "base_filter_ipset", ""),
+            "key": getattr(target_info, "key", target_key),
+            "full_name": getattr(target_info, "full_name", target_key),
+            "description": getattr(target_info, "description", ""),
+            "protocol": getattr(target_info, "protocol", ""),
+            "ports": getattr(target_info, "ports", ""),
+            "icon_name": getattr(target_info, "icon_name", ""),
+            "icon_color": getattr(target_info, "icon_color", "#909090"),
+            "command_group": getattr(target_info, "command_group", "default"),
+            "base_filter": getattr(target_info, "base_filter", ""),
+            "base_filter_hostlist": getattr(target_info, "base_filter_hostlist", ""),
+            "base_filter_ipset": getattr(target_info, "base_filter_ipset", ""),
         }
 
-        data.setdefault("key", category_key)
-        data.setdefault("full_name", category_key)
+        data.setdefault("key", target_key)
+        data.setdefault("full_name", target_key)
         data.setdefault("description", "")
         return data
 
-    def _strategy_name(self, strategy_id: str, cat_key: str) -> str:
+    def _strategy_name(self, strategy_id: str, target_key: str) -> str:
         sid = (strategy_id or "").strip()
         if not sid or sid == "none":
             return tr_catalog("page.z1_direct.strategy.off", language=self._ui_language, default="Выключено")
         if sid == "custom":
             return tr_catalog("page.z1_direct.strategy.custom", language=self._ui_language, default="Свой набор")
         try:
-            from preset_zapret1.strategies_loader import load_v1_strategies
+            from core.presets.direct_facade import DirectPresetFacade
 
-            strats = load_v1_strategies(cat_key)
+            strats = DirectPresetFacade.from_launch_method("direct_zapret1").get_target_strategies(target_key) or {}
             info = strats.get(sid)
             if info:
                 return info.get("name", sid)
@@ -322,53 +300,45 @@ class Zapret1StrategiesPage(BasePage):
             pass
         return sid
 
-    def _apply_v1_strategy_names(self) -> None:
-        if not self._unified_list:
-            return
-        for cat_key, sid in (self.category_selections or {}).items():
-            item = self._unified_list.get_category_item(cat_key)
-            if item:
-                item.set_strategy(sid, self._strategy_name(sid, cat_key))
+    def _strategy_name_for_list(self, target_key: str, strategy_id: str) -> str:
+        return self._strategy_name(strategy_id, target_key)
 
     # ------------------------------------------------------------------
     # Actions / handlers
     # ------------------------------------------------------------------
 
-    def _on_category_clicked(self, category_key: str, _strategy_id: str) -> None:
+    def _on_target_clicked(self, target_key: str, _strategy_id: str) -> None:
         try:
-            from strategy_menu.strategies_registry import registry
-
-            category_info = registry.get_category_info(category_key)
+            target_info = (self._targets or {}).get(target_key)
         except Exception:
-            category_info = None
+            target_info = None
 
-        info_dict = self._category_info_to_dict(category_key, category_info)
+        info_dict = self._target_info_to_dict(target_key, target_info)
 
         # Важно: отложенная навигация убирает артефакты hover/cursor в Qt.
         QTimer.singleShot(
             0,
-            lambda k=category_key, info=dict(info_dict): self.category_clicked.emit(k, info),
+            lambda k=target_key, info=dict(info_dict): self.target_clicked.emit(k, info),
         )
 
     def _on_selections_changed(self, selections: dict) -> None:
-        self.category_selections = dict(selections or {})
+        self.target_selections = dict(selections or {})
 
     def _refresh_subtitles(self) -> None:
         if not self._unified_list:
             return
 
-        self.category_selections = self._load_current_selections()
-        self.category_selections = {
-            key: self.category_selections.get(key, "none")
-            for key in (self._categories or {}).keys()
+        self.target_selections = self._load_current_selections()
+        self.target_selections = {
+            key: self.target_selections.get(key, "none")
+            for key in (self._targets or {}).keys()
         }
-        self._unified_list.set_selections(self.category_selections)
-        self._apply_v1_strategy_names()
+        self._unified_list.set_selections(self.target_selections)
 
         filter_modes = self._load_filter_modes()
-        for cat_key in (self._categories or {}).keys():
+        for target_key in (self._targets or {}).keys():
             try:
-                self._unified_list.update_filter_mode(cat_key, filter_modes.get(cat_key) or "")
+                self._unified_list.update_filter_mode(target_key, filter_modes.get(target_key) or "")
             except Exception:
                 continue
 
@@ -376,13 +346,6 @@ class Zapret1StrategiesPage(BasePage):
         if hasattr(self, "_reload_btn"):
             self._reload_btn.set_loading(True)
         try:
-            try:
-                from strategy_menu.strategies_registry import registry
-
-                registry.reload_strategies()
-            except Exception:
-                pass
-
             self._built = False
             self._unified_list = None
             self._schedule_build()
@@ -472,7 +435,7 @@ class Zapret1StrategiesPage(BasePage):
                 tr_catalog(
                     "page.z1_direct.empty.no_categories",
                     language=self._ui_language,
-                    default="Категории не найдены. Проверьте наличие json/strategies/builtin/categories.txt",
+                    default="Target'ы не найдены. Проверьте выбранный source preset и его содержимое.",
                 )
             )
 

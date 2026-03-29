@@ -14,6 +14,7 @@ import re
 from typing import Optional
 
 from launcher_common.blobs import get_blobs
+from core.presets.direct_facade import DirectPresetFacade
 
 # ===================== HELPERS =====================
 
@@ -71,32 +72,24 @@ def extract_payload(args: str) -> tuple[str, str]:
 # ===================== SYNDATA =====================
 
 
-def _get_active_zapret2_preset():
+def _get_direct_facade():
     try:
-        from preset_zapret2.preset_store import get_preset_store
-
-        store = get_preset_store()
-        active_file_name = (store.get_selected_source_preset_file_name() or "").strip()
-        if not active_file_name:
-            return None
-        return store.get_preset_by_file_name(active_file_name)
+        return DirectPresetFacade.from_launch_method("direct_zapret2")
     except Exception:
         return None
 
 
-def _get_tcp_syndata(category_key: str):
-    from preset_zapret2.preset_model import SyndataSettings
-
-    preset = _get_active_zapret2_preset()
-    if not preset:
-        return SyndataSettings.get_defaults()
-    category = (preset.categories or {}).get(category_key)
-    if not category:
-        return SyndataSettings.get_defaults()
-    return category.syndata_tcp
+def _get_target_details(target_key: str):
+    facade = _get_direct_facade()
+    if facade is None:
+        return None
+    try:
+        return facade.get_target_details(target_key)
+    except Exception:
+        return None
 
 
-def build_syndata_args(category_key: str, protocol: str = "tcp") -> str:
+def build_syndata_args(target_key: str, protocol: str = "tcp") -> str:
     """
     Собирает --lua-desync=syndata:... из настроек активного пресета.
 
@@ -108,9 +101,10 @@ def build_syndata_args(category_key: str, protocol: str = "tcp") -> str:
         if proto in ("udp", "quic", "l7", "raw"):
             return ""
 
-        syndata = _get_tcp_syndata(category_key)
+        details = _get_target_details(target_key)
+        syndata = getattr(details, "syndata_settings", None)
 
-        if not syndata.enabled:
+        if not syndata or not syndata.enabled:
             return ""
 
         parts = ["syndata"]
@@ -140,11 +134,11 @@ def build_syndata_args(category_key: str, protocol: str = "tcp") -> str:
 
     except Exception as e:
         from log import log
-        log(f"Error building syndata_args for {category_key}: {e}", "DEBUG")
+        log(f"Error building syndata_args for {target_key}: {e}", "DEBUG")
         return ""
 
 
-def get_out_range_args(category_key: str, protocol: str = "tcp") -> str:
+def get_out_range_args(target_key: str, protocol: str = "tcp") -> str:
     """
     Возвращает --out-range=-{mode}{value} (всегда, дефолт -n8).
 
@@ -167,27 +161,26 @@ def get_out_range_args(category_key: str, protocol: str = "tcp") -> str:
     DEFAULT_OUT_RANGE = 8
     DEFAULT_MODE = "n"
     try:
-        syndata = _get_tcp_syndata(category_key)
-
-        out_range = syndata.out_range
-        if out_range is None or out_range == 0:
+        details = _get_target_details(target_key)
+        out_range_settings = getattr(details, "out_range_settings", None)
+        out_range = getattr(out_range_settings, "value", 0) if getattr(out_range_settings, "enabled", False) else 0
+        if out_range is None or int(out_range) == 0:
             out_range = DEFAULT_OUT_RANGE
 
-        # Получаем режим (n или d)
-        out_range_mode = syndata.out_range_mode
+        out_range_mode = getattr(out_range_settings, "mode", DEFAULT_MODE)
         if out_range_mode not in ("n", "d"):
             out_range_mode = DEFAULT_MODE
 
-        return f"--out-range=-{out_range_mode}{out_range}"
+        return f"--out-range=-{out_range_mode}{int(out_range)}"
 
     except Exception as e:
         from log import log
-        log(f"Error getting out_range_args for {category_key}: {e}", "DEBUG")
+        log(f"Error getting out_range_args for {target_key}: {e}", "DEBUG")
         # Всегда возвращаем дефолтное значение
         return f"--out-range=-{DEFAULT_MODE}{DEFAULT_OUT_RANGE}"
 
 
-def build_send_args(category_key: str, protocol: str = "tcp") -> str:
+def build_send_args(target_key: str, protocol: str = "tcp") -> str:
     """
     Собирает --lua-desync=send:... из настроек активного пресета.
 
@@ -207,36 +200,36 @@ def build_send_args(category_key: str, protocol: str = "tcp") -> str:
         if proto in ("udp", "quic", "l7", "raw"):
             return ""
 
-        syndata = _get_tcp_syndata(category_key)
+        details = _get_target_details(target_key)
+        send = getattr(details, "send_settings", None)
 
-        # Проверяем, включен ли send
-        if not syndata.send_enabled:
+        if not send or not send.enabled:
             return ""
 
         parts = ["send"]
 
         # repeats (0-10)
-        repeats = syndata.send_repeats
+        repeats = send.repeats
         if repeats and repeats > 0:
             parts.append(f"repeats={repeats}")
 
         # send_ip_ttl (0-255) - TTL для send пакетов
-        send_ip_ttl = syndata.send_ip_ttl
+        send_ip_ttl = send.ip_ttl
         if send_ip_ttl and send_ip_ttl > 0:
             parts.append(f"ip_ttl={send_ip_ttl}")
 
         # ip6_ttl (0-255)
-        ip6_ttl = syndata.send_ip6_ttl
+        ip6_ttl = send.ip6_ttl
         if ip6_ttl and ip6_ttl > 0:
             parts.append(f"ip6_ttl={ip6_ttl}")
 
         # ip_id (none, seq, rnd, zero)
-        ip_id = syndata.send_ip_id
+        ip_id = send.ip_id
         if ip_id and ip_id != "none":
             parts.append(f"ip_id={ip_id}")
 
         # badsum (bool)
-        badsum = syndata.send_badsum
+        badsum = send.badsum
         if badsum:
             parts.append("badsum")
 
@@ -247,7 +240,7 @@ def build_send_args(category_key: str, protocol: str = "tcp") -> str:
 
     except Exception as e:
         from log import log
-        log(f"Error building send_args for {category_key}: {e}", "DEBUG")
+        log(f"Error building send_args for {target_key}: {e}", "DEBUG")
         return ""
 
 
@@ -256,7 +249,7 @@ def build_send_args(category_key: str, protocol: str = "tcp") -> str:
 def build_category_args(
     base_filter: str,
     strategy_args: str,
-    category_key: str,
+    target_key: str,
     strip_payload: bool = False
 ) -> str:
     """
@@ -266,13 +259,13 @@ def build_category_args(
     Args:
         base_filter: фильтр категории (--filter-tcp=443 --hostlist=youtube.txt)
         strategy_args: техника стратегии (--lua-desync=multisplit...)
-        category_key: ключ категории для syndata
+        target_key: ключ категории для syndata
         strip_payload: убрать --payload= (для IPset)
 
     Returns:
         str: полная командная строка для категории
     """
-    syndata_args = build_syndata_args(category_key)
+    syndata_args = build_syndata_args(target_key)
 
     # Извлекаем payload из strategy_args
     payload_part, remaining_strategy_args = extract_payload(strategy_args)
@@ -295,9 +288,9 @@ def build_category_args(
 
 # ===================== PREVIEW =====================
 
-def preview_syndata(category_key: str) -> str:
+def preview_syndata(target_key: str) -> str:
     """Возвращает превью syndata для отображения в UI"""
-    args = build_syndata_args(category_key)
+    args = build_syndata_args(target_key)
     if not args:
         return "Syndata: выключено"
     return f"Syndata: {args}"
@@ -305,7 +298,7 @@ def preview_syndata(category_key: str) -> str:
 
 # ===================== FILTER MODE =====================
 
-def get_filter_mode(category_key: str) -> str:
+def get_filter_mode(target_key: str) -> str:
     """
     Получает режим фильтрации для категории из активного пресета.
 
@@ -313,17 +306,14 @@ def get_filter_mode(category_key: str) -> str:
         "hostlist" или "ipset"
     """
     try:
-        preset = _get_active_zapret2_preset()
-        if not preset:
+        facade = _get_direct_facade()
+        if facade is None:
             return "hostlist"
-        category = (preset.categories or {}).get(category_key)
-        if not category:
-            return "hostlist"
-        filter_mode = category.filter_mode
+        filter_mode = facade.get_target_filter_mode(target_key)
         if filter_mode in ("hostlist", "ipset"):
             return filter_mode
         return "hostlist"
     except Exception as e:
         from log import log
-        log(f"Error getting filter_mode for {category_key}: {e}", "DEBUG")
+        log(f"Error getting filter_mode for {target_key}: {e}", "DEBUG")
         return "hostlist"

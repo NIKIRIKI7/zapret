@@ -116,12 +116,12 @@ class FavoriteCompactStrategyItem(CompactStrategyItem):
 
     favoriteToggled = pyqtSignal(str, bool)
 
-    def __init__(self, strategy_id, strategy_data, category_key=None, parent=None):
-        self.category_key = category_key
+    def __init__(self, strategy_id, strategy_data, target_key=None, parent=None):
+        self.target_key = target_key
         self._current_fav_style = None  # Кэш стиля кнопки избранного
 
         from .marks_store_bridge import is_favorite_strategy
-        self.is_favorite = is_favorite_strategy(strategy_id, category_key)
+        self.is_favorite = is_favorite_strategy(strategy_id, target_key)
 
         super().__init__(strategy_id, strategy_data, parent)
         self._add_favorite_button()
@@ -133,8 +133,8 @@ class FavoriteCompactStrategyItem(CompactStrategyItem):
     def _get_rating_style(self):
         """Возвращает стиль на основе рейтинга стратегии"""
         from .marks_store_bridge import get_strategy_rating
-        # Используем category_key для правильной привязки рейтинга
-        rating = get_strategy_rating(self.strategy_id, self.category_key)
+        # Используем target_key для правильной привязки рейтинга
+        rating = get_strategy_rating(self.strategy_id, self.target_key)
         if rating == 'working':
             return _STYLE_RATING_WORKING
         elif rating == 'broken':
@@ -206,7 +206,7 @@ class FavoriteCompactStrategyItem(CompactStrategyItem):
         """Переключает избранное"""
         from .marks_store_bridge import toggle_favorite_strategy
         
-        self.is_favorite = toggle_favorite_strategy(self.strategy_id, self.category_key)
+        self.is_favorite = toggle_favorite_strategy(self.strategy_id, self.target_key)
         self.favorite_btn.setChecked(self.is_favorite)
         self._update_favorite_style()
         self._apply_style(self.is_selected)
@@ -215,8 +215,8 @@ class FavoriteCompactStrategyItem(CompactStrategyItem):
     def _show_context_menu(self, pos):
         """Показывает окно информации о стратегии по ПКМ"""
         from .args_preview_dialog import preview_manager
-        # Передаём category_key для правильной работы рейтингов
-        preview_manager.show_preview(self, self.strategy_id, self.strategy_data, category_key=self.category_key)
+        # Передаём target_key для правильной работы рейтингов
+        preview_manager.show_preview(self, self.strategy_id, self.strategy_data, target_key=self.target_key)
 
     def _on_toggled(self, checked):
         """Переопределяем переключение"""
@@ -264,6 +264,6 @@ class FavoriteCompactStrategyItem(CompactStrategyItem):
         super().mousePressEvent(event)
 
 
-def get_strategy_widget(strategy_id, strategy_data, category_key, parent=None):
+def get_strategy_widget(strategy_id, strategy_data, target_key, parent=None):
     """Фабричная функция для создания виджета стратегии"""
-    return FavoriteCompactStrategyItem(strategy_id, strategy_data, category_key, parent)
+    return FavoriteCompactStrategyItem(strategy_id, strategy_data, target_key, parent)

@@ -6,17 +6,50 @@ from ui.page_names import PageName
 
 def get_direct_strategy_summary(window, max_items: int = 2) -> str:
     try:
-        from strategy_menu import get_direct_strategy_selections
-        from strategy_menu.strategies_registry import registry
+        from strategy_menu import get_strategy_launch_method
+        from core.presets.direct_facade import DirectPresetFacade
 
-        selections = get_direct_strategy_selections() or {}
+        method = (get_strategy_launch_method() or "").strip().lower()
+        if method == "direct_zapret2_orchestra":
+            from strategy_menu import get_direct_strategy_selections
+            from strategy_menu.strategies_registry import registry
+
+            selections = get_direct_strategy_selections() or {}
+            active_names: list[str] = []
+            for target_key in registry.get_all_target_keys_by_command_order():
+                sid = selections.get(target_key, "none") or "none"
+                if sid == "none":
+                    continue
+                info = registry.get_target_info(target_key)
+                active_names.append(getattr(info, "full_name", None) or target_key)
+
+            if not active_names:
+                return "Не выбрана"
+            if len(active_names) <= max_items:
+                return " • ".join(active_names)
+            return " • ".join(active_names[:max_items]) + f" +{len(active_names) - max_items} ещё"
+
+        if method not in ("direct_zapret1", "direct_zapret2"):
+            return "Прямой запуск"
+
+        facade = DirectPresetFacade.from_launch_method(method)
+        selections = facade.get_strategy_selections() or {}
+        target_items = facade.get_target_ui_items() or {}
+        ordered_targets = sorted(
+            target_items.items(),
+            key=lambda item: (
+                getattr(item[1], "order", 999),
+                str(getattr(item[1], "full_name", item[0]) or item[0]).lower(),
+                item[0],
+            ),
+        )
+
         active_names: list[str] = []
-        for cat_key in registry.get_all_category_keys_by_command_order():
-            sid = selections.get(cat_key, "none") or "none"
+        for target_key, target_info in ordered_targets:
+            sid = selections.get(target_key, "none") or "none"
             if sid == "none":
                 continue
-            info = registry.get_category_info(cat_key)
-            active_names.append(getattr(info, "full_name", None) or cat_key)
+            active_names.append(getattr(target_info, "full_name", None) or target_key)
 
         if not active_names:
             return "Не выбрана"

@@ -1,7 +1,7 @@
 # ui/pages/zapret2/strategy_detail_page.py
 """
-Страница детального просмотра стратегий для выбранной категории.
-Открывается при клике на категорию в Zapret2StrategiesPageNew.
+Страница детального просмотра стратегий для выбранного target'а.
+Открывается при клике на target в Zapret2StrategiesPageNew.
 """
 
 import re
@@ -59,7 +59,6 @@ from ui.pages.strategies_page_base import ResetActionButton
 from ui.widgets.direct_zapret2_strategies_tree import DirectZapret2StrategiesTree, StrategyTreeRow
 from strategy_menu.args_preview_dialog import ArgsPreviewDialog
 from launcher_common.blobs import get_blobs_info
-from preset_zapret2 import PresetManager, SyndataSettings
 from strategy_menu.marks_store_bridge import DirectZapret2MarksStore, DirectZapret2FavoritesStore
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
@@ -103,7 +102,7 @@ class _ArgsEditorDialog(MessageBoxBase):
                 _tr_text(
                     self._ui_language,
                     "page.z2_strategy_detail.args_dialog.hint",
-                    "Один аргумент на строку. Изменяет только выбранную категорию.",
+                    "Один аргумент на строку. Изменяет только выбранный target.",
                 )
             )
         else:
@@ -258,6 +257,48 @@ def _normalize_args_text(text: str) -> str:
         return ""
     lines = [ln.strip() for ln in str(text).splitlines() if ln.strip()]
     return "\n".join(lines).strip()
+
+
+def _target_details_to_settings_payload(details) -> dict[str, object]:
+    if details is None:
+        return {
+            "enabled": False,
+            "blob": "tls_google",
+            "tls_mod": "none",
+            "autottl_delta": 0,
+            "autottl_min": 3,
+            "autottl_max": 20,
+            "out_range": 0,
+            "out_range_mode": "n",
+            "tcp_flags_unset": "none",
+            "send_enabled": False,
+            "send_repeats": 2,
+            "send_ip_ttl": 0,
+            "send_ip6_ttl": 0,
+            "send_ip_id": "none",
+            "send_badsum": False,
+        }
+
+    out_range = details.out_range_settings
+    send = details.send_settings
+    syndata = details.syndata_settings
+    return {
+        "enabled": bool(syndata.enabled),
+        "blob": str(syndata.blob or "tls_google"),
+        "tls_mod": str(syndata.tls_mod or "none"),
+        "autottl_delta": int(syndata.autottl_delta or 0),
+        "autottl_min": int(syndata.autottl_min or 3),
+        "autottl_max": int(syndata.autottl_max or 20),
+        "out_range": int(out_range.value or 0) if out_range.enabled else 0,
+        "out_range_mode": str(out_range.mode or "n"),
+        "tcp_flags_unset": str(syndata.tcp_flags_unset or "none"),
+        "send_enabled": bool(send.enabled),
+        "send_repeats": int(send.repeats or 0),
+        "send_ip_ttl": int(send.ip_ttl or 0),
+        "send_ip6_ttl": int(send.ip6_ttl or 0),
+        "send_ip_id": str(send.ip_id or "none"),
+        "send_badsum": bool(send.badsum),
+    }
 
 
 class TTLButtonSelector(QWidget):
@@ -510,16 +551,16 @@ class StrategyDetailPage(BasePage):
     Страница детального выбора стратегии для категории.
 
     Signals:
-        strategy_selected(str, str): Эмитится при выборе стратегии (category_key, strategy_id)
-        args_changed(str, str, list): Эмитится при изменении аргументов (category_key, strategy_id, new_args)
-        strategy_marked(str, str, object): Эмитится при пометке стратегии (category_key, strategy_id, is_working)
+        strategy_selected(str, str): Эмитится при выборе стратегии (target_key, strategy_id)
+        args_changed(str, str, list): Эмитится при изменении аргументов (target_key, strategy_id, new_args)
+        strategy_marked(str, str, object): Эмитится при пометке стратегии (target_key, strategy_id, is_working)
         back_clicked(): Эмитится при нажатии кнопки "Назад"
     """
 
-    strategy_selected = pyqtSignal(str, str)  # category_key, strategy_id
-    filter_mode_changed = pyqtSignal(str, str)  # category_key, "hostlist"|"ipset"
-    args_changed = pyqtSignal(str, str, list)  # category_key, strategy_id, new_args
-    strategy_marked = pyqtSignal(str, str, object)  # category_key, strategy_id, is_working (bool|None)
+    strategy_selected = pyqtSignal(str, str)  # target_key, strategy_id
+    filter_mode_changed = pyqtSignal(str, str)  # target_key, "hostlist"|"ipset"
+    args_changed = pyqtSignal(str, str, list)  # target_key, strategy_id, new_args
+    strategy_marked = pyqtSignal(str, str, object)  # target_key, strategy_id, is_working (bool|None)
     back_clicked = pyqtSignal()
     navigate_to_root = pyqtSignal()  # → PageName.ZAPRET2_DIRECT_CONTROL (skip strategies list)
 
@@ -548,8 +589,8 @@ class StrategyDetailPage(BasePage):
         except Exception:
             pass
         self.parent_app = parent
-        self._category_key = None
-        self._category_info = None
+        self._target_key = None
+        self._target_info = None
         self._current_strategy_id = "none"
         self._selected_strategy_id = "none"
         self._strategies_tree = None
@@ -561,11 +602,11 @@ class StrategyDetailPage(BasePage):
         self._phase_tab_index_by_key: dict[str, int] = {}
         self._phase_tab_key_by_index: dict[int, str] = {}
         self._active_phase_key = None
-        self._last_active_phase_key_by_category: dict[str, str] = {}
+        self._last_active_phase_key_by_target: dict[str, str] = {}
         self._tcp_phase_selected_ids: dict[str, str] = {}  # phase_key -> strategy_id
         self._tcp_phase_custom_args: dict[str, str] = {}  # phase_key -> raw args chunk (if no matching strategy)
         self._tcp_hide_fake_phase = False
-        self._tcp_last_enabled_args_by_category: dict[str, str] = {}
+        self._tcp_last_enabled_args_by_target: dict[str, str] = {}
         self._waiting_for_process_start = False  # Флаг ожидания запуска DPI
         self._process_monitor_connected = False  # Флаг подключения к process_monitor
         self._apply_feedback_timer = None  # Быстрый таймер: убрать спиннер после apply
@@ -578,8 +619,8 @@ class StrategyDetailPage(BasePage):
         self._loaded_tcp_phase_mode = False
         self._default_strategy_order = []
         self._strategies_loaded_fully = False
-        self._page_scroll_by_category: dict[str, int] = {}
-        self._tree_scroll_by_category: dict[str, int] = {}
+        self._page_scroll_by_target: dict[str, int] = {}
+        self._tree_scroll_by_target: dict[str, int] = {}
 
         # Direct preset facade for category settings storage
         from core.presets.direct_facade import DirectPresetFacade
@@ -784,33 +825,33 @@ class StrategyDetailPage(BasePage):
         except Exception:
             pass
 
-    def _save_scroll_state(self, category_key: str | None = None) -> None:
-        key = str(category_key or self._category_key or "").strip()
+    def _save_scroll_state(self, target_key: str | None = None) -> None:
+        key = str(target_key or self._target_key or "").strip()
         if not key:
             return
 
         try:
             bar = self.verticalScrollBar()
-            self._page_scroll_by_category[key] = int(bar.value())
+            self._page_scroll_by_target[key] = int(bar.value())
         except Exception:
             pass
 
         try:
             if self._strategies_tree:
                 tree_bar = self._strategies_tree.verticalScrollBar()
-                self._tree_scroll_by_category[key] = int(tree_bar.value())
+                self._tree_scroll_by_target[key] = int(tree_bar.value())
         except Exception:
             pass
 
-    def _restore_scroll_state(self, category_key: str | None = None, defer: bool = False) -> None:
-        key = str(category_key or self._category_key or "").strip()
+    def _restore_scroll_state(self, target_key: str | None = None, defer: bool = False) -> None:
+        key = str(target_key or self._target_key or "").strip()
         if not key:
             return
 
         def _apply() -> None:
             try:
                 page_bar = self.verticalScrollBar()
-                saved_page = self._page_scroll_by_category.get(key)
+                saved_page = self._page_scroll_by_target.get(key)
                 if saved_page is None:
                     page_bar.setValue(page_bar.minimum())
                 else:
@@ -822,7 +863,7 @@ class StrategyDetailPage(BasePage):
                 if not self._strategies_tree:
                     return
                 tree_bar = self._strategies_tree.verticalScrollBar()
-                saved_tree = self._tree_scroll_by_category.get(key)
+                saved_tree = self._tree_scroll_by_target.get(key)
                 if saved_tree is None:
                     return
                 tree_bar.setValue(max(tree_bar.minimum(), min(int(saved_tree), tree_bar.maximum())))
@@ -836,7 +877,7 @@ class StrategyDetailPage(BasePage):
             _apply()
 
     def _on_dpi_reload_needed(self):
-        """Callback for PresetManager when DPI reload is needed."""
+        """Callback for direct preset facade when DPI reload is needed."""
         # Any preset sync may restart / hot-reload winws2 via the config watcher.
         # Flip the header indicator to spinner so UI matches the real behavior.
         try:
@@ -848,17 +889,17 @@ class StrategyDetailPage(BasePage):
             trigger_dpi_reload(
                 self.parent_app,
                 reason="preset_settings_changed",
-                category_key=self._category_key
+                target_key=self._target_key
             )
 
     def _on_breadcrumb_item_changed(self, route_key: str) -> None:
         """Breadcrumb click handler: navigate up the hierarchy."""
         # BreadcrumbBar physically deletes trailing items on click —
         # restore the full path immediately so the widget is correct when we return.
-        if self._breadcrumb is not None and self._category_key:
+        if self._breadcrumb is not None and self._target_key:
             cat_name = ""
             try:
-                cat_name = self._category_info.full_name if self._category_info else ""
+                cat_name = self._target_info.full_name if self._target_info else ""
             except Exception:
                 pass
             self._breadcrumb.blockSignals(True)
@@ -1503,37 +1544,37 @@ class StrategyDetailPage(BasePage):
         except Exception:
             pass
 
-    def show_category(self, category_key: str, category_info, current_strategy_id: str):
-        """
-        Показывает стратегии для выбранной категории.
-
-        Args:
-            category_key: Ключ категории (например, "youtube_https")
-            category_info: Объект CategoryInfo с информацией о категории
-            current_strategy_id: ID текущей выбранной стратегии
-        """
+    def show_target(self, target_key: str):
+        """Открывает detail page для target из текущего source preset."""
         self._ensure_content_built()
 
-        prev_key = str(self._category_key or "").strip()
+        prev_key = str(self._target_key or "").strip()
         if prev_key:
             self._save_scroll_state(prev_key)
 
-        log(f"StrategyDetailPage.show_category: {category_key}, current={current_strategy_id}", "DEBUG")
-        self._category_key = category_key
-        self._category_info = category_info
-        self._current_strategy_id = current_strategy_id or "none"
+        normalized_key = str(target_key or "").strip().lower()
+        details = self._get_target_details(normalized_key)
+        target_info = self._preset_manager.get_target_ui_item(normalized_key)
+        if target_info is None or details is None:
+            log(f"StrategyDetailPage.show_target: target '{normalized_key}' не найден", "WARNING")
+            return
+
+        log(f"StrategyDetailPage.show_target: {normalized_key}", "DEBUG")
+        self._target_key = normalized_key
+        self._target_info = target_info
+        self._current_strategy_id = (details.current_strategy or "none").strip() or "none"
         self._selected_strategy_id = self._current_strategy_id
         self._close_preview_dialog(force=True)
         try:
-            self._favorite_strategy_ids = self._favorites_store.get_favorites(category_key)
+            self._favorite_strategy_ids = self._favorites_store.get_favorites(normalized_key)
         except Exception:
             self._favorite_strategy_ids = set()
 
         # Обновляем заголовок (только название категории в breadcrumb)
-        self._title.setText(category_info.full_name)
+        self._title.setText(target_info.full_name)
         self._subtitle.setText(
-            f"{category_info.protocol}  |  "
-            f"{self._tr('page.z2_strategy_detail.subtitle.ports', 'порты: {ports}', ports=category_info.ports)}"
+            f"{target_info.protocol}  |  "
+            f"{self._tr('page.z2_strategy_detail.subtitle.ports', 'порты: {ports}', ports=target_info.ports)}"
         )
         self._update_selected_strategy_header(self._selected_strategy_id)
 
@@ -1544,24 +1585,24 @@ class StrategyDetailPage(BasePage):
                 self._breadcrumb.clear()
                 self._breadcrumb.addItem("control", self._tr("page.z2_strategy_detail.breadcrumb.control", "Управление"))
                 self._breadcrumb.addItem("strategies", self._tr("page.z2_strategy_detail.breadcrumb.strategies", "Стратегии DPI"))
-                self._breadcrumb.addItem("detail", category_info.full_name)
+                self._breadcrumb.addItem("detail", target_info.full_name)
             finally:
                 self._breadcrumb.blockSignals(False)
 
         # Determine whether to use the TCP multi-phase UI:
         # - only for TCP strategies (tcp.txt)
-        # - only for direct_zapret2 advanced set (no orchestra/zapret1/basic)
-        new_strategy_type = str(getattr(category_info, "strategy_type", "") or "tcp").strip().lower()
+        # - only for direct_zapret2 advanced mode
+        new_strategy_type = str(getattr(target_info, "strategy_type", "") or "tcp").strip().lower()
         is_udp_like_now = self._is_udp_like_category()
         try:
-            from strategy_menu.strategies_registry import get_current_strategy_set
-            strategy_set = get_current_strategy_set()
+            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
+            strategy_set = get_direct_zapret2_ui_mode()
         except Exception:
-            strategy_set = None
+            strategy_set = "basic"
         want_tcp_phase_mode = (
             (new_strategy_type == "tcp")
             and (not is_udp_like_now)
-            and (strategy_set in (None, "advanced"))
+            and (strategy_set == "advanced")
         )
 
         self._tcp_phase_mode = bool(want_tcp_phase_mode)
@@ -1608,18 +1649,18 @@ class StrategyDetailPage(BasePage):
                 else:
                     self._strategies_tree.clearSelection()
             # Восстанавливаем последнюю позицию прокрутки для этой категории.
-            self._restore_scroll_state(category_key, defer=True)
+            self._restore_scroll_state(target_key, defer=True)
 
         # Обновляем галочку статуса
         is_enabled = self._current_strategy_id != "none"
         self._update_status_icon(is_enabled)
 
         # Показываем режим фильтрации только если категория поддерживает оба варианта
-        has_ipset = hasattr(category_info, 'base_filter_ipset') and category_info.base_filter_ipset
-        has_hostlist = hasattr(category_info, 'base_filter_hostlist') and category_info.base_filter_hostlist
+        has_ipset = hasattr(target_info, 'base_filter_ipset') and target_info.base_filter_ipset
+        has_hostlist = hasattr(target_info, 'base_filter_hostlist') and target_info.base_filter_hostlist
         if has_ipset and has_hostlist:
             self._filter_mode_frame.setVisible(True)
-            saved_filter_mode = self._load_category_filter_mode(category_key)
+            saved_filter_mode = self._load_target_filter_mode(normalized_key)
             self._filter_mode_selector.blockSignals(True)
             self._filter_mode_selector.setChecked(saved_filter_mode == "ipset")
             self._filter_mode_selector.blockSignals(False)
@@ -1628,7 +1669,7 @@ class StrategyDetailPage(BasePage):
 
         # Очищаем поиск и загружаем сохранённую сортировку
         self._search_input.clear()
-        self._sort_mode = self._load_category_sort(category_key)
+        self._sort_mode = self._load_target_sort(normalized_key)
 
         # Сбрасываем фильтры по технике
         self._active_filters.clear()
@@ -1640,14 +1681,14 @@ class StrategyDetailPage(BasePage):
             self._apply_tcp_phase_tabs_visibility()
             preferred = None
             try:
-                preferred = (self._last_active_phase_key_by_category or {}).get(category_key)
+                preferred = (self._last_active_phase_key_by_target or {}).get(normalized_key)
             except Exception:
                 preferred = None
             if not preferred:
-                preferred = self._load_category_last_tcp_phase_tab(category_key)
+                preferred = self._load_target_last_tcp_phase_tab(normalized_key)
                 if preferred:
                     try:
-                        self._last_active_phase_key_by_category[category_key] = preferred
+                        self._last_active_phase_key_by_target[normalized_key] = preferred
                     except Exception:
                         pass
             if preferred:
@@ -1660,14 +1701,14 @@ class StrategyDetailPage(BasePage):
         self._apply_filters()
 
         # Загружаем syndata настройки для категории
-        syndata_settings = self._load_syndata_settings(category_key)
+        syndata_settings = self._load_syndata_settings(normalized_key)
         self._apply_syndata_settings(syndata_settings)
 
         # direct_zapret2 Basic: hide advanced Send/Syndata UI without mutating stored settings.
         is_basic_direct = (strategy_set == "basic")
 
         # syndata/send are supported only for TCP SYN; for UDP/QUIC always hide.
-        protocol_raw = str(getattr(category_info, "protocol", "") or "").upper()
+        protocol_raw = str(getattr(target_info, "protocol", "") or "").upper()
         is_udp_like = ("UDP" in protocol_raw) or ("QUIC" in protocol_raw) or ("L7" in protocol_raw)
 
         if is_basic_direct:
@@ -1707,9 +1748,9 @@ class StrategyDetailPage(BasePage):
 
         # Args editor availability depends on whether category is enabled (strategy != none)
         self._refresh_args_editor_state()
-        self._set_category_enabled_ui(is_enabled)
+        self._set_target_enabled_ui(is_enabled)
 
-        log(f"StrategyDetailPage: показана категория {self._category_key}, sort_mode={self._sort_mode}", "DEBUG")
+        log(f"StrategyDetailPage: показана категория {self._target_key}, sort_mode={self._sort_mode}", "DEBUG")
 
     def refresh_from_preset_switch(self):
         """
@@ -1725,26 +1766,25 @@ class StrategyDetailPage(BasePage):
                 pass
 
     def _apply_preset_refresh(self):
-        if not self._category_key:
+        if not self._target_key:
             return
 
         try:
-            from strategy_menu.strategies_registry import registry
-            category_info = registry.get_category_info(self._category_key) or self._category_info
+            target_info = self._preset_manager.get_target_ui_item(self._target_key) or self._target_info
         except Exception:
-            category_info = self._category_info
+            target_info = self._target_info
 
-        if not category_info:
+        if not target_info:
             return
 
         try:
-            selections = self._preset_manager.get_strategy_selections() or {}
-            current_strategy_id = selections.get(self._category_key, "none") or "none"
+            details = self._get_target_details(self._target_key)
+            current_strategy_id = (details.current_strategy if details is not None else "none") or "none"
         except Exception:
             current_strategy_id = "none"
 
         try:
-            self.show_category(self._category_key, category_info, current_strategy_id)
+            self.show_target(self._target_key)
         except Exception:
             return
 
@@ -1818,46 +1858,26 @@ class StrategyDetailPage(BasePage):
     def _load_strategies(self):
         """Загружает стратегии для текущей категории"""
         try:
-            from strategy_menu.strategies_registry import registry
-
-            # Получаем информацию о категории
-            category_info = registry.get_category_info(self._category_key)
-            if category_info:
-                log(f"StrategyDetailPage: категория {self._category_key}, strategy_type={category_info.strategy_type}", "DEBUG")
+            target_info = self._preset_manager.get_target_ui_item(self._target_key) or self._target_info
+            if target_info:
+                log(f"StrategyDetailPage: категория {self._target_key}, strategy_type={target_info.strategy_type}", "DEBUG")
             else:
-                log(f"StrategyDetailPage: категория {self._category_key} не найдена в реестре!", "ERROR")
+                log(f"StrategyDetailPage: категория {self._target_key} не найдена в реестре!", "ERROR")
                 return
 
-            # Получаем стратегии для категории
-            strategies = registry.get_category_strategies(self._category_key)
-            log(f"StrategyDetailPage: загружено {len(strategies)} стратегий для {self._category_key}", "DEBUG")
-
-            # TCP multi-phase: load additional pure-fake strategies from tcp_fake.txt
-            if self._tcp_phase_mode:
-                try:
-                    from strategy_menu.strategies_registry import get_current_strategy_set
-                    from strategy_menu.strategy_loader import load_strategies_as_dict
-                    current_set = get_current_strategy_set()
-                    fake_set = "advanced" if current_set == "advanced" else None
-                    fake_strategies = load_strategies_as_dict("tcp_fake", fake_set)
-                except Exception:
-                    fake_strategies = {}
-
-                combined = {}
-                # Preserve source ordering: tcp_fake.txt first, then tcp.txt
-                combined.update(fake_strategies or {})
-                combined.update(strategies or {})
-                strategies = combined
+            # Получаем стратегии для category/target из нового direct preset core
+            strategies = self._preset_manager.get_target_strategies(self._target_key)
+            log(f"StrategyDetailPage: загружено {len(strategies)} стратегий для {self._target_key}", "DEBUG")
 
             self._strategies_data_by_id = dict(strategies or {})
             self._default_strategy_order = list(self._strategies_data_by_id.keys())
-            self._loaded_strategy_type = category_info.strategy_type
+            self._loaded_strategy_type = target_info.strategy_type
             
             try:
-                from strategy_menu.strategies_registry import get_current_strategy_set
-                self._loaded_strategy_set = get_current_strategy_set()
+                from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
+                self._loaded_strategy_set = get_direct_zapret2_ui_mode()
             except Exception:
-                self._loaded_strategy_set = None
+                self._loaded_strategy_set = "basic"
                 
             self._loaded_tcp_phase_mode = self._tcp_phase_mode
 
@@ -1866,7 +1886,7 @@ class StrategyDetailPage(BasePage):
                     self._strategies_tree.clear_strategies()
                 except Exception:
                     pass
-                log(f"StrategyDetailPage: список стратегий пуст для {self._category_key}", "INFO")
+                log(f"StrategyDetailPage: список стратегий пуст для {self._target_key}", "INFO")
                 # Fallback display: usually handled by empty list state, but we can stop loading.
                 self._stop_loading()
                 
@@ -1882,7 +1902,7 @@ class StrategyDetailPage(BasePage):
                     # В этот момент чаще всего идёт смена режима/перезапуск.
                     if (not self._is_dpi_running_now()) or (not self.isVisible()):
                         log(
-                            f"StrategyDetailPage: suppress 'no strategies' warning while DPI is stopped ({self._category_key})",
+                            f"StrategyDetailPage: suppress 'no strategies' warning while DPI is stopped ({self._target_key})",
                             "DEBUG",
                         )
                         return
@@ -1893,7 +1913,7 @@ class StrategyDetailPage(BasePage):
                             content=self._tr(
                                 "page.z2_strategy_detail.infobar.no_strategies.content",
                                 "Для категории '{category}' не найдено стратегий.",
-                                category=self._category_key,
+                                category=self._target_key,
                             ),
                             parent=self.window(),
                         )
@@ -2018,9 +2038,9 @@ class StrategyDetailPage(BasePage):
         args_list = [str(a).strip() for a in (args or []) if str(a).strip()]
         is_favorite = (strategy_id != "none") and (strategy_id in self._favorite_strategy_ids)
         is_working = None
-        if self._category_key and strategy_id not in ("none", CUSTOM_STRATEGY_ID):
+        if self._target_key and strategy_id not in ("none", CUSTOM_STRATEGY_ID):
             try:
-                is_working = self._marks_store.get_mark(self._category_key, strategy_id)
+                is_working = self._marks_store.get_mark(self._target_key, strategy_id)
             except Exception:
                 is_working = None
 
@@ -2107,17 +2127,17 @@ class StrategyDetailPage(BasePage):
                 self._strategies_tree.set_selected_strategy("none")
 
         self._refresh_scroll_range()
-        self._restore_scroll_state(self._category_key, defer=True)
+        self._restore_scroll_state(self._target_key, defer=True)
 
     def _refresh_working_marks_for_category(self) -> None:
-        if not (self._category_key and self._strategies_tree):
+        if not (self._target_key and self._strategies_tree):
             return
         for strategy_id in self._strategies_tree.get_strategy_ids():
             if strategy_id in ("none", CUSTOM_STRATEGY_ID):
                 continue
             try:
                 self._strategies_tree.set_working_state(
-                    strategy_id, self._marks_store.get_mark(self._category_key, strategy_id)
+                    strategy_id, self._marks_store.get_mark(self._target_key, strategy_id)
                 )
             except Exception:
                 pass
@@ -2137,11 +2157,11 @@ class StrategyDetailPage(BasePage):
         data["args"] = args_text
         return data
 
-    def _get_preview_rating(self, strategy_id: str, category_key: str):
-        if not (category_key and strategy_id and strategy_id != "none"):
+    def _get_preview_rating(self, strategy_id: str, target_key: str):
+        if not (target_key and strategy_id and strategy_id != "none"):
             return None
         try:
-            mark = self._marks_store.get_mark(category_key, strategy_id)
+            mark = self._marks_store.get_mark(target_key, strategy_id)
         except Exception:
             return None
         if mark is True:
@@ -2150,12 +2170,12 @@ class StrategyDetailPage(BasePage):
             return "broken"
         return None
 
-    def _toggle_preview_rating(self, strategy_id: str, rating: str, category_key: str):
-        if not (category_key and strategy_id and strategy_id != "none"):
+    def _toggle_preview_rating(self, strategy_id: str, rating: str, target_key: str):
+        if not (target_key and strategy_id and strategy_id != "none"):
             return None
         current = None
         try:
-            current = self._marks_store.get_mark(category_key, strategy_id)
+            current = self._marks_store.get_mark(target_key, strategy_id)
         except Exception:
             current = None
 
@@ -2167,10 +2187,10 @@ class StrategyDetailPage(BasePage):
             new_state = None
 
         try:
-            self._marks_store.set_mark(category_key, strategy_id, new_state)
+            self._marks_store.set_mark(target_key, strategy_id, new_state)
         except Exception as e:
             log(f"Error saving strategy mark (preview): {e}", "WARNING")
-            return self._get_preview_rating(strategy_id, category_key)
+            return self._get_preview_rating(strategy_id, target_key)
 
         if self._strategies_tree:
             self._strategies_tree.set_working_state(strategy_id, new_state)
@@ -2229,7 +2249,7 @@ class StrategyDetailPage(BasePage):
             return global_pos
 
     def _show_preview_dialog(self, strategy_id: str, global_pos) -> None:
-        if not (self._category_key and strategy_id and strategy_id != "none"):
+        if not (self._target_key and strategy_id and strategy_id != "none"):
             return
 
         data = self._get_preview_strategy_data(strategy_id)
@@ -2242,7 +2262,7 @@ class StrategyDetailPage(BasePage):
             dlg.set_strategy_data(
                 data,
                 strategy_id=strategy_id,
-                category_key=self._category_key,
+                target_key=self._target_key,
                 rating_getter=self._get_preview_rating,
                 rating_toggler=self._toggle_preview_rating,
             )
@@ -2261,23 +2281,23 @@ class StrategyDetailPage(BasePage):
         pass  # No hover preview instance to hide.
 
     def _on_tree_working_mark_requested(self, strategy_id: str, is_working):
-        if not (self._category_key and strategy_id and strategy_id != "none"):
+        if not (self._target_key and strategy_id and strategy_id != "none"):
             return
         self._on_strategy_marked(strategy_id, is_working)
         if self._strategies_tree:
             self._strategies_tree.set_working_state(strategy_id, is_working)
 
     def _on_strategy_marked(self, strategy_id: str, is_working):
-        if not self._category_key:
+        if not self._target_key:
             return
 
         try:
             if strategy_id and strategy_id != "none":
-                self._marks_store.set_mark(self._category_key, strategy_id, is_working)
+                self._marks_store.set_mark(self._target_key, strategy_id, is_working)
         except Exception as e:
             log(f"Error saving strategy mark: {e}", "WARNING")
 
-        self.strategy_marked.emit(self._category_key, strategy_id, is_working)
+        self.strategy_marked.emit(self._target_key, strategy_id, is_working)
 
     def _apply_syndata_settings(self, settings: dict):
         """Applies persisted syndata settings to controls without re-saving."""
@@ -2373,7 +2393,7 @@ class StrategyDetailPage(BasePage):
         """Открывает WinUI-диалог создания нового пресета."""
         try:
             from core.presets.direct_facade import DirectPresetFacade
-            from preset_zapret2.preset_store import get_preset_store
+            from core.services import get_preset_store
 
             facade = DirectPresetFacade.from_launch_method("direct_zapret2")
             store = get_preset_store()
@@ -2419,8 +2439,7 @@ class StrategyDetailPage(BasePage):
         """Открывает WinUI-диалог переименования текущего активного пресета."""
         try:
             from core.presets.direct_facade import DirectPresetFacade
-            from core.services import get_direct_flow_coordinator
-            from preset_zapret2.preset_store import get_preset_store
+            from core.services import get_direct_flow_coordinator, get_preset_store
 
             facade = DirectPresetFacade.from_launch_method("direct_zapret2")
             store = get_preset_store()
@@ -2484,31 +2503,27 @@ class StrategyDetailPage(BasePage):
                 )
 
     def _on_reset_settings_confirmed(self):
-        """Сбрасывает настройки категории на значения по умолчанию (встроенный шаблон)"""
-        if not self._category_key:
+        """Сбрасывает настройки target на значения по умолчанию (встроенный шаблон)."""
+        if not self._target_key:
             return
 
-        # 1. Reset via PresetManager (saves to preset file)
-        if self._preset_manager.reset_category_settings(self._category_key):
-            log(f"Настройки категории {self._category_key} сброшены", "INFO")
+        # 1. Reset through the direct facade (saves to the source preset file)
+        if self._preset_manager.reset_target_settings(self._target_key):
+            log(f"Настройки категории {self._target_key} сброшены", "INFO")
 
-            # 2. Reload settings from PresetManager and apply to UI
-            protocol_raw = str(getattr(self._category_info, "protocol", "") or "").upper()
-            is_udp_like = ("UDP" in protocol_raw) or ("QUIC" in protocol_raw) or ("L7" in protocol_raw)
-            protocol_key = "udp" if is_udp_like else "tcp"
-            syndata = self._preset_manager.get_category_syndata(self._category_key, protocol=protocol_key)
-            self._apply_syndata_settings(syndata.to_dict())
+            # 2. Reload settings from the direct facade and apply them to UI
+            self._apply_syndata_settings(self._load_syndata_settings(self._target_key))
 
             # 3. Reset filter_mode selector to stored default
             if hasattr(self, '_filter_mode_frame') and self._filter_mode_frame.isVisible():
-                current_mode = self._preset_manager.get_category_filter_mode(self._category_key)
+                current_mode = self._preset_manager.get_target_filter_mode(self._target_key)
                 self._filter_mode_selector.blockSignals(True)
                 self._filter_mode_selector.setChecked(current_mode == "ipset")
                 self._filter_mode_selector.blockSignals(False)
 
             # 4. Update selected strategy highlight and enable toggle
             try:
-                current_strategy_id = self._preset_manager.get_strategy_selections().get(self._category_key, "none")
+                current_strategy_id = self._preset_manager.get_strategy_selections().get(self._target_key, "none")
             except Exception:
                 current_strategy_id = "none"
 
@@ -2534,7 +2549,7 @@ class StrategyDetailPage(BasePage):
             self.show_loading()
             self._update_selected_strategy_header(self._selected_strategy_id)
             self._refresh_args_editor_state()
-            self._set_category_enabled_ui((self._selected_strategy_id or "none") != "none")
+            self._set_target_enabled_ui((self._selected_strategy_id or "none") != "none")
 
     def _on_row_clicked(self, strategy_id: str):
         """Обработчик клика по строке стратегии - выбор активной"""
@@ -2565,11 +2580,11 @@ class StrategyDetailPage(BasePage):
             self._success_icon.hide()
 
         self._refresh_args_editor_state()
-        self._set_category_enabled_ui((strategy_id or "none") != "none")
+        self._set_target_enabled_ui((strategy_id or "none") != "none")
 
         # Применяем стратегию (но остаёмся на странице)
-        if self._category_key:
-            self.strategy_selected.emit(self._category_key, strategy_id)
+        if self._target_key:
+            self.strategy_selected.emit(self._target_key, strategy_id)
 
     def _update_status_icon(self, active: bool):
         """Обновляет галочку статуса в заголовке"""
@@ -2660,28 +2675,33 @@ class StrategyDetailPage(BasePage):
 
     def _on_args_changed(self, strategy_id: str, args: list):
         """Обработчик изменения аргументов стратегии"""
-        if self._category_key:
-            self.args_changed.emit(self._category_key, strategy_id, args)
-            log(f"Args changed: {self._category_key}/{strategy_id} = {args}", "DEBUG")
+        if self._target_key:
+            self.args_changed.emit(self._target_key, strategy_id, args)
+            log(f"Args changed: {self._target_key}/{strategy_id} = {args}", "DEBUG")
+
+    def _get_target_details(self, target_key: str | None = None):
+        key = str(target_key or self._target_key or "").strip().lower()
+        if not key or not getattr(self, "_preset_manager", None):
+            return None
+        try:
+            return self._preset_manager.get_target_details(key)
+        except Exception:
+            return None
 
     def _is_udp_like_category(self) -> bool:
-        protocol_raw = str(getattr(self._category_info, "protocol", "") or "").upper()
+        protocol_raw = str(getattr(self._target_info, "protocol", "") or "").upper()
         return ("UDP" in protocol_raw) or ("QUIC" in protocol_raw) or ("L7" in protocol_raw)
 
     # ======================================================================
     # TCP MULTI-PHASE (direct_zapret2)
     # ======================================================================
 
-    def _get_category_strategy_args_text(self) -> str:
+    def _get_target_strategy_args_text(self) -> str:
         """Returns the stored strategy args (tcp_args/udp_args) for the current category."""
-        if not self._category_key:
+        if not self._target_key:
             return ""
         try:
-            preset = self._preset_manager.get_selected_source_preset()
-            cat = preset.categories.get(self._category_key) if preset else None
-            if not cat:
-                return ""
-            return cat.udp_args if self._is_udp_like_category() else cat.tcp_args
+            return self._preset_manager.get_target_raw_args_text(self._target_key) or ""
         except Exception:
             return ""
 
@@ -2804,10 +2824,10 @@ class StrategyDetailPage(BasePage):
         self._tcp_phase_custom_args = {}
         self._tcp_hide_fake_phase = False
 
-        if not (self._tcp_phase_mode and self._category_key):
+        if not (self._tcp_phase_mode and self._target_key):
             return
 
-        args_text = self._get_category_strategy_args_text()
+        args_text = self._get_target_strategy_args_text()
         args_norm = _normalize_args_text(args_text)
         if not args_norm:
             # Default: fake disabled, no other phases selected.
@@ -2990,29 +3010,26 @@ class StrategyDetailPage(BasePage):
 
     def _save_tcp_phase_state_to_preset(self, *, show_loading: bool = True) -> None:
         """Persists current phase state into preset tcp_args and emits selection update."""
-        if not (self._tcp_phase_mode and self._category_key):
+        if not (self._tcp_phase_mode and self._target_key):
             return
 
         new_args = self._build_tcp_args_from_phase_state()
 
         try:
-            preset = self._preset_manager.get_selected_source_preset()
-            if not preset:
+            if not self._preset_manager.update_target_raw_args_text(
+                self._target_key,
+                new_args,
+                save_and_sync=True,
+            ):
                 return
-
-            if self._category_key not in preset.categories:
-                self._preset_manager.ensure_category(preset, self._category_key)
-
-            cat = preset.categories[self._category_key]
-            cat.tcp_args = new_args
-            cat.strategy_id = self._infer_strategy_id_from_args_exact(new_args)
-            preset.touch()
-            self._preset_manager.save_preset_model(preset)
+            current_selection = (
+                self._preset_manager.get_strategy_selections().get(self._target_key, "none") or "none"
+            )
 
             # Update local state for UI.
-            self._selected_strategy_id = cat.strategy_id or "none"
-            self._current_strategy_id = cat.strategy_id or "none"
-            self._set_category_enabled_ui(self._selected_strategy_id != "none")
+            self._selected_strategy_id = current_selection
+            self._current_strategy_id = current_selection
+            self._set_target_enabled_ui(self._selected_strategy_id != "none")
             self._refresh_args_editor_state()
 
             # UI feedback
@@ -3026,14 +3043,14 @@ class StrategyDetailPage(BasePage):
             self._update_tcp_phase_chip_markers()
 
             # Notify main page (strategy id is "custom" for multi-phase)
-            self.strategy_selected.emit(self._category_key, self._selected_strategy_id)
+            self.strategy_selected.emit(self._target_key, self._selected_strategy_id)
 
         except Exception as e:
             log(f"TCP phase save failed: {e}", "ERROR")
 
     def _on_tcp_phase_row_clicked(self, strategy_id: str) -> None:
         """TCP multi-phase: applies selection for the currently active phase."""
-        if not (self._tcp_phase_mode and self._category_key and self._strategies_tree):
+        if not (self._tcp_phase_mode and self._target_key and self._strategies_tree):
             return
 
         phase = (self._active_phase_key or "").strip().lower()
@@ -3106,7 +3123,7 @@ class StrategyDetailPage(BasePage):
 
         self._save_tcp_phase_state_to_preset(show_loading=True)
 
-    def _set_category_block_dimmed(self, widget: QWidget | None, dimmed: bool) -> None:
+    def _set_target_block_dimmed(self, widget: QWidget | None, dimmed: bool) -> None:
         if widget is None:
             return
 
@@ -3132,19 +3149,19 @@ class StrategyDetailPage(BasePage):
         except Exception:
             pass
 
-    def _set_category_enabled_ui(self, enabled: bool) -> None:
+    def _set_target_enabled_ui(self, enabled: bool) -> None:
         """Keeps controls visible and dims blocks for disabled categories."""
         is_enabled = bool(enabled)
         try:
             if hasattr(self, "_toolbar_frame") and self._toolbar_frame is not None:
                 self._toolbar_frame.setVisible(True)
-                self._set_category_block_dimmed(self._toolbar_frame, not is_enabled)
+                self._set_target_block_dimmed(self._toolbar_frame, not is_enabled)
         except Exception:
             pass
         try:
             if hasattr(self, "_strategies_block") and self._strategies_block is not None:
                 self._strategies_block.setVisible(True)
-                self._set_category_block_dimmed(self._strategies_block, not is_enabled)
+                self._set_target_block_dimmed(self._strategies_block, not is_enabled)
                 if hasattr(self, "layout") and self.layout is not None:
                     self.layout.setStretchFactor(self._strategies_block, 1)
                 self._strategies_block.setMaximumHeight(16777215)
@@ -3157,11 +3174,11 @@ class StrategyDetailPage(BasePage):
 
     def _on_favorite_toggled(self, strategy_id: str, is_favorite: bool) -> None:
         """Called when user clicks the favorite star in the UI."""
-        if not self._category_key:
+        if not self._target_key:
             return
             
         try:
-            self._favorites_store.set_favorite(self._category_key, strategy_id, is_favorite)
+            self._favorites_store.set_favorite(self._target_key, strategy_id, is_favorite)
             
             # Update the cached set for the current category
             if is_favorite:
@@ -3180,63 +3197,47 @@ class StrategyDetailPage(BasePage):
                 pass
 
     def _get_default_strategy(self) -> str:
-        """╨Т╨╛╨╖╨▓╤А╨░╤Й╨░╨╡╤В ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤О ╨┐╨╛ ╤Г╨╝╨╛╨╗╤З╨░╨╜╨╕╤О ╨┤╨╗╤П ╤В╨╡╨║╤Г╤Й╨╡╨╣ ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕"""
-        try:
-            from strategy_menu.strategies_registry import registry
-
-            # ╨Я╤А╨╛╨▒╤Г╨╡╨╝ ╨┐╨╛╨╗╤Г╤З╨╕╤В╤М ╨┤╨╡╤Д╨╛╨╗╤В╨╜╤Г╤О ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤О ╨╕╨╖ ╤А╨╡╨╡╤Б╤В╤А╨░
-            defaults = registry.get_default_selections()
-            if self._category_key in defaults:
-                default_id = defaults[self._category_key]
-                if default_id and default_id != "none" and (default_id in (self._default_strategy_order or [])):
-                    return default_id
-
-            # ╨Ш╨╜╨░╤З╨╡ ╨▒╨╡╤А╤С╨╝ ╨┐╨╡╤А╨▓╤Г╤О ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤О ╨╕╨╖ ╤Б╨┐╨╕╤Б╨║╨░ (╨╜╨╡ none)
-            for sid in (self._default_strategy_order or []):
-                if sid and sid != "none":
-                    return sid
-
-            return "none"
-        except Exception as e:
-            log(f"╨Ю╤И╨╕╨▒╨║╨░ ╨┐╨╛╨╗╤Г╤З╨╡╨╜╨╕╤П ╤Б╤В╤А╨░╤В╨╡╨│╨╕╨╕ ╨┐╨╛ ╤Г╨╝╨╛╨╗╤З╨░╨╜╨╕╤О: {e}", "DEBUG")
-            # Fallback - ╨┐╨╡╤А╨▓╨░╤П ╨╜╨╡-none ╤Б╤В╤А╨░╤В╨╡╨│╨╕╤П
-            for sid in (self._default_strategy_order or []):
-                if sid and sid != "none":
-                    return sid
-            return "none"
+        """Возвращает первую доступную стратегию из текущего каталога target."""
+        for sid in (self._default_strategy_order or []):
+            if sid and sid != "none":
+                return sid
+        return "none"
 
     def _on_filter_mode_changed(self, new_mode: str):
         """╨Ю╨▒╤А╨░╨▒╨╛╤В╤З╨╕╨║ ╨╕╨╖╨╝╨╡╨╜╨╡╨╜╨╕╤П ╤А╨╡╨╢╨╕╨╝╨░ ╤Д╨╕╨╗╤М╤В╤А╨░╤Ж╨╕╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕"""
-        if not self._category_key:
+        if not self._target_key:
             return
 
-        # Save via PresetManager (triggers DPI reload automatically)
-        self._save_category_filter_mode(self._category_key, new_mode)
-        self.filter_mode_changed.emit(self._category_key, new_mode)
-        log(f"╨а╨╡╨╢╨╕╨╝ ╤Д╨╕╨╗╤М╤В╤А╨░╤Ж╨╕╨╕ ╨┤╨╗╤П {self._category_key}: {new_mode}", "INFO")
+        # Save via the direct facade (triggers DPI reload automatically)
+        self._save_target_filter_mode(self._target_key, new_mode)
+        self.filter_mode_changed.emit(self._target_key, new_mode)
+        log(f"╨а╨╡╨╢╨╕╨╝ ╤Д╨╕╨╗╤М╤В╤А╨░╤Ж╨╕╨╕ ╨┤╨╗╤П {self._target_key}: {new_mode}", "INFO")
 
-    def _save_category_filter_mode(self, category_key: str, mode: str):
+    def _save_target_filter_mode(self, target_key: str, mode: str):
         """╨б╨╛╤Е╤А╨░╨╜╤П╨╡╤В ╤А╨╡╨╢╨╕╨╝ ╤Д╨╕╨╗╤М╤В╤А╨░╤Ж╨╕╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╤З╨╡╤А╨╡╨╖ PresetManager"""
-        self._preset_manager.update_category_filter_mode(
-            category_key, mode, save_and_sync=True
+        self._preset_manager.update_target_filter_mode(
+            target_key, mode, save_and_sync=True
         )
 
-    def _load_category_filter_mode(self, category_key: str) -> str:
+    def _load_target_filter_mode(self, target_key: str) -> str:
         """╨Ч╨░╨│╤А╤Г╨╢╨░╨╡╤В ╤А╨╡╨╢╨╕╨╝ ╤Д╨╕╨╗╤М╤В╤А╨░╤Ж╨╕╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╨╕╨╖ PresetManager"""
-        return self._preset_manager.get_category_filter_mode(category_key)
+        details = self._get_target_details(target_key)
+        if details is not None:
+            return str(details.filter_mode or "hostlist")
+        return self._preset_manager.get_target_filter_mode(target_key)
 
-    def _save_category_sort(self, category_key: str, sort_order: str):
+    def _save_target_sort(self, target_key: str, sort_order: str):
         """╨б╨╛╤Е╤А╨░╨╜╤П╨╡╤В ╨┐╨╛╤А╤П╨┤╨╛╨║ ╤Б╨╛╤А╤В╨╕╤А╨╛╨▓╨║╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╤З╨╡╤А╨╡╨╖ PresetManager"""
         # Sort order is UI-only parameter, doesn't affect DPI
         # But save_and_sync=True is needed to persist changes to disk
         # (hot-reload may trigger but sort_order has no effect on winws2)
-        self._preset_manager.update_category_sort_order(
-            category_key, sort_order, save_and_sync=True
+        self._preset_manager.update_target_sort_order(
+            target_key, sort_order, save_and_sync=True
         )
 
-    def _load_category_sort(self, category_key: str) -> str:
+    def _load_target_sort(self, target_key: str) -> str:
         """╨Ч╨░╨│╤А╤Г╨╢╨░╨╡╤В ╨┐╨╛╤А╤П╨┤╨╛╨║ ╤Б╨╛╤А╤В╨╕╤А╨╛╨▓╨║╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╨╕╨╖ PresetManager"""
-        return self._preset_manager.get_category_sort_order(category_key)
+        return self._preset_manager.get_target_sort_order(target_key)
 
     # ======================================================================
     # TCP PHASE TAB PERSISTENCE (UI-only)
@@ -3244,7 +3245,7 @@ class StrategyDetailPage(BasePage):
 
     _REG_TCP_PHASE_TABS_BY_CATEGORY = "TcpPhaseTabByCategory"
 
-    def _load_category_last_tcp_phase_tab(self, category_key: str) -> str | None:
+    def _load_target_last_tcp_phase_tab(self, target_key: str) -> str | None:
         """Loads the last selected TCP phase tab for a category (persisted in registry)."""
         try:
             from config.reg import reg
@@ -3252,7 +3253,7 @@ class StrategyDetailPage(BasePage):
         except Exception:
             return None
 
-        key = str(category_key or "").strip().lower()
+        key = str(target_key or "").strip().lower()
         if not key:
             return None
 
@@ -3269,7 +3270,7 @@ class StrategyDetailPage(BasePage):
 
         return None
 
-    def _save_category_last_tcp_phase_tab(self, category_key: str, phase_key: str) -> None:
+    def _save_target_last_tcp_phase_tab(self, target_key: str, phase_key: str) -> None:
         """Saves the last selected TCP phase tab for a category (best-effort)."""
         try:
             from config.reg import reg
@@ -3277,7 +3278,70 @@ class StrategyDetailPage(BasePage):
         except Exception:
             return
 
-        cat_key = str(category_key or "").strip().lower()
+        cat_key = str(target_key or "").strip().lower()
+        phase = str(phase_key or "").strip().lower()
+        if not cat_key or not phase:
+            return
+
+        # Validate phase key early to avoid persisting garbage.
+        if self._tcp_phase_mode and phase not in (self._phase_tab_index_by_key or {}):
+            return
+
+        try:
+            raw = reg(REGISTRY_PATH_GUI, self._REG_TCP_PHASE_TABS_BY_CATEGORY)
+            data = {}
+            if isinstance(raw, str) and raw.strip():
+                try:
+                    data = json.loads(raw) or {}
+                except Exception:
+                    data = {}
+            if not isinstance(data, dict):
+                data = {}
+            data[cat_key] = phase
+            reg(REGISTRY_PATH_GUI, self._REG_TCP_PHASE_TABS_BY_CATEGORY, json.dumps(data, ensure_ascii=False))
+        except Exception:
+            return
+
+    # ======================================================================
+    # TCP PHASE TAB PERSISTENCE (UI-only)
+    # ======================================================================
+
+    _REG_TCP_PHASE_TABS_BY_CATEGORY = "TcpPhaseTabByCategory"
+
+    def _load_target_last_tcp_phase_tab(self, target_key: str) -> str | None:
+        """Loads the last selected TCP phase tab for a category (persisted in registry)."""
+        try:
+            from config.reg import reg
+            from config import REGISTRY_PATH_GUI
+        except Exception:
+            return None
+
+        key = str(target_key or "").strip().lower()
+        if not key:
+            return None
+
+        try:
+            raw = reg(REGISTRY_PATH_GUI, self._REG_TCP_PHASE_TABS_BY_CATEGORY)
+            if not raw:
+                return None
+            data = json.loads(raw) if isinstance(raw, str) else {}
+            phase = str((data or {}).get(key) or "").strip().lower()
+            if phase and phase in (self._phase_tab_index_by_key or {}):
+                return phase
+        except Exception:
+            return None
+
+        return None
+
+    def _save_target_last_tcp_phase_tab(self, target_key: str, phase_key: str) -> None:
+        """Saves the last selected TCP phase tab for a category (best-effort)."""
+        try:
+            from config.reg import reg
+            from config import REGISTRY_PATH_GUI
+        except Exception:
+            return
+
+        cat_key = str(target_key or "").strip().lower()
         phase = str(phase_key or "").strip().lower()
         if not cat_key or not phase:
             return
@@ -3330,185 +3394,51 @@ class StrategyDetailPage(BasePage):
         self._save_syndata_settings()
 
     def _save_syndata_settings(self):
-        """╨б╨╛╤Е╤А╨░╨╜╤П╨╡╤В syndata ╨╜╨░╤Б╤В╤А╨╛╨╣╨║╨╕ ╨┤╨╗╤П ╤В╨╡╨║╤Г╤Й╨╡╨╣ ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╤З╨╡╤А╨╡╨╖ PresetManager"""
-        if not self._category_key:
+        """Сохраняет out_range/send/syndata через новый direct facade."""
+        if not self._target_key:
             return
 
-        # Build SyndataSettings from UI
-        syndata = SyndataSettings(
-            enabled=self._syndata_toggle.isChecked(),
-            blob=self._blob_combo.currentText(),
-            tls_mod=self._tls_mod_combo.currentText(),
-            autottl_delta=self._autottl_delta_selector.value(),
-            autottl_min=self._autottl_min_selector.value(),
-            autottl_max=self._autottl_max_selector.value(),
-            out_range=self._out_range_spin.value(),
-            out_range_mode=self._out_range_mode,
-            tcp_flags_unset=self._tcp_flags_combo.currentText(),
-            send_enabled=self._send_toggle.isChecked(),
-            send_repeats=self._send_repeats_spin.value(),
-            send_ip_ttl=self._send_ip_ttl_selector.value(),
-            send_ip6_ttl=self._send_ip6_ttl_selector.value(),
-            send_ip_id=self._send_ip_id_combo.currentText(),
-            send_badsum=self._send_badsum_check.isChecked(),
+        payload = {
+            "enabled": self._syndata_toggle.isChecked(),
+            "blob": self._blob_combo.currentText(),
+            "tls_mod": self._tls_mod_combo.currentText(),
+            "autottl_delta": self._autottl_delta_selector.value(),
+            "autottl_min": self._autottl_min_selector.value(),
+            "autottl_max": self._autottl_max_selector.value(),
+            "out_range": self._out_range_spin.value(),
+            "out_range_mode": self._out_range_mode,
+            "tcp_flags_unset": self._tcp_flags_combo.currentText(),
+            "send_enabled": self._send_toggle.isChecked(),
+            "send_repeats": self._send_repeats_spin.value(),
+            "send_ip_ttl": self._send_ip_ttl_selector.value(),
+            "send_ip6_ttl": self._send_ip6_ttl_selector.value(),
+            "send_ip_id": self._send_ip_id_combo.currentText(),
+            "send_badsum": self._send_badsum_check.isChecked(),
+        }
+
+        log(f"Syndata settings saved for {self._target_key}: {payload}", "DEBUG")
+        self._preset_manager.update_target_details_settings(
+            self._target_key,
+            payload,
+            save_and_sync=True,
         )
 
-        log(f"Syndata settings saved for {self._category_key}: {syndata.to_dict()}", "DEBUG")
-
-        # Save with sync=True - ConfigFileWatcher will trigger hot-reload automatically
-        # when it detects the preset file change
-        protocol_raw = str(getattr(self._category_info, "protocol", "") or "").upper()
+    def _load_syndata_settings(self, target_key: str) -> dict:
+        """Читает текущие настройки target из PresetTargetDetails."""
+        details = self._get_target_details(target_key)
+        if details is not None:
+            return _target_details_to_settings_payload(details)
+        protocol_raw = str(getattr(self._target_info, "protocol", "") or "").upper()
         is_udp_like = ("UDP" in protocol_raw) or ("QUIC" in protocol_raw) or ("L7" in protocol_raw)
-        protocol_key = "udp" if is_udp_like else "tcp"
-        self._preset_manager.update_category_syndata(
-            self._category_key, syndata, protocol=protocol_key, save_and_sync=True
-        )
-
-    def _load_syndata_settings(self, category_key: str) -> dict:
-        """╨Ч╨░╨│╤А╤Г╨╢╨░╨╡╤В syndata ╨╜╨░╤Б╤В╤А╨╛╨╣╨║╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╨╕╨╖ PresetManager"""
-        protocol_raw = str(getattr(self._category_info, "protocol", "") or "").upper()
-        is_udp_like = ("UDP" in protocol_raw) or ("QUIC" in protocol_raw) or ("L7" in protocol_raw)
-        protocol_key = "udp" if is_udp_like else "tcp"
-        syndata = self._preset_manager.get_category_syndata(category_key, protocol=protocol_key)
-        return syndata.to_dict()
-
-    # ======================================================================
-    # TCP PHASE TAB PERSISTENCE (UI-only)
-    # ======================================================================
-
-    _REG_TCP_PHASE_TABS_BY_CATEGORY = "TcpPhaseTabByCategory"
-
-    def _load_category_last_tcp_phase_tab(self, category_key: str) -> str | None:
-        """Loads the last selected TCP phase tab for a category (persisted in registry)."""
-        try:
-            from config.reg import reg
-            from config import REGISTRY_PATH_GUI
-        except Exception:
-            return None
-
-        key = str(category_key or "").strip().lower()
-        if not key:
-            return None
-
-        try:
-            raw = reg(REGISTRY_PATH_GUI, self._REG_TCP_PHASE_TABS_BY_CATEGORY)
-            if not raw:
-                return None
-            data = json.loads(raw) if isinstance(raw, str) else {}
-            phase = str((data or {}).get(key) or "").strip().lower()
-            if phase and phase in (self._phase_tab_index_by_key or {}):
-                return phase
-        except Exception:
-            return None
-
-        return None
-
-    def _save_category_last_tcp_phase_tab(self, category_key: str, phase_key: str) -> None:
-        """Saves the last selected TCP phase tab for a category (best-effort)."""
-        try:
-            from config.reg import reg
-            from config import REGISTRY_PATH_GUI
-        except Exception:
-            return
-
-        cat_key = str(category_key or "").strip().lower()
-        phase = str(phase_key or "").strip().lower()
-        if not cat_key or not phase:
-            return
-
-        # Validate phase key early to avoid persisting garbage.
-        if self._tcp_phase_mode and phase not in (self._phase_tab_index_by_key or {}):
-            return
-
-        try:
-            raw = reg(REGISTRY_PATH_GUI, self._REG_TCP_PHASE_TABS_BY_CATEGORY)
-            data = {}
-            if isinstance(raw, str) and raw.strip():
-                try:
-                    data = json.loads(raw) or {}
-                except Exception:
-                    data = {}
-            if not isinstance(data, dict):
-                data = {}
-            data[cat_key] = phase
-            reg(REGISTRY_PATH_GUI, self._REG_TCP_PHASE_TABS_BY_CATEGORY, json.dumps(data, ensure_ascii=False))
-        except Exception:
-            return
-
-    # тХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХР
-    # OUT RANGE METHODS
-    # тХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХР
-
-    def _select_out_range_mode(self, mode: str):
-        """╨Т╤Л╨▒╨╛╤А ╤А╨╡╨╢╨╕╨╝╨░ out_range (n ╨╕╨╗╨╕ d)"""
-        if mode != self._out_range_mode:
-            self._out_range_mode = mode
-            try:
-                self._out_range_seg.setCurrentItem(mode)
-            except Exception:
-                pass
-            self._save_syndata_settings()
-
-    # тХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХР
-    # SYNDATA SETTINGS METHODS
-    # тХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХР
-
-    def _on_send_toggled(self, checked: bool):
-        """╨Ю╨▒╤А╨░╨▒╨╛╤В╤З╨╕╨║ ╨▓╨║╨╗╤О╤З╨╡╨╜╨╕╤П/╨▓╤Л╨║╨╗╤О╤З╨╡╨╜╨╕╤П send ╨┐╨░╤А╨░╨╝╨╡╤В╤А╨╛╨▓"""
-        self._send_settings.setVisible(checked)
-        self._save_syndata_settings()
-
-    def _on_syndata_toggled(self, checked: bool):
-        """╨Ю╨▒╤А╨░╨▒╨╛╤В╤З╨╕╨║ ╨▓╨║╨╗╤О╤З╨╡╨╜╨╕╤П/╨▓╤Л╨║╨╗╤О╤З╨╡╨╜╨╕╤П syndata ╨┐╨░╤А╨░╨╝╨╡╤В╤А╨╛╨▓"""
-        self._syndata_settings.setVisible(checked)
-        self._save_syndata_settings()
-
-    def _save_syndata_settings(self):
-        """╨б╨╛╤Е╤А╨░╨╜╤П╨╡╤В syndata ╨╜╨░╤Б╤В╤А╨╛╨╣╨║╨╕ ╨┤╨╗╤П ╤В╨╡╨║╤Г╤Й╨╡╨╣ ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╤З╨╡╤А╨╡╨╖ PresetManager"""
-        if not self._category_key:
-            return
-
-        # Build SyndataSettings from UI
-        syndata = SyndataSettings(
-            enabled=self._syndata_toggle.isChecked(),
-            blob=self._blob_combo.currentText(),
-            tls_mod=self._tls_mod_combo.currentText(),
-            autottl_delta=self._autottl_delta_selector.value(),
-            autottl_min=self._autottl_min_selector.value(),
-            autottl_max=self._autottl_max_selector.value(),
-            out_range=self._out_range_spin.value(),
-            out_range_mode=self._out_range_mode,
-            tcp_flags_unset=self._tcp_flags_combo.currentText(),
-            send_enabled=self._send_toggle.isChecked(),
-            send_repeats=self._send_repeats_spin.value(),
-            send_ip_ttl=self._send_ip_ttl_selector.value(),
-            send_ip6_ttl=self._send_ip6_ttl_selector.value(),
-            send_ip_id=self._send_ip_id_combo.currentText(),
-            send_badsum=self._send_badsum_check.isChecked(),
-        )
-
-        log(f"Syndata settings saved for {self._category_key}: {syndata.to_dict()}", "DEBUG")
-
-        # Save with sync=True - ConfigFileWatcher will trigger hot-reload automatically
-        # when it detects the preset file change
-        protocol_raw = str(getattr(self._category_info, "protocol", "") or "").upper()
-        is_udp_like = ("UDP" in protocol_raw) or ("QUIC" in protocol_raw) or ("L7" in protocol_raw)
-        protocol_key = "udp" if is_udp_like else "tcp"
-        self._preset_manager.update_category_syndata(
-            self._category_key, syndata, protocol=protocol_key, save_and_sync=True
-        )
-
-    def _load_syndata_settings(self, category_key: str) -> dict:
-        """╨Ч╨░╨│╤А╤Г╨╢╨░╨╡╤В syndata ╨╜╨░╤Б╤В╤А╨╛╨╣╨║╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╨╕╨╖ PresetManager"""
-        protocol_raw = str(getattr(self._category_info, "protocol", "") or "").upper()
-        is_udp_like = ("UDP" in protocol_raw) or ("QUIC" in protocol_raw) or ("L7" in protocol_raw)
-        protocol_key = "udp" if is_udp_like else "tcp"
-        syndata = self._preset_manager.get_category_syndata(category_key, protocol=protocol_key)
-        return syndata.to_dict()
+        fallback = _target_details_to_settings_payload(None)
+        if is_udp_like:
+            fallback["enabled"] = False
+            fallback["send_enabled"] = False
+        return fallback
 
 
     def _refresh_args_editor_state(self):
-        enabled = bool(self._category_key) and (self._selected_strategy_id or "none") != "none"
+        enabled = bool(self._target_key) and (self._selected_strategy_id or "none") != "none"
         try:
             if hasattr(self, "_edit_args_btn"):
                 self._edit_args_btn.setEnabled(enabled)
@@ -3520,7 +3450,7 @@ class StrategyDetailPage(BasePage):
 
     def _toggle_args_editor(self):
         """Открывает MessageBoxBase диалог для редактирования args текущей категории."""
-        if not self._category_key:
+        if not self._target_key:
             return
         if (self._selected_strategy_id or "none") == "none":
             return
@@ -3536,15 +3466,12 @@ class StrategyDetailPage(BasePage):
 
     def _load_args_text(self) -> str:
         """Возвращает текущий args текст из пресета для открытия в диалоге."""
-        if not self._category_key:
+        if not self._target_key:
             return ""
         if (self._selected_strategy_id or "none") == "none":
             return ""
         try:
-            preset = self._preset_manager.get_selected_source_preset()
-            cat = preset.categories.get(self._category_key) if preset else None
-            if cat:
-                return (cat.udp_args if self._is_udp_like_category() else cat.tcp_args) or ""
+            return self._preset_manager.get_target_raw_args_text(self._target_key) or ""
         except Exception as e:
             log(f"Args editor: failed to load preset args: {e}", "DEBUG")
         return ""
@@ -3558,7 +3485,7 @@ class StrategyDetailPage(BasePage):
         pass
 
     def _apply_args_editor(self, raw: str = ""):
-        if not self._category_key:
+        if not self._target_key:
             return
         if (self._selected_strategy_id or "none") == "none":
             return
@@ -3567,23 +3494,17 @@ class StrategyDetailPage(BasePage):
         normalized = "\n".join(lines)
 
         try:
-            preset = self._preset_manager.get_selected_source_preset()
-            if not preset:
+            if not self._preset_manager.update_target_raw_args_text(
+                self._target_key,
+                normalized,
+                save_and_sync=True,
+            ):
                 return
 
-            if self._category_key not in preset.categories:
-                self._preset_manager.ensure_category(preset, self._category_key)
-
-            cat = preset.categories[self._category_key]
-
-            if self._is_udp_like_category():
-                cat.udp_args = normalized
-            else:
-                cat.tcp_args = normalized
-
-            preset.touch()
-            self._preset_manager.save_preset_model(preset)
-
+            self._selected_strategy_id = (
+                self._preset_manager.get_strategy_selections().get(self._target_key, "none") or "none"
+            )
+            self._current_strategy_id = self._selected_strategy_id
             self._args_editor_dirty = False
             self.show_loading()
             self._on_args_changed(self._selected_strategy_id, lines)
@@ -3671,9 +3592,9 @@ class StrategyDetailPage(BasePage):
 
         self._active_phase_key = key
         try:
-            if self._category_key:
-                self._last_active_phase_key_by_category[self._category_key] = key
-                self._save_category_last_tcp_phase_tab(self._category_key, key)
+            if self._target_key:
+                self._last_active_phase_key_by_target[self._target_key] = key
+                self._save_target_last_tcp_phase_tab(self._target_key, key)
         except Exception:
             pass
 
@@ -3749,8 +3670,8 @@ class StrategyDetailPage(BasePage):
 
         def _set_sort(mode: str):
             self._sort_mode = mode
-            if self._category_key:
-                self._save_category_sort(self._category_key, self._sort_mode)
+            if self._target_key:
+                self._save_target_sort(self._target_key, self._sort_mode)
             self._apply_sort()
 
         entries = [
@@ -3798,7 +3719,7 @@ class StrategyDetailPage(BasePage):
                 )
                 detail = ""
                 try:
-                    detail = self._category_info.full_name if self._category_info else ""
+                    detail = self._target_info.full_name if self._target_info else ""
                 except Exception:
                     detail = ""
                 self._breadcrumb.addItem(
@@ -3816,10 +3737,10 @@ class StrategyDetailPage(BasePage):
             protocol = ""
             ports = ""
             try:
-                if self._category_info:
-                    cat_name = str(getattr(self._category_info, "full_name", "") or "").strip()
-                    protocol = str(getattr(self._category_info, "protocol", "") or "").strip()
-                    ports = str(getattr(self._category_info, "ports", "") or "").strip()
+                if self._target_info:
+                    cat_name = str(getattr(self._target_info, "full_name", "") or "").strip()
+                    protocol = str(getattr(self._target_info, "protocol", "") or "").strip()
+                    ports = str(getattr(self._target_info, "ports", "") or "").strip()
             except Exception:
                 pass
             self._title.setText(cat_name or self._tr("page.z2_strategy_detail.header.select_category", "Выберите категорию"))

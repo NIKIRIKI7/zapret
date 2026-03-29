@@ -51,7 +51,7 @@ class ArgsPreviewDialog(QDialog):
             | Qt.WindowType.WindowCloseButtonHint
         )
         self._strategy_id = None
-        self._category_key = None
+        self._target_key = None
         self._rating_getter = None
         self._rating_toggler = None
         self._original_args = ""
@@ -158,12 +158,12 @@ class ArgsPreviewDialog(QDialog):
         strategy_data,
         strategy_id=None,
         source_widget=None,
-        category_key=None,
+        target_key=None,
         rating_getter=None,
         rating_toggler=None,
     ):
         self._strategy_id = strategy_id
-        self._category_key = category_key
+        self._target_key = target_key
         self._rating_getter = rating_getter
         self._rating_toggler = rating_toggler
 
@@ -260,9 +260,9 @@ class ArgsPreviewDialog(QDialog):
 
     def _update_rating_buttons(self):
         current_rating = None
-        if self._rating_getter and self._strategy_id and self._category_key:
+        if self._rating_getter and self._strategy_id and self._target_key:
             try:
-                current_rating = self._rating_getter(self._strategy_id, self._category_key)
+                current_rating = self._rating_getter(self._strategy_id, self._target_key)
             except Exception:
                 pass
 
@@ -280,7 +280,7 @@ class ArgsPreviewDialog(QDialog):
         if self._rating_toggler:
             try:
                 new_rating = self._rating_toggler(
-                    self._strategy_id, rating, self._category_key
+                    self._strategy_id, rating, self._target_key
                 )
             except Exception:
                 pass
@@ -331,7 +331,7 @@ class StrategyPreviewManager:
         widget,
         strategy_id,
         strategy_data,
-        category_key=None,
+        target_key=None,
         rating_getter=None,
         rating_toggler=None,
     ):
@@ -352,7 +352,7 @@ class StrategyPreviewManager:
             strategy_data,
             strategy_id,
             source_widget=widget,
-            category_key=category_key,
+            target_key=target_key,
             rating_getter=rating_getter,
             rating_toggler=rating_toggler,
         )
