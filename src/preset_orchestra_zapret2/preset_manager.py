@@ -321,7 +321,7 @@ class PresetManager:
             # Keep inference aligned with the currently selected strategies catalog
             # (direct_zapret2 Basic/Advanced and other launch-method based sets).
             try:
-                from strategy_menu.strategies_registry import get_current_strategy_set
+                from legacy_registry_launch.strategies_registry import get_current_strategy_set
                 current_strategy_set = get_current_strategy_set()
             except Exception:
                 current_strategy_set = None
@@ -1554,7 +1554,7 @@ class PresetManager:
         from .txt_preset_parser import parse_preset_content
 
         try:
-            from strategy_menu.strategies_registry import get_current_strategy_set
+            from legacy_registry_launch.strategies_registry import get_current_strategy_set
             current_strategy_set = get_current_strategy_set()
         except Exception:
             current_strategy_set = None
@@ -1707,7 +1707,7 @@ class PresetManager:
         from .strategy_inference import infer_strategy_id_from_args
 
         try:
-            from strategy_menu.strategies_registry import get_current_strategy_set
+            from legacy_registry_launch.strategies_registry import get_current_strategy_set
             current_strategy_set = get_current_strategy_set()
         except Exception:
             current_strategy_set = None
@@ -2161,7 +2161,7 @@ class PresetManager:
         try:
             # Keep strategy args resolution in sync with UI-selected strategy set
             # (direct_zapret2 Basic/Advanced load from %APPDATA%\zapret\direct_zapret2\*_strategies\*.txt).
-            from strategy_menu.strategies_registry import get_current_strategy_set
+            from legacy_registry_launch.strategies_registry import get_current_strategy_set
             strategy_set = get_current_strategy_set()
         except Exception:
             strategy_set = None

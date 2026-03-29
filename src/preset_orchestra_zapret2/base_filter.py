@@ -82,7 +82,7 @@ def get_category_base_filter_template(category_key: str, filter_mode: str) -> Op
     # additional path fallbacks.
     if not info:
         try:
-            from strategy_menu.strategy_loader import load_categories as _load_categories_sm
+            from legacy_registry_launch.strategy_loader import load_categories as _load_categories_sm
 
             info = _load_categories_sm().get(category_key) or {}
         except Exception as e:

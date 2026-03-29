@@ -15,7 +15,7 @@ from log import log
 from strategy_menu import get_strategy_launch_method
 
 # Re-export common utilities for backwards compatibility
-from .builder_common import (
+from legacy_registry_launch.builder_common import (
     calculate_required_filters,
     _apply_settings,
     _clean_spaces,
@@ -25,8 +25,8 @@ from .builder_common import (
 )
 
 # Import both implementations
-from zapret1_launcher.strategy_builder import combine_strategies_v1
-from zapret2_launcher.strategy_builder import combine_strategies_v2
+from legacy_registry_launch.zapret1_strategy_builder import combine_strategies_v1
+from legacy_registry_launch.zapret2_strategy_builder import combine_strategies_v2
 
 
 def _combine_direct_source_preset(launch_method: str) -> dict:

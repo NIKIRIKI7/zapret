@@ -11,7 +11,7 @@ Important:
 
 from log import log
 
-from .launch_method_store import get_strategy_launch_method
+from strategy_menu.launch_method_store import get_strategy_launch_method
 
 _legacy_selections_cache = None
 _legacy_selections_cache_time = 0
@@ -90,7 +90,7 @@ def get_direct_strategy_selections() -> dict:
                 selections = {}
         elif method == "direct_zapret2_orchestra":
             try:
-                from .strategies_registry import registry
+                from legacy_registry_launch.strategies_registry import registry
                 from preset_orchestra_zapret2 import PresetManager, ensure_default_preset_exists
 
                 ensure_default_preset_exists()
@@ -101,11 +101,11 @@ def get_direct_strategy_selections() -> dict:
                 selections.update({k: (v or "none") for k, v in preset_selections.items()})
             except Exception as e:
                 log(f"Ошибка чтения preset-zapret2-orchestra.txt для выбора стратегий: {e}", "DEBUG")
-                from .strategies_registry import registry
+                from legacy_registry_launch.strategies_registry import registry
 
                 selections = {k: "none" for k in registry.get_all_target_keys()}
         else:
-            from .strategies_registry import registry
+            from legacy_registry_launch.strategies_registry import registry
 
             default_selections = registry.get_default_selections()
             selections = dict(default_selections)
@@ -131,7 +131,7 @@ def get_direct_strategy_selections() -> dict:
         log(traceback.format_exc(), "DEBUG")
         if method in ("direct_zapret1", "direct_zapret2"):
             return {}
-        from .strategies_registry import registry
+        from legacy_registry_launch.strategies_registry import registry
 
         return registry.get_default_selections()
 
@@ -169,7 +169,7 @@ def set_direct_strategy_selections(selections: dict) -> bool:
             return success
 
         if method == "direct_zapret2_orchestra":
-            from .strategies_registry import registry
+            from legacy_registry_launch.strategies_registry import registry
             from preset_orchestra_zapret2 import PresetManager, ensure_default_preset_exists
 
             if not ensure_default_preset_exists():
@@ -198,7 +198,7 @@ def get_direct_strategy_for_target(target_key: str) -> str:
         selections = get_direct_strategy_selections()
         return selections.get(target_key, "none") or "none"
 
-    from .strategies_registry import registry
+    from legacy_registry_launch.strategies_registry import registry
 
     target_info = registry.get_target_info(target_key)
     if target_info:

@@ -144,7 +144,7 @@ def get_system_blobs_info() -> dict:
             }
         }
     """
-    from zapret2_launcher.strategy_builder import HARDCODED_BLOBS
+    from legacy_registry_launch.zapret2_strategy_builder import HARDCODED_BLOBS
     from config import BIN_FOLDER
 
     # Парсим HARDCODED_BLOBS строку

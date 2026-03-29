@@ -11,8 +11,8 @@ def get_direct_strategy_summary(window, max_items: int = 2) -> str:
 
         method = (get_strategy_launch_method() or "").strip().lower()
         if method == "direct_zapret2_orchestra":
-            from strategy_menu import get_direct_strategy_selections
-            from strategy_menu.strategies_registry import registry
+            from legacy_registry_launch.selection_store import get_direct_strategy_selections
+            from legacy_registry_launch.strategies_registry import registry
 
             selections = get_direct_strategy_selections() or {}
             active_names: list[str] = []

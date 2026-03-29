@@ -1034,8 +1034,8 @@ class Zapret2DirectControlPage(BasePage):
                             seen_lists.add(dedupe_key)
                             active_lists.append(list_name)
                 else:
-                    from strategy_menu.legacy_selection_store import get_direct_strategy_selections
-                    from strategy_menu.strategies_registry import registry
+                    from legacy_registry_launch.selection_store import get_direct_strategy_selections
+                    from legacy_registry_launch.strategies_registry import registry
 
                     selections = get_direct_strategy_selections() or {}
                     for target_key in registry.get_all_target_keys_by_command_order():

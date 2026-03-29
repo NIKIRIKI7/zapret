@@ -728,7 +728,7 @@ class ControlPage(BasePage):
 
                     selections = DirectPresetFacade.from_launch_method(method).get_strategy_selections() or {}
                 else:
-                    from strategy_menu import get_direct_strategy_selections
+                    from legacy_registry_launch.selection_store import get_direct_strategy_selections
 
                     selections = get_direct_strategy_selections() or {}
                 active_count = sum(1 for strategy_id in selections.values() if (strategy_id or "none") != "none")

@@ -120,7 +120,7 @@ class InitializationManager:
     def _init_strategy_cache(self):
         """Прогрев кэша стратегий для быстрого открытия вкладок"""
         try:
-            from strategy_menu.strategies_registry import registry
+            from legacy_registry_launch.strategies_registry import registry
             from strategy_menu import get_strategy_launch_method
 
             # Прогреваем кэш отсортированных ключей
@@ -134,7 +134,7 @@ class InitializationManager:
 
                 DirectPresetFacade.from_launch_method(method).get_strategy_selections()
             else:
-                from strategy_menu import get_direct_strategy_selections
+                from legacy_registry_launch.selection_store import get_direct_strategy_selections
 
                 get_direct_strategy_selections()
 
@@ -370,7 +370,7 @@ class InitializationManager:
 
         # Для orchestra direct-режима пока остаётся legacy selections path.
         elif launch_method == "direct_zapret2_orchestra":
-            from strategy_menu import get_direct_strategy_selections
+            from legacy_registry_launch.selection_store import get_direct_strategy_selections
 
             selections = get_direct_strategy_selections()
             has_any = any(v and v != 'none' for v in selections.values())

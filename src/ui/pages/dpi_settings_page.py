@@ -1247,9 +1247,8 @@ class DpiSettingsPage(BasePage):
     def _select_method(self, method: str):
         """Обработчик выбора метода"""
         try:
-            from strategy_menu import (
-                set_strategy_launch_method, get_strategy_launch_method, invalidate_direct_selections_cache,
-            )
+            from strategy_menu import set_strategy_launch_method, get_strategy_launch_method
+            from legacy_registry_launch.selection_store import invalidate_direct_selections_cache
             from preset_orchestra_zapret2 import ensure_default_preset_exists
 
             # Запоминаем предыдущий метод, чтобы понять, затрагиваем ли мы legacy registry-driven ветки.
@@ -1276,7 +1275,7 @@ class DpiSettingsPage(BasePage):
                 and (previous_method in registry_driven_methods or method in registry_driven_methods)
             ):
                 try:
-                    from strategy_menu.strategies_registry import registry
+                    from legacy_registry_launch.strategies_registry import registry
 
                     registry.reload_strategies()
                 except Exception:

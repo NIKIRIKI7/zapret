@@ -968,7 +968,8 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
                     # ✅ ДЛЯ ДРУГИХ РЕЖИМОВ - используем combine_strategies
                     else:
                         from launcher_common import combine_strategies
-                        from strategy_menu import get_direct_strategy_selections, get_default_selections
+                        from legacy_registry_launch.selection_store import get_direct_strategy_selections
+                        from legacy_registry_launch.strategies_registry import get_default_selections
 
                         try:
                             category_selections = get_direct_strategy_selections()

@@ -489,7 +489,7 @@ class StrategyScanner:
     def _load_catalog_strategies(self) -> list[dict]:
         """Load catalog strategies for current scan protocol."""
         try:
-            from strategy_menu.strategy_loader import load_strategies_as_dict
+            from legacy_registry_launch.strategy_loader import load_strategies_as_dict
             if self._scan_protocol == _PROTOCOL_STUN_VOICE:
                 strategy_type = "discord_voice"
             elif self._scan_protocol == _PROTOCOL_UDP_GAMES:

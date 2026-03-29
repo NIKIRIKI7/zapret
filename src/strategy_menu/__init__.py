@@ -4,8 +4,8 @@
 
 Важно:
 - для direct_zapret1/direct_zapret2 источник истины теперь selected source preset;
-- registry и legacy launcher helpers по-прежнему нужны для orchestra и старых registry-driven сценариев;
-- этот модуль остаётся общим фасадом приложения, но не должен считаться ядром нового direct flow.
+- этот модуль — фасад launch method / UI prefs / marks / direct source-preset helpers;
+- registry/orchestra helpers должны импортироваться явно из legacy модулей, а не через этот общий фасад.
 """
 
 from log import log
@@ -39,33 +39,13 @@ from .marks_store_bridge import (
     toggle_strategy_rating,
     clear_all_strategy_ratings,
 )
-from .legacy_selection_store import (
-    get_direct_strategy_selections,
-    set_direct_strategy_selections,
-    get_direct_strategy_for_target,
-    set_direct_strategy_for_target,
-    invalidate_direct_selections_cache,
-)
-from .strategies_registry import (
-    registry,
-    get_strategies_registry,
-    get_target_strategies,
-    get_target_info,
-    get_tab_names,
-    get_tab_tooltips,
-    get_default_selections,
-    get_target_icon,
-    TargetInfo,
-    reload_targets,
-)
-
-
 # ==================== ИНИЦИАЛИЗАЦИЯ DIRECT ORCHESTRA ====================
 
 def clear_direct_zapret2_orchestra_strategies() -> bool:
     """Очищает все сохранённые стратегии для режима direct_zapret2_orchestra (устанавливает все в 'none')."""
     try:
         from preset_orchestra_zapret2 import ensure_default_preset_exists, PresetManager
+        from legacy_registry_launch.strategies_registry import registry
 
         log("🧹 Очистка стратегий DirectOrchestra (первая инициализация)...", "INFO")
 
@@ -75,6 +55,7 @@ def clear_direct_zapret2_orchestra_strategies() -> bool:
         manager = PresetManager()
         selections = {target_key: "none" for target_key in registry.get_all_target_keys()}
         manager.set_strategy_selections(selections, save_and_sync=True)
+        from legacy_registry_launch.selection_store import invalidate_direct_selections_cache
         invalidate_direct_selections_cache()
 
         log("✅ Все стратегии DirectOrchestra установлены в 'none'", "INFO")
@@ -171,18 +152,6 @@ def get_debug_log_file() -> str:
 
 
 __all__ = [
-    # Реестр стратегий
-    "registry",
-    "get_strategies_registry",
-    "get_target_strategies",
-    "get_target_info",
-    "get_tab_names",
-    "get_tab_tooltips",
-    "get_default_selections",
-    "get_target_icon",
-    "TargetInfo",
-    "reload_targets",
-
     # Launch method
     "get_strategy_launch_method",
     "set_strategy_launch_method",
@@ -211,13 +180,6 @@ __all__ = [
     "set_strategy_rating",
     "toggle_strategy_rating",
     "clear_all_strategy_ratings",
-
-    # Direct selections
-    "get_direct_strategy_selections",
-    "set_direct_strategy_selections",
-    "get_direct_strategy_for_target",
-    "set_direct_strategy_for_target",
-    "invalidate_direct_selections_cache",
 
     # Direct/orchestra helpers
     "clear_direct_zapret2_orchestra_strategies",

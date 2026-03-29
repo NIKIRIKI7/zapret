@@ -1,4 +1,4 @@
-# zapret1_launcher/strategy_builder.py
+# legacy_registry_launch/zapret1_strategy_builder.py
 """
 Strategy list builder for Zapret 1 (winws.exe).
 
@@ -19,8 +19,8 @@ Important:
 import re
 import os
 from log import log
-from strategy_menu.strategies_registry import registry
-from launcher_common.builder_common import (
+from .strategies_registry import registry
+from .builder_common import (
     calculate_required_filters,
     _apply_settings,
     _clean_spaces,

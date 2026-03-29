@@ -1,4 +1,4 @@
-# launcher_common/builder_common.py
+# legacy_registry_launch/builder_common.py
 
 """
 Common utilities for legacy strategy combiners shared between V1 and V2.
@@ -13,7 +13,7 @@ import re
 import os
 from log import log
 from .constants import LABEL_RECOMMENDED, LABEL_GAME, LABEL_CAUTION, LABEL_EXPERIMENTAL, LABEL_STABLE
-from strategy_menu.strategies_registry import registry
+from .strategies_registry import registry
 from .blobs import build_args_with_deduped_blobs
 
 

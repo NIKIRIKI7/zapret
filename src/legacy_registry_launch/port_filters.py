@@ -1,4 +1,4 @@
-# launcher_common/port_filters.py
+# legacy_registry_launch/port_filters.py
 """
 Конфигурация фильтров портов и их связь с target'ами legacy registry-слоя.
 
@@ -204,7 +204,7 @@ def get_targets_for_filter(filter_key: str) -> List[str]:
     Returns:
         List[str] - список ключей target'ов
     """
-    from strategy_menu.strategies_registry import registry
+    from legacy_registry_launch.strategies_registry import registry
 
     targets = []
     all_target_keys = registry.get_all_target_keys()
@@ -228,7 +228,7 @@ def build_filter_to_targets_map() -> Dict[str, List[str]]:
     """
     filter_map = {key: [] for key in FILTERS.keys()}
 
-    from strategy_menu.strategies_registry import registry
+    from legacy_registry_launch.strategies_registry import registry
     all_target_keys = registry.get_all_target_keys()
 
     for target_key in all_target_keys:
@@ -251,7 +251,7 @@ def build_target_to_filters_map() -> Dict[str, Set[str]]:
     """
     target_map = {}
 
-    from strategy_menu.strategies_registry import registry
+    from legacy_registry_launch.strategies_registry import registry
     all_target_keys = registry.get_all_target_keys()
 
     for target_key in all_target_keys:

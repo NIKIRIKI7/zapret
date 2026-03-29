@@ -36,8 +36,8 @@ def get_current_strategy_set() -> Optional[str]:
         "zapret1" для direct_zapret1 и т.д.
     """
     try:
-        from .launch_method_store import get_strategy_launch_method
-        from .ui_prefs_store import get_direct_zapret2_ui_mode
+        from strategy_menu.launch_method_store import get_strategy_launch_method
+        from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
         method = get_strategy_launch_method()
 
         # direct_zapret2 supports an additional UI mode selector (Basic/Advanced)
@@ -202,7 +202,7 @@ def _load_categories_from_json() -> Dict[str, TargetInfo]:
     try:
         from .strategy_loader import load_categories
 
-        raw_categories = load_targets()
+        raw_categories = load_categories()
         result = {}
         
         for key, data in raw_categories.items():
@@ -467,7 +467,7 @@ class StrategiesRegistry:
         # Provide a name fallback so main lists don't show raw ids or "custom" unnecessarily.
         if not strategy and target_info.strategy_type == "tcp":
             try:
-                from strategy_menu.strategy_loader import load_strategies_as_dict
+                from .strategy_loader import load_strategies_as_dict
                 # В advanced-режиме tcp_fake берётся из advanced_strategies;
                 # в остальных режимах используем обычный набор без отдельного strategy_set.
                 current_set = get_current_strategy_set()

@@ -59,9 +59,9 @@ class StrategyChecker:
                 return self._check_direct_source_preset()
 
             # Оркестр пока остаётся на legacy launcher path.
-            from strategy_menu import get_direct_strategy_selections
+            from legacy_registry_launch.selection_store import get_direct_strategy_selections
             from launcher_common import combine_strategies
-            from strategy_menu.strategies_registry import registry
+            from legacy_registry_launch.strategies_registry import registry
 
             selections = get_direct_strategy_selections()
             combined = combine_strategies(**selections)

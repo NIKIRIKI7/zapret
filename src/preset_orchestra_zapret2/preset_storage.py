@@ -308,7 +308,7 @@ def load_preset(name: str) -> Optional[Preset]:
         from .strategy_inference import infer_strategy_id_from_args
 
         try:
-            from strategy_menu.strategies_registry import get_current_strategy_set
+            from legacy_registry_launch.strategies_registry import get_current_strategy_set
             current_strategy_set = get_current_strategy_set()
         except Exception:
             current_strategy_set = None

@@ -881,7 +881,7 @@ class DPIController:
 
             # Сохраняем выборы в реестр для будущего использования
             if 'selections' in selected_mode and launch_method != "direct_zapret2_orchestra":
-                from strategy_menu import set_direct_strategy_selections
+                from legacy_registry_launch.selection_store import set_direct_strategy_selections
                 selections = selected_mode['selections']
                 set_direct_strategy_selections(selections)
             

@@ -465,7 +465,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
     @staticmethod
     def _load_categories() -> dict[str, Any]:
         try:
-            from strategy_menu.strategies_registry import registry
+            from legacy_registry_launch.strategies_registry import registry
 
             categories = dict(registry.categories or {})
             if categories:
@@ -483,7 +483,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
 
     def _load_current_selections(self) -> dict[str, str]:
         try:
-            from strategy_menu import get_direct_strategy_selections
+            from legacy_registry_launch.selection_store import get_direct_strategy_selections
 
             raw = get_direct_strategy_selections() or {}
         except Exception:
@@ -495,7 +495,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
     def _load_filter_modes() -> dict[str, str]:
         try:
             from strategy_menu.command_builder import get_filter_mode
-            from strategy_menu.strategies_registry import registry
+            from legacy_registry_launch.strategies_registry import registry
 
             out = {}
             for key in (registry.categories or {}).keys():
@@ -509,7 +509,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
     @staticmethod
     def _load_category_strategies(category_key: str) -> dict[str, dict]:
         try:
-            from strategy_menu.strategies_registry import registry
+            from legacy_registry_launch.strategies_registry import registry
 
             strategies = registry.get_category_strategies(category_key) or {}
             result: dict[str, dict] = {}
@@ -700,7 +700,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
 
         self.show_loading()
         try:
-            from strategy_menu import set_direct_strategy_for_target
+            from legacy_registry_launch.selection_store import set_direct_strategy_for_target
 
             ok = set_direct_strategy_for_target(category_key, sid)
             if not ok:
@@ -813,7 +813,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
             self._reload_btn.set_loading(True)
 
         try:
-            from strategy_menu.strategies_registry import registry
+            from legacy_registry_launch.strategies_registry import registry
 
             registry.reload_strategies()
             self._categories = self._load_categories()
@@ -843,7 +843,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
 
     def _clear_all(self) -> None:
         try:
-            from strategy_menu import set_direct_strategy_selections
+            from legacy_registry_launch.selection_store import set_direct_strategy_selections
 
             none_selections = {k: "none" for k in (self._categories or {}).keys()}
             set_direct_strategy_selections(none_selections)
@@ -984,7 +984,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
         if not categories_to_disable:
             return
         try:
-            from strategy_menu import set_direct_strategy_selections
+            from legacy_registry_launch.selection_store import set_direct_strategy_selections
 
             for key in categories_to_disable:
                 if key in self.category_selections:

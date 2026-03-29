@@ -1,4 +1,4 @@
-# zapret2_launcher/strategy_builder.py
+# legacy_registry_launch/zapret2_strategy_builder.py
 """
 Strategy list builder for Zapret 2 (winws2.exe).
 
@@ -19,7 +19,7 @@ Important:
 import re
 import os
 from log import log
-from strategy_menu.strategies_registry import registry
+from .strategies_registry import registry
 from launcher_common.blobs import extract_and_dedupe_blobs, get_user_blobs_args
 from strategy_menu.command_builder import build_syndata_args, get_out_range_args, build_send_args
 
@@ -105,7 +105,7 @@ def calculate_required_filters(target_strategies: dict) -> dict:
     Returns:
         dict with filter flags
     """
-    from launcher_common.port_filters import get_filter_for_target, FILTERS
+    from .port_filters import get_filter_for_target, FILTERS
 
     # Initialize all filters as False
     filters = {key: False for key in FILTERS.keys()}
