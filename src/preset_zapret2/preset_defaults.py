@@ -192,10 +192,6 @@ def invalidate_templates_cache() -> None:
     _CANONICAL_NAME_BY_KEY = None
 
 
-# Keep old name as alias for compatibility during transition.
-invalidate_builtin_preset_templates_cache = invalidate_templates_cache
-
-
 def _ensure_templates_loaded() -> None:
     global _TEMPLATES_CACHE, _TEMPLATE_BY_KEY, _CANONICAL_NAME_BY_KEY
 
@@ -226,17 +222,10 @@ def get_preset_templates() -> dict[str, str]:
     return _TEMPLATES_CACHE or {}
 
 
-# Aliases for backward compatibility (other modules may still call these).
-get_builtin_preset_templates = get_preset_templates
-
-
 def get_preset_template_names() -> list[str]:
     """Returns sorted list of template names."""
     templates = get_preset_templates()
     return sorted(set(templates.keys()), key=lambda s: s.lower())
-
-
-get_builtin_preset_names = get_preset_template_names
 
 
 def get_template_content(name: str) -> Optional[str]:
@@ -248,10 +237,6 @@ def get_template_content(name: str) -> Optional[str]:
     return (_TEMPLATE_BY_KEY or {}).get(key)
 
 
-# Alias
-get_builtin_preset_content = get_template_content
-
-
 def get_template_canonical_name(name: str) -> Optional[str]:
     """Returns canonical template name (case-insensitive lookup)."""
     _ensure_templates_loaded()
@@ -260,17 +245,9 @@ def get_template_canonical_name(name: str) -> Optional[str]:
         return None
     return (_CANONICAL_NAME_BY_KEY or {}).get(key)
 
-
-get_builtin_preset_canonical_name = get_template_canonical_name
-
-
 def has_template(name: str) -> bool:
     """Checks if a template with this name exists."""
     return get_template_canonical_name(name) is not None
-
-
-# Alias (old code calls is_builtin_preset_name)
-is_builtin_preset_name = has_template
 
 
 def get_default_template_name() -> Optional[str]:
@@ -287,17 +264,11 @@ def get_default_template_name() -> Optional[str]:
     return names[0] if names else None
 
 
-get_default_builtin_preset_name = get_default_template_name
-
-
 def get_default_template_content() -> Optional[str]:
     name = get_default_template_name()
     if not name:
         return None
     return get_template_content(name)
-
-
-get_default_builtin_preset_content = get_default_template_content
 
 
 # ── Deleted presets tracking ──────────────────────────────────────────────
@@ -680,16 +651,8 @@ def get_category_default_syndata(category_name: str, protocol: str = "tcp") -> d
 BUILTIN_COPY_SUFFIX = " (копия)"  # kept for migration code only
 
 
-def get_builtin_copy_name(builtin_name: str) -> Optional[str]:
-    """DEPRECATED: No longer used. Kept for migration compatibility."""
-    canonical = get_template_canonical_name(builtin_name)
-    if not canonical:
-        return None
-    return f"{canonical}{BUILTIN_COPY_SUFFIX}"
-
-
 def get_builtin_base_from_copy_name(name: str) -> Optional[str]:
-    """DEPRECATED: No longer used. Kept for migration compatibility."""
+    """Resolves canonical template name from duplicate-like display names."""
     raw = (name or "").strip()
     if not raw:
         return None

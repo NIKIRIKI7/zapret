@@ -150,7 +150,7 @@ def trigger_dpi_reload(
         # Продолжаем - пусть hot-reload обработает
 
     # 5. Hot-reload: ConfigFileWatcher автоматически перезапустит winws2.exe
-    #    когда обнаружит изменение preset-zapret2.txt
+    #    когда обнаружит изменение launch preset file
     #    Но если нужен немедленный перезапуск - делаем явно
     category_info = f" [{category_key}]" if category_key else ""
     log(f"DPI reload{category_info} (причина: {reason}) - hot-reload сработает автоматически", "INFO")

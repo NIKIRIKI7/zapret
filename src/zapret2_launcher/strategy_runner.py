@@ -4,7 +4,7 @@ Strategy runner for Zapret 2 (winws2.exe) with hot-reload support.
 
 This version:
 - Supports hot-reload via ConfigFileWatcher
-- Monitors preset-zapret2.txt for changes
+- Monitors the launch preset file for changes
 - Automatically restarts process when config changes
 - Uses winws2.exe executable
 """
@@ -121,6 +121,25 @@ def _ensure_lua_init_lines(content: str, work_dir: str) -> tuple[str, bool]:
     return "\n".join(lines), True
 
 
+def _launch_args_from_preset_text(content: str) -> list[str]:
+    """Build argv directly from a source preset file.
+
+    winws2 `@config_file` parsing uses shell-style splitting and does not
+    understand our UI metadata lines like `# Preset: ...`. Keep the source
+    preset as the single editable file, but strip those metadata lines and pass
+    the remaining options directly as process arguments.
+    """
+    args: list[str] = []
+    for raw in str(content or "").splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            continue
+        args.append(stripped)
+    return args
+
+
 def _is_windows_abs(path: str) -> bool:
     try:
         return bool(_WINDOWS_ABS_RE.match(str(path or "")))
@@ -223,7 +242,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
     Runner for Zapret 2 (winws2.exe) with hot-reload support.
 
     Features:
-    - Hot-reload: automatically restarts when preset-zapret2.txt changes
+    - Hot-reload: automatically restarts when the launch preset file changes
     - Full Lua support
     - Uses winws2.exe executable
     """
@@ -252,7 +271,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
                 return "preset-zapret2-orchestra.txt"
         except Exception:
             pass
-        return "preset-zapret2.txt"
+        return "launch_direct_zapret2.txt"
 
     def _set_last_error(self, message: Optional[str]) -> None:
         try:
@@ -515,14 +534,14 @@ class StrategyRunnerV2(StrategyRunnerBase):
     def _write_text_file(path: str, content: str) -> None:
         atomic_write_text(path, content, encoding="utf-8")
 
-    def _prepare_launch_preset_file(self, source_preset_path: str) -> str:
-        """Normalizes the selected source preset in place before direct launch."""
+    def _prepare_launch_preset_args(self, source_preset_path: str) -> list[str]:
+        """Normalizes the selected source preset and returns direct argv items."""
 
         try:
             with open(source_preset_path, "r", encoding="utf-8", errors="replace") as f:
                 source_content = f.read()
         except Exception:
-            return source_preset_path
+            return []
 
         # Auto-fix missing --lua-init lines before any other processing.
         source_content, lua_fixed = _ensure_lua_init_lines(source_content, self.work_dir)
@@ -540,7 +559,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
             except Exception as e:
                 log(f"Failed to clean preset file {source_preset_path}: {e}", "DEBUG")
 
-        return source_preset_path
+        return _launch_args_from_preset_text(cleaned_source)
 
     def _on_config_changed(self):
         """
@@ -603,10 +622,12 @@ class StrategyRunnerV2(StrategyRunnerBase):
             return False
 
         try:
-            launch_preset_path = self._prepare_launch_preset_file(self._preset_file_path)
+            launch_args = self._prepare_launch_preset_args(self._preset_file_path)
+            if not launch_args:
+                log("Cannot start from preset: no launch arguments produced", "ERROR")
+                return False
 
-            # Build command with @file
-            cmd = [self.winws_exe, f"@{launch_preset_path}"]
+            cmd = [self.winws_exe, *launch_args]
 
             log(f"Hot-reload: starting from preset {self._preset_file_path}", "INFO")
 
@@ -626,7 +647,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
 
             if self.running_process.poll() is None:
                 log(f"Hot-reload successful (PID: {self.running_process.pid})", "SUCCESS")
-                self.current_strategy_args = [f"@{launch_preset_path}"]
+                self.current_strategy_args = list(launch_args)
                 return True
             else:
                 exit_code = self.running_process.returncode
@@ -668,7 +689,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
         - Preset file already contains all arguments
 
         Args:
-            preset_path: Path to preset file (e.g., preset-zapret2.txt)
+            preset_path: Path to the prepared launch preset file
             strategy_name: Strategy name for logs
 
         Returns:
@@ -683,18 +704,10 @@ class StrategyRunnerV2(StrategyRunnerBase):
 
         try:
             self._set_last_error(None)
-            launch_preset_path = self._prepare_launch_preset_file(preset_path)
-
-            # If the exact preset is already running, do NOT restart it.
-            # Just attach watcher + update runner state.
-            pid = self.find_running_preset_pid(launch_preset_path)
-            if pid:
-                self._preset_file_path = preset_path
-                self.current_strategy_name = strategy_name
-                self.current_strategy_args = [f"@{launch_preset_path}"]
-                log(f"Preset already running (PID: {pid}), attaching without restart", "INFO")
-                self._start_config_watcher()
-                return True
+            launch_args = self._prepare_launch_preset_args(preset_path)
+            if not launch_args:
+                self._set_last_error("Не удалось подготовить аргументы запуска из preset файла")
+                return False
 
             # Preflight: validate referenced files before stopping/killing anything.
             ok, report = self.validate_preset_file(preset_path)
@@ -749,8 +762,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
             # Store preset file path for hot-reload
             self._preset_file_path = preset_path
 
-            # Build command with @file
-            cmd = [self.winws_exe, f"@{launch_preset_path}"]
+            cmd = [self.winws_exe, *launch_args]
 
             log(f"Starting from preset file: {preset_path}", "INFO")
             log(f"Strategy: {strategy_name}", "INFO")
@@ -768,7 +780,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
 
             # Save info
             self.current_strategy_name = strategy_name
-            self.current_strategy_args = [f"@{launch_preset_path}"]
+            self.current_strategy_args = list(launch_args)
 
             # Quick startup check
             time.sleep(0.2)
@@ -927,7 +939,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
         V2 features:
         - Hot-reload support
         - Lua functionality supported
-        - Writes to preset-zapret2.txt
+        - Writes args into a temporary launch preset file for the old custom-args flow
 
         Args:
             custom_args: List of command line arguments

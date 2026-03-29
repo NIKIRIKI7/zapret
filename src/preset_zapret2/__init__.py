@@ -268,7 +268,7 @@ def ensure_default_preset_exists() -> bool:
     """
     Ensures that a default preset exists for direct_zapret2 mode.
 
-    Ensures a selected preset exists and is ready for direct launch.
+    Ensures a selected source preset exists and is ready for direct launch.
 
     This function should be called during application startup
     when running in direct_zapret2 mode.
@@ -331,7 +331,7 @@ def restore_builtin_preset(preset_name: str) -> bool:
             selected_file_name = ""
 
         if coordinator is not None and selected_file_name and selected_file_name.lower() == preset_path.name.lower():
-            profile = coordinator.refresh_selected_runtime("direct_zapret2")
+            profile = coordinator.refresh_selected_launch_profile("direct_zapret2")
             log(f"Selected source preset refreshed after restore: {profile.launch_config_path}", "SUCCESS")
 
         return True

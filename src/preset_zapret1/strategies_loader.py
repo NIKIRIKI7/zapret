@@ -59,7 +59,7 @@ def get_v1_strategies_dir() -> Path:
     if appdata:
         return Path(appdata) / "zapret" / "direct_zapret1"
 
-    return Path.home() / "AppData" / "Roaming" / "zapret" / "direct_zapret1"
+    raise RuntimeError("APPDATA is required for direct_zapret1 strategies directory")
 
 
 def _seed_source_dirs() -> list[Path]:
@@ -121,9 +121,6 @@ def ensure_v1_strategies_exist() -> bool:
 
     return copied > 0 or not missing
 
-
-# Backward-compatible export name.
-BASIC_STRATEGIES_DIR = get_v1_strategies_dir()
 
 # Кеш: cache_key -> (mtime_ns, size, data)
 _CACHE: Dict[str, tuple[int, int, Any]] = {}

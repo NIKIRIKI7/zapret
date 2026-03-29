@@ -12,7 +12,7 @@ import zipfile
 
 from core.paths import AppPaths
 
-from .models import PresetDocument, PresetManifest
+from .models import PresetManifest
 
 _PRESET_HEADER_RE = re.compile(r"^\s*#\s*Preset:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 _TEMPLATE_ORIGIN_RE = re.compile(r"^\s*#\s*TemplateOrigin:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
@@ -35,23 +35,40 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def _read_header_text(path: Path) -> str:
+    lines: list[str] = []
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for raw in handle:
+            stripped = raw.strip()
+            if stripped and not stripped.startswith("#"):
+                break
+            lines.append(raw.rstrip("\n"))
+    return "\n".join(lines)
+
+
 class PresetRepository:
     def __init__(self, paths: AppPaths):
         self._paths = paths
 
-    def list_presets(self, engine: str) -> list[PresetDocument]:
+    def list_manifests(self, engine: str) -> list[PresetManifest]:
         manifests = self._load_index(engine)
-        docs = [self._load_document(engine, manifest) for manifest in manifests]
-        return sorted(docs, key=lambda item: (item.manifest.name.lower(), item.manifest.file_name.lower()))
+        return sorted(manifests, key=lambda item: (item.name.lower(), item.file_name.lower()))
 
-    def get_preset(self, engine: str, file_name: str) -> PresetDocument | None:
+    def get_manifest(self, engine: str, file_name: str) -> PresetManifest | None:
         target = str(file_name or "").strip().lower()
         if not target:
             return None
         for manifest in self._load_index(engine):
             if manifest.file_name.strip().lower() == target:
-                return self._load_document(engine, manifest)
+                return manifest
         return None
+
+    def read_source_text(self, engine: str, file_name: str) -> str:
+        manifest = self.get_manifest(engine, file_name)
+        if manifest is None:
+            raise ValueError(f"Preset not found: {file_name}")
+        path = self._engine_paths(engine).presets_dir / manifest.file_name
+        return _read_text(path)
 
     def create_preset(
         self,
@@ -60,7 +77,7 @@ class PresetRepository:
         source_text: str,
         *,
         kind: str = "user",
-    ) -> PresetDocument:
+    ) -> PresetManifest:
         engine_paths = self._engine_paths(engine)
         manifests = self._load_index(engine)
         normalized_name = str(name or "").strip()
@@ -82,7 +99,7 @@ class PresetRepository:
         self._write_source(engine_paths.presets_dir / file_name, source_text)
         manifests.append(manifest)
         self._save_index(engine, manifests)
-        return self._load_document(engine, manifest)
+        return manifest
 
     def update_preset(
         self,
@@ -90,7 +107,7 @@ class PresetRepository:
         file_name: str,
         source_text: str,
         name: str | None,
-    ) -> PresetDocument:
+    ) -> PresetManifest:
         _ = name
         manifests = self._load_index(engine)
         idx = self._find_index(manifests, file_name)
@@ -108,9 +125,9 @@ class PresetRepository:
         manifests[idx] = updated
         self._write_source(self._engine_paths(engine).presets_dir / updated.file_name, source_text)
         self._save_index(engine, manifests)
-        return self._load_document(engine, updated)
+        return updated
 
-    def rename_preset(self, engine: str, file_name: str, new_name: str) -> PresetDocument:
+    def rename_preset(self, engine: str, file_name: str, new_name: str) -> PresetManifest:
         manifests = self._load_index(engine)
         idx = self._find_index(manifests, file_name)
         current = manifests[idx]
@@ -138,7 +155,7 @@ class PresetRepository:
         )
         manifests[idx] = updated
         self._save_index(engine, manifests)
-        return self._load_document(engine, updated)
+        return updated
 
     def delete_preset(self, engine: str, file_name: str) -> None:
         manifests = self._load_index(engine)
@@ -152,16 +169,16 @@ class PresetRepository:
         self._save_index(engine, manifests)
 
     def export_preset(self, engine: str, file_name: str, dest_path: Path) -> None:
-        preset = self.get_preset(engine, file_name)
-        if preset is None:
+        manifest = self.get_manifest(engine, file_name)
+        if manifest is None:
             raise ValueError(f"Preset not found: {file_name}")
         dest_path = Path(dest_path)
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(dest_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("manifest.json", json.dumps(asdict(preset.manifest), ensure_ascii=False, indent=2))
-            zf.writestr("preset.txt", preset.source_text)
+            zf.writestr("manifest.json", json.dumps(asdict(manifest), ensure_ascii=False, indent=2))
+            zf.writestr("preset.txt", self.read_source_text(engine, manifest.file_name))
 
-    def import_preset(self, engine: str, src_path: Path) -> PresetDocument:
+    def import_preset(self, engine: str, src_path: Path) -> PresetManifest:
         src_path = Path(src_path)
         with zipfile.ZipFile(src_path, "r") as zf:
             manifest_data = json.loads(zf.read("manifest.json").decode("utf-8"))
@@ -211,9 +228,9 @@ class PresetRepository:
         manifests: list[PresetManifest] = []
         for preset_path in sorted(engine_paths.presets_dir.glob("*.txt"), key=lambda p: p.name.lower()):
             current = manifests_by_file.get(preset_path.name.lower())
-            source_text = _read_text(preset_path)
-            display_name = self._extract_name(source_text, preset_path.stem)
-            template_origin = self._extract_template_origin(source_text)
+            header_text = _read_header_text(preset_path)
+            display_name = self._extract_name(header_text, preset_path.stem)
+            template_origin = self._extract_template_origin(header_text)
             created_at = current.created_at if current is not None else _now_iso()
             updated_at = current.updated_at if current is not None else created_at
             kind = current.kind if current is not None else self._infer_kind(engine, preset_path.name, template_origin)
@@ -272,10 +289,6 @@ class PresetRepository:
         if canonical and Path(str(file_name or "").strip()).stem.casefold() == canonical.casefold():
             return "builtin"
         return "user"
-
-    def _load_document(self, engine: str, manifest: PresetManifest) -> PresetDocument:
-        path = self._engine_paths(engine).presets_dir / manifest.file_name
-        return PresetDocument(manifest=manifest, source_text=_read_text(path))
 
     def _save_index(self, engine: str, manifests: Iterable[PresetManifest]) -> None:
         path = self._index_path(engine)

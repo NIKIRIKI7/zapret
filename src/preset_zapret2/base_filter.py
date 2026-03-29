@@ -69,7 +69,7 @@ def get_category_base_filter_template(category_key: str, filter_mode: str) -> Op
     Preference:
     - filter_mode == "ipset" -> base_filter_ipset
     - filter_mode == "hostlist" -> base_filter_hostlist
-    - fallback -> base_filter (or any available variant)
+    - fallback -> base_filter only
     """
     try:
         from .catalog import load_categories
@@ -78,27 +78,13 @@ def get_category_base_filter_template(category_key: str, filter_mode: str) -> Op
         log(f"Cannot load categories for base_filter: {e}", "DEBUG")
         info = {}
 
-    # Fallback: if the lightweight catalog couldn't find categories (e.g. running
-    # from source/dev layouts), reuse the main strategy_menu loader which has
-    # additional path fallbacks.
-    if not info:
-        try:
-            from strategy_menu.strategy_loader import load_categories as _load_categories_sm
-
-            info = _load_categories_sm().get(category_key) or {}
-        except Exception as e:
-            log(f"Cannot load categories (strategy_menu fallback) for base_filter: {e}", "DEBUG")
-            info = {}
-
     filter_mode = (filter_mode or "").strip().lower()
-    candidates = []
     if filter_mode == "ipset":
-        candidates.append(info.get("base_filter_ipset"))
-    if filter_mode == "hostlist":
-        candidates.append(info.get("base_filter_hostlist"))
-    candidates.append(info.get("base_filter"))
-    candidates.append(info.get("base_filter_ipset"))
-    candidates.append(info.get("base_filter_hostlist"))
+        candidates = [info.get("base_filter_ipset"), info.get("base_filter")]
+    elif filter_mode == "hostlist":
+        candidates = [info.get("base_filter_hostlist"), info.get("base_filter")]
+    else:
+        candidates = [info.get("base_filter")]
 
     for c in candidates:
         if isinstance(c, str) and c.strip():
@@ -108,7 +94,7 @@ def get_category_base_filter_template(category_key: str, filter_mode: str) -> Op
 
 def build_category_base_filter_lines(category_key: str, filter_mode: str) -> List[str]:
     """
-    Builds base filter lines (one arg per line) for writing to preset-zapret2.txt.
+    Builds base filter lines (one arg per line) for writing to a direct_zapret2 source preset file.
 
     Normalizes list filenames in --hostlist/--ipset/--*-exclude to `lists/...`.
     """

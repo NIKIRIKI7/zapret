@@ -158,14 +158,14 @@ def reset_all_categories_settings() -> bool:
         from core.presets.direct_facade import DirectPresetFacade
 
         manager = DirectPresetFacade.from_launch_method("direct_zapret2")
-        preset = manager.get_active_preset()
+        preset = manager.get_selected_source_preset_model()
 
         if not preset:
-            log("Нет активного пресета для сброса категорий", "WARNING")
+            log("Нет выбранного source-пресета для сброса категорий", "WARNING")
             return False
 
         if not preset.categories:
-            log("Нет категорий в активном пресете", "INFO")
+            log("Нет категорий в выбранном source-пресете", "INFO")
             return True
 
         # Сбрасываем каждую категорию

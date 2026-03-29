@@ -178,8 +178,8 @@ class Zapret1PresetSyncLayer:
 
             category_filenames = self._category_filter_filenames(category_key)
             if not category_filenames:
-                log(f"V1: cannot resolve list filenames for category '{category_key}', fallback to full sync", "WARNING")
-                return self.sync_preset(preset)
+                log(f"V1: cannot resolve list filenames for category '{category_key}'", "ERROR")
+                return False
 
             new_blocks: list[list[str]] = []
             for block in blocks:
@@ -203,7 +203,7 @@ class Zapret1PresetSyncLayer:
             raise
         except Exception as e:
             log(f"Error syncing single V1 category '{category_key}': {e}", "ERROR")
-            return self.sync_preset(preset)
+            return False
 
     def _commit_generated_launch_config_text(
         self,

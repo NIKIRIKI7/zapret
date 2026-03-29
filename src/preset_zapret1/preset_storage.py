@@ -7,7 +7,6 @@ Presets stored in: %APPDATA%/zapret/presets_v1/
 Selected preset state is managed by the core selection service.
 The selected source preset is also the direct launch file.
 """
-import os
 import re
 import shutil
 from datetime import datetime
@@ -20,10 +19,6 @@ from .preset_model import DEFAULT_PRESET_ICON_COLOR, normalize_preset_icon_color
 if TYPE_CHECKING:
     from .preset_model import PresetV1
 
-_APP_CORE_PATH: Optional[str] = None
-_PRESETS_ROOT_PATH: Optional[str] = None
-_MAIN_DIRECTORY: Optional[str] = None
-
 def _core_engine_id() -> str:
     return "winws1"
 
@@ -34,48 +29,8 @@ def _core_paths():
     return get_app_paths().engine_paths(_core_engine_id()).ensure_directories()
 
 
-def _get_app_core_path() -> str:
-    global _APP_CORE_PATH
-    if _APP_CORE_PATH is None:
-        from config import APP_CORE_PATH
-        _APP_CORE_PATH = APP_CORE_PATH
-    return _APP_CORE_PATH
-
-
-def _get_presets_root_path() -> str:
-    global _PRESETS_ROOT_PATH
-    if _PRESETS_ROOT_PATH is None:
-        base = ""
-        try:
-            from config import get_zapret_userdata_dir
-            base = (get_zapret_userdata_dir() or "").strip()
-        except Exception:
-            base = ""
-
-        if not base:
-            appdata = (os.environ.get("APPDATA") or "").strip()
-            if appdata:
-                base = os.path.join(appdata, "zapret")
-
-        if not base:
-            # Conservative fallback for non-standard env without APPDATA.
-            base = str(Path.home() / "AppData" / "Roaming" / "zapret")
-
-        _PRESETS_ROOT_PATH = os.path.join(base, "presets_v1")
-    return _PRESETS_ROOT_PATH
-
-
-def _get_main_directory() -> str:
-    global _MAIN_DIRECTORY
-    if _MAIN_DIRECTORY is None:
-        from config import MAIN_DIRECTORY
-        _MAIN_DIRECTORY = MAIN_DIRECTORY
-    return _MAIN_DIRECTORY
-
 def get_presets_dir_v1() -> Path:
-    presets_dir = Path(_get_presets_root_path())
-    presets_dir.mkdir(parents=True, exist_ok=True)
-    return presets_dir
+    return _core_paths().presets_dir
 
 
 def _sanitize_filename(name: str) -> str:
@@ -102,7 +57,7 @@ def _parse_metadata_from_header_v1(header: str) -> Tuple[str, str, str, str]:
         desc_match = re.match(r'#\s*Description:\s*(.*)', line, re.IGNORECASE)
         if desc_match:
             description = desc_match.group(1).strip()
-        icon_color_match = re.match(r'#\s*(?:IconColor|PresetIconColor):\s*(.+)', line, re.IGNORECASE)
+        icon_color_match = re.match(r'#\s*IconColor:\s*(.+)', line, re.IGNORECASE)
         if icon_color_match:
             icon_color = normalize_preset_icon_color_v1(icon_color_match.group(1).strip())
 
@@ -121,7 +76,7 @@ def _parse_template_origin_from_header_v1(header: str) -> Optional[str]:
     return None
 
 
-def _load_preset_from_path_v1(preset_path: Path, fallback_name: str) -> Optional["PresetV1"]:
+def _load_preset_from_path_v1(preset_path: Path) -> Optional["PresetV1"]:
     from .preset_model import PresetV1, CategoryConfigV1
     from preset_zapret2.txt_preset_parser import parse_preset_file
 
@@ -131,8 +86,9 @@ def _load_preset_from_path_v1(preset_path: Path, fallback_name: str) -> Optional
 
     try:
         data = parse_preset_file(preset_path)
+        file_stem = Path(preset_path).stem
         preset = PresetV1(
-            name=data.name if data.name != "Unnamed" else fallback_name,
+            name=data.name if data.name != "Unnamed" else file_stem,
             base_args=data.base_args,
         )
         preset.created, preset.modified, preset.description, preset.icon_color = \
@@ -186,11 +142,11 @@ def _load_preset_from_path_v1(preset_path: Path, fallback_name: str) -> Optional
         except Exception:
             pass
 
-        log(f"Loaded V1 preset '{fallback_name}': {len(preset.categories)} categories", "DEBUG")
+        log(f"Loaded V1 preset '{file_stem}': {len(preset.categories)} categories", "DEBUG")
         return preset
 
     except Exception as e:
-        log(f"Error loading V1 preset '{fallback_name}': {e}", "ERROR")
+        log(f"Error loading V1 preset '{file_stem}': {e}", "ERROR")
         return None
 def save_preset_v1(preset: "PresetV1") -> bool:
     import os

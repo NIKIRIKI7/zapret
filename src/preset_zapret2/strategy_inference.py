@@ -137,24 +137,12 @@ def infer_strategy_id_from_args(
         Example: TCP multi-phase UI loads additional strategies from `tcp_fake.txt`,
         and preset files can contain those args. When loading such presets, we want to
         resolve strategy_id to the real one (not "custom") so UI shows the name.
-
-        Also: some categories have strategy_type='tcp' in categories.txt but appear
-        in UDP blocks (e.g. ipset_zapretkvn). When the actual block protocol is 'udp'
-        but the category says 'tcp', also search the udp catalog as a fallback.
         """
         st = (primary_type or "").strip()
         if not st:
             return []
         if st == "tcp":
-            candidates = [st, "tcp_fake"]
-            # When the actual block is UDP, also search the udp catalog in case
-            # the category has a mismatched strategy_type.
-            if protocol == "udp":
-                candidates.append("udp")
-            return candidates
-        if st == "discord_voice":
-            # Also check udp catalog for discord_voice_udp categories
-            return [st, "udp"]
+            return [st, "tcp_fake"]
         return [st]
 
     any_strategies_loaded = False
@@ -165,8 +153,7 @@ def infer_strategy_id_from_args(
             from .catalog import load_strategies
 
             # tcp_fake is a special catalog used by the multi-phase TCP UI.
-            # In advanced mode it is loaded from advanced_strategies; in other
-            # modes keep legacy untied behavior.
+            # In advanced mode it is loaded from advanced_strategies.
             candidate_type_key = (candidate_type or "").strip().lower()
             if candidate_type_key == "tcp_fake":
                 set_for_candidate = "advanced" if (strategy_set == "advanced") else None

@@ -1,8 +1,8 @@
 # presets/txt_preset_parser.py
 """
-Parser for Zapret 2 txt preset files.
+Parser for direct_zapret2 source preset txt files.
 
-Parses preset-zapret2.txt into structured data and back.
+Parses a direct_zapret2 source preset file into structured data and back.
 Supports:
 - Base args (lua-init, wf-*, blob=*)
 - Category blocks separated by --new
@@ -1253,12 +1253,6 @@ def parse_preset_content(content: str) -> PresetData:
             name_match = re.match(r'#\s*Preset:\s*(.+)', stripped, re.IGNORECASE)
             if name_match:
                 data.name = name_match.group(1).strip()
-
-            # Also check "Strategy:" for compatibility
-            strategy_match = re.match(r'#\s*Strategy:\s*(.+)', stripped, re.IGNORECASE)
-            if strategy_match and data.name == "Unnamed":
-                data.name = strategy_match.group(1).strip()
-
 
         elif stripped:
             # First non-comment, non-empty line

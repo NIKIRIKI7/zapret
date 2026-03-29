@@ -322,9 +322,7 @@ class CategoryConfig:
     @classmethod
     def from_dict(cls, data: Dict) -> "CategoryConfig":
         """Creates CategoryConfig from dictionary."""
-        # Backward compatibility:
-        # - older versions stored a single "syndata" dict (TCP-only in practice)
-        syndata_tcp_data = data.get("syndata_tcp") or data.get("syndata") or {}
+        syndata_tcp_data = data.get("syndata_tcp") or {}
         syndata_tcp = SyndataSettings.from_dict(syndata_tcp_data) if syndata_tcp_data else SyndataSettings.get_defaults()
 
         syndata_udp_data = data.get("syndata_udp") or {}

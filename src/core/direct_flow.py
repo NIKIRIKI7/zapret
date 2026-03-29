@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from log import log
+from core.presets.models import PresetManifest
 
 
 class DirectFlowError(RuntimeError):
-    """Raised when the direct-launch preset/runtime flow cannot be prepared."""
+    """Raised when the direct-launch selected source preset flow cannot be prepared."""
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,7 @@ class DirectFlowCoordinator:
         require_filters: bool = False,
     ) -> DirectLaunchProfile:
         method = self._normalize_method(launch_method)
-        selected = self._ensure_selected_source_preset(method)
+        selected = self._ensure_selected_source_manifest(method)
 
         launch_config_path = self.get_selected_source_path(method)
         if not launch_config_path.exists():
@@ -60,10 +61,10 @@ class DirectFlowCoordinator:
         return DirectLaunchProfile(
             launch_method=method,
             engine=self._METHOD_TO_ENGINE[method],
-            preset_file_name=selected.manifest.file_name,
-            preset_name=selected.manifest.name,
+            preset_file_name=selected.file_name,
+            preset_name=selected.name,
             launch_config_path=launch_config_path,
-            display_name=f"Пресет: {selected.manifest.name}",
+            display_name=f"Пресет: {selected.name}",
         )
 
     def build_selected_mode(
@@ -77,25 +78,25 @@ class DirectFlowCoordinator:
             require_filters=require_filters,
         ).to_selected_mode()
 
-    def get_selected_source_preset(self, launch_method: str):
-        return self._ensure_selected_source_preset(launch_method)
+    def get_selected_source_manifest(self, launch_method: str) -> PresetManifest:
+        return self._ensure_selected_source_manifest(launch_method)
 
     def get_selected_source_file_name(self, launch_method: str) -> str:
-        return self.get_selected_source_preset(launch_method).manifest.file_name
+        return self.get_selected_source_manifest(launch_method).file_name
 
     def get_selected_source_path(self, launch_method: str) -> Path:
-        selected = self.get_selected_source_preset(launch_method)
+        selected = self.get_selected_source_manifest(launch_method)
         from core.services import get_app_paths
 
         engine = self._METHOD_TO_ENGINE[self._normalize_method(launch_method)]
-        return get_app_paths().engine_paths(engine).ensure_directories().presets_dir / selected.manifest.file_name
+        return get_app_paths().engine_paths(engine).ensure_directories().presets_dir / selected.file_name
 
-    def ensure_runtime(self, launch_method: str) -> Path:
+    def ensure_selected_source_path(self, launch_method: str) -> Path:
         return self.ensure_launch_profile(launch_method, require_filters=False).launch_config_path
 
     def is_selected_preset(self, launch_method: str, preset_name: str) -> bool:
         try:
-            current = (self.get_selected_source_preset(launch_method).manifest.name or "").strip().lower()
+            current = (self.get_selected_source_manifest(launch_method).name or "").strip().lower()
         except Exception:
             current = ""
         target = str(preset_name or "").strip().lower()
@@ -112,13 +113,13 @@ class DirectFlowCoordinator:
         return DirectLaunchProfile(
             launch_method=method,
             engine=engine,
-            preset_file_name=selected.manifest.file_name,
-            preset_name=selected.manifest.name,
+            preset_file_name=selected.file_name,
+            preset_name=selected.name,
             launch_config_path=self.get_selected_source_path(method),
-            display_name=f"Пресет: {selected.manifest.name}",
+            display_name=f"Пресет: {selected.name}",
         )
 
-    def refresh_selected_runtime(self, launch_method: str) -> DirectLaunchProfile:
+    def refresh_selected_launch_profile(self, launch_method: str) -> DirectLaunchProfile:
         return self.ensure_launch_profile(launch_method, require_filters=False)
 
     def _normalize_method(self, launch_method: str) -> str:
@@ -127,7 +128,7 @@ class DirectFlowCoordinator:
             raise DirectFlowError(f"Unsupported direct launch method: {launch_method}")
         return method
 
-    def _ensure_selected_source_preset(self, launch_method: str):
+    def _ensure_selected_source_manifest(self, launch_method: str) -> PresetManifest:
         method = self._normalize_method(launch_method)
         engine = self._METHOD_TO_ENGINE[method]
 
@@ -138,20 +139,22 @@ class DirectFlowCoordinator:
         repo = get_preset_repository()
         selection = get_selection_service()
 
-        presets = repo.list_presets(engine)
-        if not presets:
+        manifests = repo.list_manifests(engine)
+        if not manifests:
             raise DirectFlowError(
                 "Пресеты не найдены. Скачайте файлы пресетов вручную: "
                 f"{self.PRESETS_DOWNLOAD_URL}"
             )
 
-        selected = selection.get_selected_preset(engine)
+        selected = selection.get_selected_manifest(engine)
         if selected is None:
-            default_preset = repo.get_preset(engine, "Default.txt")
+            default_preset = repo.get_manifest(engine, "Default.txt")
             if default_preset is not None:
-                selected = selection.select_preset(engine, default_preset.manifest.file_name)
+                selection.select_preset(engine, default_preset.file_name)
+                selected = selection.get_selected_manifest(engine)
             else:
-                selected = selection.select_preset(engine, presets[0].manifest.file_name)
+                selection.select_preset(engine, manifests[0].file_name)
+                selected = selection.get_selected_manifest(engine)
         if selected is None:
             raise DirectFlowError("Не удалось определить выбранный пресет")
         return selected

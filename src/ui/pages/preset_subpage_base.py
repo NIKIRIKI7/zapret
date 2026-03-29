@@ -206,8 +206,8 @@ class PresetSubpageBase(BasePage):
         try:
             if not self._preset_file_name:
                 return False
-            document = facade.get_document_by_file_name(self._preset_file_name)
-            return bool(document is not None and str(document.manifest.kind or "").strip().lower() == "builtin")
+            manifest = facade.get_manifest_by_file_name(self._preset_file_name)
+            return bool(manifest is not None and str(manifest.kind or "").strip().lower() == "builtin")
         except Exception:
             return False
 
@@ -276,10 +276,10 @@ class PresetSubpageBase(BasePage):
         facade = self._get_direct_facade()
         if facade is not None and self._preset_file_name:
             try:
-                document = facade.get_document_by_file_name(self._preset_file_name)
-                if document is not None:
-                    self._preset_name = document.manifest.name
-                    self._preset_file_name = document.manifest.file_name
+                manifest = facade.get_manifest_by_file_name(self._preset_file_name)
+                if manifest is not None:
+                    self._preset_name = manifest.name
+                    self._preset_file_name = manifest.file_name
                 self._preset_path = facade.get_source_path_by_file_name(self._preset_file_name)
             except Exception:
                 self._preset_path = self._get_preset_path(self._preset_name)
@@ -307,9 +307,9 @@ class PresetSubpageBase(BasePage):
         origin = "builtin" if self._is_current_builtin() else "user"
         if facade is not None and self._preset_file_name:
             try:
-                document = facade.get_document_by_file_name(self._preset_file_name)
-                if document is not None:
-                    kind = str(document.manifest.kind or "").strip().lower()
+                manifest = facade.get_manifest_by_file_name(self._preset_file_name)
+                if manifest is not None:
+                    kind = str(manifest.kind or "").strip().lower()
                     if kind in {"builtin", "imported", "user"}:
                         origin = kind
             except Exception:
@@ -363,8 +363,8 @@ class PresetSubpageBase(BasePage):
             if not self._preset_file_name:
                 raise ValueError("Preset file name is required for direct preset saving")
             updated = facade.save_source_text_by_file_name(self._preset_file_name, self.editor.toPlainText())
-            self._preset_name = updated.manifest.name
-            self._preset_file_name = updated.manifest.file_name
+            self._preset_name = updated.name
+            self._preset_file_name = updated.file_name
             self._preset_path = facade.get_source_path_by_file_name(self._preset_file_name)
             active_name = self._current_selected_name()
             active_file_name = self._current_selected_file_name()
@@ -452,7 +452,7 @@ class PresetSubpageBase(BasePage):
                 raise ValueError("Preset file name is required for direct preset rename")
             updated = facade.rename_by_file_name(self._preset_file_name, new_name)
             self._notify_presets_changed()
-            self.set_preset_file_name(updated.manifest.file_name)
+            self.set_preset_file_name(updated.file_name)
             if self._preset_file_name and facade.is_selected_file_name(self._preset_file_name):
                 self._notify_preset_switched()
             self._show_success(f"Пресет переименован: {new_name}")
@@ -470,7 +470,7 @@ class PresetSubpageBase(BasePage):
                 raise ValueError("Preset file name is required for direct preset duplicate")
             duplicated = facade.duplicate_by_file_name(self._preset_file_name, new_name)
             self._notify_presets_changed()
-            self.set_preset_file_name(duplicated.manifest.file_name)
+            self.set_preset_file_name(duplicated.file_name)
             self._show_success(f"Создан дубликат: {new_name}")
         except Exception as e:
             self._show_error(str(e))
@@ -515,8 +515,8 @@ class PresetSubpageBase(BasePage):
             if not self._preset_file_name:
                 raise ValueError("Preset file name is required for direct preset reset")
             updated = facade.reset_to_template_by_file_name(self._preset_file_name)
-            self._preset_name = updated.manifest.name
-            self._preset_file_name = updated.manifest.file_name
+            self._preset_name = updated.name
+            self._preset_file_name = updated.file_name
             self._preset_path = facade.get_source_path_by_file_name(self._preset_file_name)
             self._load_file()
             self._refresh_header()
@@ -562,8 +562,8 @@ class PresetSubpageBase(BasePage):
             from core.services import get_direct_flow_coordinator
 
             method = self._direct_launch_method()
-            selected = get_direct_flow_coordinator().get_selected_source_preset(method)
-            return (selected.manifest.name if selected is not None else "").strip()
+            selected = get_direct_flow_coordinator().get_selected_source_manifest(method)
+            return (selected.name if selected is not None else "").strip()
         except Exception:
             return ""
 
@@ -576,12 +576,12 @@ class PresetSubpageBase(BasePage):
         except Exception:
             return ""
 
-    def _refresh_selected_runtime(self) -> bool:
+    def _refresh_selected_launch_profile(self) -> bool:
         try:
             from core.services import get_direct_flow_coordinator
 
             method = self._direct_launch_method()
-            get_direct_flow_coordinator().refresh_selected_runtime(method)
+            get_direct_flow_coordinator().refresh_selected_launch_profile(method)
             return True
         except Exception:
             return False

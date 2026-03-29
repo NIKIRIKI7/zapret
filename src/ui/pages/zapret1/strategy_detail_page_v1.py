@@ -896,7 +896,7 @@ class Zapret1StrategyDetailPage(BasePage):
         if not self._preset_manager or not self._category_key:
             return ""
         try:
-            preset = self._preset_manager.get_active_preset()
+            preset = self._preset_manager.get_selected_source_preset()
             if not preset:
                 return ""
             cat = (preset.categories or {}).get(self._category_key)
@@ -927,7 +927,7 @@ class Zapret1StrategyDetailPage(BasePage):
         try:
             from preset_zapret1.preset_model import CategoryConfigV1
 
-            preset = self._preset_manager.get_active_preset()
+            preset = self._preset_manager.get_selected_source_preset()
             if not preset:
                 return
 

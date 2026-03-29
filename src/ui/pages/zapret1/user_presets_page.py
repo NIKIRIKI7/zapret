@@ -195,7 +195,7 @@ def _read_preset_list_metadata(path: Path) -> dict[str, str]:
                     result["description"] = desc_match.group(1).strip()
                     continue
 
-                icon_color_match = re.match(r"#\s*(?:IconColor|PresetIconColor):\s*(.+)", stripped, re.IGNORECASE)
+                icon_color_match = re.match(r"#\s*IconColor:\s*(.+)", stripped, re.IGNORECASE)
                 if icon_color_match:
                     result["icon_color"] = icon_color_match.group(1).strip()
                     continue
@@ -349,6 +349,24 @@ class _PresetListModel(QAbstractListModel):
         self.beginResetModel()
         self._rows = rows
         self.endResetModel()
+
+    def set_active_preset(self, file_name: str) -> bool:
+        target_file_name = str(file_name or "").strip()
+        changed_rows: list[int] = []
+        for row_index, row in enumerate(self._rows):
+            if str(row.get("kind") or "") != "preset":
+                continue
+            next_active = bool(target_file_name and str(row.get("file_name") or "") == target_file_name)
+            if bool(row.get("is_active", False)) == next_active:
+                continue
+            row["is_active"] = next_active
+            changed_rows.append(row_index)
+
+        for row_index in changed_rows:
+            model_index = self.index(row_index, 0)
+            self.dataChanged.emit(model_index, model_index, [self.ActiveRole])
+
+        return bool(changed_rows)
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         if parent.isValid():
@@ -1602,57 +1620,78 @@ class Zapret1UserPresetsPage(BasePage):
             self._load_presets()
 
     def _on_store_switched(self, _name: str):
-        """Central store says the selected preset switched."""
-        self._ui_dirty = True
+        """Central store says the selected source preset switched."""
         if self._bulk_reset_running:
             return
+        if self.isVisible() and self._apply_active_preset_marker():
+            return
+        self._ui_dirty = True
         if self.isVisible():
             self._load_presets()
 
-    def _list_preset_entries_light(self) -> list[dict[str, str]]:
+    def _apply_active_preset_marker(self) -> bool:
+        if self._presets_model is None:
+            return False
+        active_file_name = self._get_selected_source_preset_file_name_light()
+        changed = self._presets_model.set_active_preset(active_file_name)
+        if changed and hasattr(self, "presets_list"):
+            self.presets_list.viewport().update()
+        return changed
+
+    def _list_preset_entries_light(self) -> list[dict[str, object]]:
         try:
             facade = self._get_direct_facade()
             return [
                 {
-                    "file_name": item.manifest.file_name,
-                    "display_name": item.manifest.name,
+                    "file_name": item.file_name,
+                    "display_name": item.name,
+                    "kind": item.kind,
+                    "is_builtin": str(item.kind or "").strip().lower() == "builtin",
                 }
-                for item in facade.list_presets()
+                for item in facade.list_manifests()
             ]
         except Exception:
             pass
 
         return []
 
-    def _get_active_preset_file_name_light(self) -> str:
+    def _get_selected_source_preset_file_name_light(self) -> str:
         try:
-            from core.services import get_direct_flow_coordinator
+            from core.services import get_selection_service
 
-            return str(get_direct_flow_coordinator().get_selected_source_file_name("direct_zapret1") or "").strip()
+            return str(get_selection_service().get_selected_file_name("winws1") or "").strip()
         except Exception:
             return ""
 
-    def _load_preset_list_metadata_light(self) -> dict[str, dict[str, str]]:
-        metadata: dict[str, dict[str, str]] = {}
+    def _load_preset_list_metadata_light(self) -> dict[str, dict[str, object]]:
+        metadata: dict[str, dict[str, object]] = {}
+        from core.services import get_app_paths
+
+        presets_dir = get_app_paths().engine_paths("winws1").ensure_directories().presets_dir
         for entry in self._list_preset_entries_light():
             file_name = str(entry.get("file_name") or "").strip()
             display_name = str(entry.get("display_name") or file_name).strip()
+            kind = str(entry.get("kind") or "").strip() or "user"
+            is_builtin = bool(entry.get("is_builtin", False))
             if not file_name:
                 continue
             try:
-                facade = self._get_direct_facade()
-                if facade is not None and file_name.lower().endswith(".txt"):
-                    path = facade.get_source_path_by_file_name(file_name)
-                else:
-                    from core.services import get_app_paths
-
-                    path = get_app_paths().engine_paths("winws1").ensure_directories().presets_dir / file_name
+                path = presets_dir / file_name
                 metadata[file_name] = {
                     **_read_preset_list_metadata(path),
                     "display_name": display_name,
+                    "kind": kind,
+                    "is_builtin": is_builtin,
                 }
             except Exception:
-                metadata[file_name] = {"description": "", "modified": "", "icon_color": "", "display_name": display_name}
+                metadata[file_name] = {
+                    "description": "",
+                    "modified": "",
+                    "icon_color": "",
+                    "display_name": display_name,
+                    "kind": kind,
+                    "is_builtin": is_builtin,
+                }
         return metadata
 
     def _resolve_display_name(self, reference: str) -> str:
@@ -1661,9 +1700,9 @@ class Zapret1UserPresetsPage(BasePage):
             return ""
         if candidate.lower().endswith(".txt"):
             try:
-                document = self._get_direct_facade().get_document_by_file_name(candidate)
-                if document is not None:
-                    return document.manifest.name
+                manifest = self._get_direct_facade().get_manifest_by_file_name(candidate)
+                if manifest is not None:
+                    return manifest.name
             except Exception:
                 pass
         return candidate
@@ -1678,8 +1717,8 @@ class Zapret1UserPresetsPage(BasePage):
         if not candidate or not candidate.lower().endswith(".txt"):
             return False
         try:
-            document = self._get_direct_facade().get_document_by_file_name(candidate)
-            return bool(document is not None and str(document.manifest.kind or "").strip().lower() == "builtin")
+            manifest = self._get_direct_facade().get_manifest_by_file_name(candidate)
+            return bool(manifest is not None and str(manifest.kind or "").strip().lower() == "builtin")
         except Exception:
             return False
 
@@ -2275,8 +2314,8 @@ class Zapret1UserPresetsPage(BasePage):
             from preset_zapret1.preset_store import get_preset_store_v1
 
             get_preset_store_v1().notify_presets_changed()
-            if facade.is_selected_file_name(updated.manifest.file_name):
-                get_preset_store_v1().notify_preset_switched(updated.manifest.file_name)
+            if facade.is_selected_file_name(updated.file_name):
+                get_preset_store_v1().notify_preset_switched(updated.file_name)
             log(f"Пресет '{display_name}' переименован в '{new_name}'", "INFO")
             self._load_presets()
         except Exception as e:
@@ -2333,8 +2372,8 @@ class Zapret1UserPresetsPage(BasePage):
             from preset_zapret1.preset_store import get_preset_store_v1
 
             get_preset_store_v1().notify_presets_changed()
-            log(f"Импортирован пресет '{imported.manifest.name}'", "INFO")
-            self._show_import_result_infobar(name, imported.manifest.name, imported.manifest.file_name)
+            log(f"Импортирован пресет '{imported.name}'", "INFO")
+            self._show_import_result_infobar(name, imported.name, imported.file_name)
             self._load_presets()
 
         except Exception as e:
@@ -2412,8 +2451,12 @@ class Zapret1UserPresetsPage(BasePage):
         try:
             started_at = time.perf_counter()
             all_presets = self._load_preset_list_metadata_light()
-            active_file_name = self._get_active_preset_file_name_light()
+            active_file_name = self._get_selected_source_preset_file_name_light()
             hierarchy = self._get_hierarchy_store()
+            builtin_by_file = {
+                file_name: bool(meta.get("is_builtin", False))
+                for file_name, meta in all_presets.items()
+            }
 
             query = ""
             try:
@@ -2428,12 +2471,12 @@ class Zapret1UserPresetsPage(BasePage):
                     {
                         "file_name": file_name,
                         "display_name": str(meta.get("display_name") or file_name),
-                        "is_builtin": self._is_builtin_preset_file(file_name),
+                        "is_builtin": builtin_by_file.get(file_name, False),
                     }
                     for file_name, meta in all_presets.items()
                 ],
                 query=query,
-                is_builtin_resolver=self._is_builtin_preset_file,
+                is_builtin_resolver=lambda file_name: builtin_by_file.get(str(file_name or ""), False),
             )
 
             for item in layout_rows:
@@ -2459,10 +2502,11 @@ class Zapret1UserPresetsPage(BasePage):
                 preset = all_presets.get(file_name)
                 if not preset:
                     continue
+                is_builtin = builtin_by_file.get(file_name, False)
 
                 effective_folder_id = hierarchy.get_effective_folder_id(
                     file_name,
-                    is_builtin=self._is_builtin_preset_file(file_name),
+                    is_builtin=is_builtin,
                     display_name=display_name,
                 )
                 rows.append(
@@ -2473,7 +2517,7 @@ class Zapret1UserPresetsPage(BasePage):
                         "description": str(preset.get("description") or ""),
                         "date": self._format_modified_timestamp(str(preset.get("modified") or "")),
                         "is_active": bool(file_name and file_name == active_file_name),
-                        "is_builtin": self._is_builtin_preset_file(file_name),
+                        "is_builtin": is_builtin,
                         "icon_color": _normalize_preset_icon_color(str(preset.get("icon_color") or "")),
                         "depth": int(item.get("depth", 0) or 0),
                         "folder_id": effective_folder_id,
@@ -2665,7 +2709,7 @@ class Zapret1UserPresetsPage(BasePage):
             get_preset_store_v1().notify_preset_switched(name)
             display_name = self._resolve_display_name(name)
             log(f"Активирован пресет '{display_name}'", "INFO")
-            self._load_presets()
+            self._apply_active_preset_marker()
         except Exception as e:
             log(f"Ошибка активации пресета: {e}", "ERROR")
             InfoBar.warning(
@@ -2950,8 +2994,8 @@ class Zapret1UserPresetsPage(BasePage):
             facade = self._get_direct_facade()
             template_origin = ""
             try:
-                document = facade.get_document_by_file_name(name)
-                template_origin = str(getattr(getattr(document, "manifest", None), "template_origin", "") or "").strip()
+                manifest = facade.get_manifest_by_file_name(name)
+                template_origin = str(getattr(manifest, "template_origin", "") or "").strip()
             except Exception:
                 template_origin = ""
             facade.delete_by_file_name(name)

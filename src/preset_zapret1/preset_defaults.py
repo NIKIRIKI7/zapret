@@ -44,16 +44,24 @@ def _get_v1_templates_dir() -> Path:
         appdata = (os.environ.get("APPDATA") or "").strip()
         if appdata:
             return Path(appdata) / "zapret" / "presets_v1_template"
-        return Path.home() / "AppData" / "Roaming" / "zapret" / "presets_v1_template"
+        raise RuntimeError("APPDATA is required for presets_v1_template directory")
 
 
 def _get_deleted_presets_ini_path_v1() -> Path:
     try:
         from config import get_zapret_userdata_dir
 
-        return Path(get_zapret_userdata_dir()) / "presets_v1" / "deleted_presets.ini"
+        base = (get_zapret_userdata_dir() or "").strip()
+        if base:
+            return Path(base) / "presets_v1" / "deleted_presets.ini"
     except Exception:
-        return Path("")
+        pass
+
+    appdata = (os.environ.get("APPDATA") or "").strip()
+    if appdata:
+        return Path(appdata) / "zapret" / "presets_v1" / "deleted_presets.ini"
+
+    raise RuntimeError("APPDATA is required for deleted_presets.ini path")
 
 
 def get_deleted_preset_names_v1() -> set[str]:
@@ -442,7 +450,7 @@ def get_builtin_preset_content_v1(name: str) -> Optional[str]:
 
     Source priority:
     1) External presets_v1_template/ (source of truth)
-    2) Embedded default fallback for "Default"
+    2) Embedded default content only for explicit maintenance paths
     """
     # External templates (source of truth)
     content = get_template_content_v1(name)
@@ -455,27 +463,16 @@ def get_builtin_preset_content_v1(name: str) -> Optional[str]:
     return None
 
 
-def get_default_builtin_preset_name_v1() -> Optional[str]:
-    """Returns name of the default builtin preset."""
-    template_name = get_default_template_name_v1()
-    return template_name
-
-
-def get_all_builtin_preset_names_v1() -> list[str]:
-    """Returns sorted list of all builtin preset names (excluding Default)."""
-    _ensure_templates_loaded_v1()
-    template_names = sorted((_TEMPLATES_CACHE_V1 or {}).keys(), key=lambda s: s.lower())
-    return [n for n in template_names if n.lower() != "default"]
-
-
 def ensure_default_preset_exists_v1() -> bool:
-    """Ensures presets_v1/ is populated and Default preset exists.
+    """Ensures presets_v1/ contains at least one launchable preset.
 
     Flow:
       1. Copy missing templates from presets_v1_template/ → presets_v1/
-      2. If Default still missing, create from embedded fallback
+      2. If Default exists, we are done
+      3. If Default is missing but another preset exists, that is also acceptable
+      4. Only fail when the directory has no presets at all
 
-    Returns True if Default preset exists or was created successfully.
+    Returns True if at least one preset exists.
     """
     try:
         from .preset_storage import get_presets_dir_v1
@@ -487,12 +484,8 @@ def ensure_default_preset_exists_v1() -> bool:
         if default_path.exists():
             return True
 
-        content = get_builtin_preset_content_v1("Default")
-        if not content:
-            return False
-
-        default_path.write_text(content, encoding="utf-8")
-        return True
+        any_preset = next((path for path in sorted(presets_dir.glob("*.txt"), key=lambda p: p.name.lower())), None)
+        return any_preset is not None
     except Exception as e:
         log(f"Error ensuring V1 default preset: {e}", "DEBUG")
         return False

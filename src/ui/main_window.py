@@ -39,6 +39,25 @@ from ui.text_catalog import (
     normalize_language,
     tr as tr_catalog,
 )
+from ui.main_window_compat import setup_main_window_compatibility_attrs
+from ui.main_window_navigation import (
+    open_zapret1_preset_detail,
+    open_zapret1_preset_folders,
+    open_zapret2_preset_detail,
+    open_zapret2_preset_folders,
+    redirect_to_strategies_page_for_method,
+    refresh_active_zapret2_user_presets_page,
+    refresh_page_if_possible,
+    refresh_zapret1_user_presets_page,
+    show_active_zapret2_user_presets_page,
+    show_zapret1_user_presets_page,
+)
+from ui.main_window_refresh import refresh_main_window_pages_after_preset_switch
+from ui.main_window_signals import connect_main_window_page_signals
+from core.runtime.preset_runtime_coordinator import (
+    PresetRuntimeCoordinator,
+    resolve_active_preset_watch_path,
+)
 
 # ---------------------------------------------------------------------------
 # Page class specs — UNCHANGED from original
@@ -338,6 +357,18 @@ class MainWindowUI:
         self._sidebar_search_titlebar_attached = False
         self._ui_language = self._resolve_ui_language()
         self._startup_page_init_metrics: list[tuple[str, int]] = []
+        self._preset_runtime_coordinator = PresetRuntimeCoordinator(
+            self,
+            get_launch_method=self._get_current_launch_method_for_preset_runtime,
+            get_active_preset_path=resolve_active_preset_watch_path,
+            is_dpi_running=lambda: bool(
+                hasattr(self, "dpi_controller")
+                and self.dpi_controller
+                and self.dpi_controller.is_running()
+            ),
+            restart_dpi_async=lambda: self.dpi_controller.restart_dpi_async(),
+            refresh_after_switch=self._refresh_pages_after_preset_switch,
+        )
 
         self._page_signal_bootstrap_complete = False
         self._create_pages()
@@ -346,11 +377,11 @@ class MainWindowUI:
         self._init_navigation()
 
         # Wire up signals
-        self._connect_page_signals()
+        connect_main_window_page_signals(self)
         self._page_signal_bootstrap_complete = True
 
         # Backward-compat attrs
-        self._setup_compatibility_attrs()
+        setup_main_window_compatibility_attrs(self)
         self._log_startup_page_init_summary()
 
         # Session memory
@@ -358,6 +389,15 @@ class MainWindowUI:
             self._direct_zapret2_last_opened_category_key = None
         if not hasattr(self, "_direct_zapret2_restore_detail_on_open"):
             self._direct_zapret2_restore_detail_on_open = False
+
+    @staticmethod
+    def _get_current_launch_method_for_preset_runtime() -> str:
+        try:
+            from strategy_menu import get_strategy_launch_method
+
+            return str(get_strategy_launch_method() or "").strip().lower()
+        except Exception:
+            return ""
 
     def _pump_startup_ui(self, force: bool = False) -> None:
         """Yield to event loop during heavy startup UI composition.
@@ -1388,333 +1428,33 @@ class MainWindowUI:
                 self.stackedWidget.setCurrentWidget(page)
         return True
 
-    # ------------------------------------------------------------------
-    # Compatibility attributes
-    # ------------------------------------------------------------------
-
-    def _setup_compatibility_attrs(self):
-        """Create attributes for backward-compatibility with old code."""
-        self.start_btn = self.home_page.start_btn
-        self.stop_btn = self.home_page.stop_btn
-
-        method = ""
-        try:
-            from strategy_menu import get_strategy_launch_method
-
-            method = (get_strategy_launch_method() or "").strip().lower()
-        except Exception:
-            method = ""
-
-        if method == "direct_zapret2_orchestra" and hasattr(self, "orchestra_zapret2_control_page") and hasattr(self.orchestra_zapret2_control_page, "strategy_label"):
-            self.current_strategy_label = self.orchestra_zapret2_control_page.strategy_label
-        elif hasattr(self, "zapret2_direct_control_page") and hasattr(self.zapret2_direct_control_page, "strategy_label"):
-            self.current_strategy_label = self.zapret2_direct_control_page.strategy_label
-        elif hasattr(self.control_page, "strategy_label"):
-            self.current_strategy_label = self.control_page.strategy_label
-
-        self.test_connection_btn = self.home_page.test_btn
-        self.open_folder_btn = self.home_page.folder_btn
-        self.server_status_btn = self.about_page.update_btn
-        self.subscription_btn = self.about_page.premium_btn
-
-        # Expose diagnostics sub-pages for backward-compat (cleanup, focus etc.)
-        if PageName.BLOCKCHECK in self.pages:
-            _blockcheck = self.pages[PageName.BLOCKCHECK]
-            self.connection_page = getattr(_blockcheck, "connection_page", None)
-            self.dns_check_page = getattr(_blockcheck, "dns_check_page", None)
-        if PageName.HOSTS in self.pages:
-            self.hosts_page = self.pages[PageName.HOSTS]
-
     def _show_active_zapret2_user_presets_page(self) -> None:
-        try:
-            from strategy_menu import get_strategy_launch_method
-
-            method = (get_strategy_launch_method() or "").strip().lower()
-        except Exception:
-            method = ""
-
-        if method == "direct_zapret2_orchestra":
-            self._refresh_page_if_possible(PageName.ZAPRET2_ORCHESTRA_USER_PRESETS)
-            self.show_page(PageName.ZAPRET2_ORCHESTRA_USER_PRESETS)
-        else:
-            self._refresh_page_if_possible(PageName.ZAPRET2_USER_PRESETS)
-            self.show_page(PageName.ZAPRET2_USER_PRESETS)
+        show_active_zapret2_user_presets_page(self)
 
     def _show_zapret1_user_presets_page(self) -> None:
-        self._refresh_page_if_possible(PageName.ZAPRET1_USER_PRESETS)
-        self.show_page(PageName.ZAPRET1_USER_PRESETS)
+        show_zapret1_user_presets_page(self)
 
     def _refresh_page_if_possible(self, page_name: PageName) -> None:
-        page = self._ensure_page(page_name)
-        if page is None:
-            return
-        loader = getattr(page, "_load_presets", None)
-        if callable(loader):
-            try:
-                loader()
-            except Exception:
-                pass
+        refresh_page_if_possible(self, page_name)
 
     def _refresh_active_zapret2_user_presets_page(self) -> None:
-        try:
-            from strategy_menu import get_strategy_launch_method
-
-            method = (get_strategy_launch_method() or "").strip().lower()
-        except Exception:
-            method = ""
-        target = PageName.ZAPRET2_ORCHESTRA_USER_PRESETS if method == "direct_zapret2_orchestra" else PageName.ZAPRET2_USER_PRESETS
-        self._refresh_page_if_possible(target)
+        refresh_active_zapret2_user_presets_page(self)
 
     def _refresh_zapret1_user_presets_page(self) -> None:
-        self._refresh_page_if_possible(PageName.ZAPRET1_USER_PRESETS)
+        refresh_zapret1_user_presets_page(self)
 
     def _open_zapret2_preset_detail(self, preset_name: str) -> None:
-        page = self._ensure_page(PageName.ZAPRET2_PRESET_DETAIL)
-        if page is None:
-            return
-        if hasattr(page, "set_preset_file_name"):
-            page.set_preset_file_name(preset_name)
-        self.show_page(PageName.ZAPRET2_PRESET_DETAIL)
+        open_zapret2_preset_detail(self, preset_name)
 
     def _open_zapret1_preset_detail(self, preset_name: str) -> None:
-        page = self._ensure_page(PageName.ZAPRET1_PRESET_DETAIL)
-        if page is None:
-            return
-        if hasattr(page, "set_preset_file_name"):
-            page.set_preset_file_name(preset_name)
-        self.show_page(PageName.ZAPRET1_PRESET_DETAIL)
+        open_zapret1_preset_detail(self, preset_name)
 
     def _open_zapret2_preset_folders(self) -> None:
-        self._ensure_page(PageName.ZAPRET2_PRESET_FOLDERS)
-        self.show_page(PageName.ZAPRET2_PRESET_FOLDERS)
+        open_zapret2_preset_folders(self)
 
     def _open_zapret1_preset_folders(self) -> None:
-        self._ensure_page(PageName.ZAPRET1_PRESET_FOLDERS)
-        self.show_page(PageName.ZAPRET1_PRESET_FOLDERS)
+        open_zapret1_preset_folders(self)
 
-
-    # ------------------------------------------------------------------
-    # Signal connections — UNCHANGED from original
-    # ------------------------------------------------------------------
-
-    def _connect_page_signals(self):
-        """Wire up signals from pages."""
-
-        self.start_clicked = self.home_page.start_btn.clicked
-        self.stop_clicked = self.home_page.stop_btn.clicked
-        # theme_changed replaced by display_mode_changed (theme selection removed)
-        if hasattr(self.appearance_page, 'display_mode_changed'):
-            self.display_mode_changed = self.appearance_page.display_mode_changed
-        elif hasattr(self.appearance_page, 'theme_changed'):
-            self.display_mode_changed = self.appearance_page.theme_changed
-
-        # Zapret 2 Direct signals
-        if hasattr(self, 'zapret2_strategies_page') and hasattr(self.zapret2_strategies_page, 'strategy_selected'):
-            self.zapret2_strategies_page.strategy_selected.connect(self._on_strategy_selected_from_page)
-
-        if hasattr(self, 'zapret2_strategies_page') and hasattr(self.zapret2_strategies_page, 'open_category_detail'):
-            self.zapret2_strategies_page.open_category_detail.connect(self._on_open_category_detail)
-
-        if hasattr(self, 'strategy_detail_page'):
-            if hasattr(self.strategy_detail_page, 'back_clicked'):
-                self.strategy_detail_page.back_clicked.connect(self._on_strategy_detail_back)
-            if hasattr(self.strategy_detail_page, 'navigate_to_root'):
-                self.strategy_detail_page.navigate_to_root.connect(
-                    lambda: self.show_page(PageName.ZAPRET2_DIRECT_CONTROL)
-                )
-            if hasattr(self.strategy_detail_page, 'strategy_selected'):
-                self.strategy_detail_page.strategy_selected.connect(self._on_strategy_detail_selected)
-            if hasattr(self.strategy_detail_page, 'filter_mode_changed'):
-                self.strategy_detail_page.filter_mode_changed.connect(self._on_strategy_detail_filter_mode_changed)
-
-        if hasattr(self, 'zapret2_orchestra_strategies_page') and hasattr(self.zapret2_orchestra_strategies_page, 'strategy_selected'):
-            self.zapret2_orchestra_strategies_page.strategy_selected.connect(self._on_strategy_selected_from_page)
-
-        self.autostart_page.autostart_enabled.connect(self._on_autostart_enabled)
-        self.autostart_page.autostart_disabled.connect(self._on_autostart_disabled)
-        self.autostart_page.navigate_to_dpi_settings.connect(self._navigate_to_dpi_settings)
-
-        # Connect display mode change to autostart page theme refresh
-        if hasattr(self.appearance_page, 'display_mode_changed'):
-            self.appearance_page.display_mode_changed.connect(
-                lambda _mode: self.autostart_page.on_theme_changed()
-            )
-        elif hasattr(self.appearance_page, 'theme_changed'):
-            self.appearance_page.theme_changed.connect(self.autostart_page.on_theme_changed)
-
-        # Connect background preset change
-        if hasattr(self.appearance_page, 'background_preset_changed'):
-            self.appearance_page.background_preset_changed.connect(self._on_background_preset_changed)
-
-        self.control_page.start_btn.clicked.connect(self._proxy_start_click)
-        self.control_page.stop_winws_btn.clicked.connect(self._proxy_stop_click)
-        self.control_page.stop_and_exit_btn.clicked.connect(self._proxy_stop_and_exit)
-        self.control_page.test_btn.clicked.connect(self._proxy_test_click)
-        self.control_page.folder_btn.clicked.connect(self._proxy_folder_click)
-
-        try:
-            page = getattr(self, "zapret2_direct_control_page", None)
-            if page is not None:
-                page.start_btn.clicked.connect(self._proxy_start_click)
-                page.stop_winws_btn.clicked.connect(self._proxy_stop_click)
-                page.stop_and_exit_btn.clicked.connect(self._proxy_stop_and_exit)
-                page.test_btn.clicked.connect(self._proxy_test_click)
-                page.folder_btn.clicked.connect(self._proxy_folder_click)
-                if hasattr(page, 'navigate_to_presets'):
-                    page.navigate_to_presets.connect(
-                        lambda: self.show_page(PageName.ZAPRET2_USER_PRESETS))
-                if hasattr(page, 'navigate_to_direct_launch'):
-                    page.navigate_to_direct_launch.connect(
-                        lambda: self.show_page(PageName.ZAPRET2_DIRECT))
-                if hasattr(page, 'navigate_to_blobs'):
-                    page.navigate_to_blobs.connect(
-                        lambda: self.show_page(PageName.BLOBS))
-                if hasattr(page, 'direct_mode_changed'):
-                    page.direct_mode_changed.connect(self._on_direct_mode_changed)
-        except Exception:
-            pass
-
-        try:
-            page = getattr(self, "orchestra_zapret2_control_page", None)
-            if page is not None:
-                page.start_btn.clicked.connect(self._proxy_start_click)
-                page.stop_winws_btn.clicked.connect(self._proxy_stop_click)
-                page.stop_and_exit_btn.clicked.connect(self._proxy_stop_and_exit)
-                page.test_btn.clicked.connect(self._proxy_test_click)
-                page.folder_btn.clicked.connect(self._proxy_folder_click)
-                if hasattr(page, 'navigate_to_presets'):
-                    page.navigate_to_presets.connect(
-                        lambda: self.show_page(PageName.ZAPRET2_ORCHESTRA_USER_PRESETS)
-                    )
-                if hasattr(page, 'navigate_to_direct_launch'):
-                    page.navigate_to_direct_launch.connect(
-                        lambda: self.show_page(PageName.ZAPRET2_ORCHESTRA)
-                    )
-                if hasattr(page, 'navigate_to_blobs'):
-                    page.navigate_to_blobs.connect(
-                        lambda: self.show_page(PageName.BLOBS)
-                    )
-        except Exception:
-            pass
-
-        # Zapret 1 Direct Control page — start/stop buttons + navigation
-        try:
-            z1_page = getattr(self, "zapret1_direct_control_page", None)
-            if z1_page is not None:
-                if hasattr(z1_page, 'start_btn'):
-                    z1_page.start_btn.clicked.connect(self._proxy_start_click)
-                if hasattr(z1_page, 'stop_winws_btn'):
-                    z1_page.stop_winws_btn.clicked.connect(self._proxy_stop_click)
-                if hasattr(z1_page, 'stop_and_exit_btn'):
-                    z1_page.stop_and_exit_btn.clicked.connect(self._proxy_stop_and_exit)
-                if hasattr(z1_page, 'test_btn'):
-                    z1_page.test_btn.clicked.connect(self._proxy_test_click)
-                if hasattr(z1_page, 'folder_btn'):
-                    z1_page.folder_btn.clicked.connect(self._proxy_folder_click)
-                if hasattr(z1_page, 'navigate_to_strategies'):
-                    z1_page.navigate_to_strategies.connect(
-                        lambda: self.show_page(PageName.ZAPRET1_DIRECT))
-                if hasattr(z1_page, 'navigate_to_presets'):
-                    z1_page.navigate_to_presets.connect(
-                        lambda: self.show_page(PageName.ZAPRET1_USER_PRESETS))
-        except Exception:
-            pass
-
-        # Back nav from subpages (Мои пресеты / Прямой запуск / Блобы → Управление)
-        for _back_attr in ("zapret2_user_presets_page", "zapret2_strategies_page", "blobs_page"):
-            _back_page = getattr(self, _back_attr, None)
-            if _back_page is not None and hasattr(_back_page, "back_clicked"):
-                try:
-                    _back_page.back_clicked.connect(self._show_active_zapret2_control_page)
-                except Exception:
-                    pass
-
-        _orch_back_page = getattr(self, "orchestra_zapret2_user_presets_page", None)
-        if _orch_back_page is not None and hasattr(_orch_back_page, "back_clicked"):
-            try:
-                _orch_back_page.back_clicked.connect(
-                    lambda: self.show_page(PageName.ZAPRET2_ORCHESTRA_CONTROL)
-                )
-            except Exception:
-                pass
-
-        if hasattr(self.home_page, 'premium_link_btn'):
-            self.home_page.premium_link_btn.clicked.connect(self._open_subscription_dialog)
-
-        self.home_page.navigate_to_control.connect(self._navigate_to_control)
-        self.home_page.navigate_to_strategies.connect(self._navigate_to_strategies)
-        self.home_page.navigate_to_autostart.connect(self.show_autostart_page)
-        self.home_page.navigate_to_premium.connect(self._open_subscription_dialog)
-        if hasattr(self.home_page, 'navigate_to_dpi_settings'):
-            self.home_page.navigate_to_dpi_settings.connect(
-                lambda: self.show_page(PageName.DPI_SETTINGS))
-
-        if hasattr(self.appearance_page, 'subscription_btn'):
-            self.appearance_page.subscription_btn.clicked.connect(self._open_subscription_dialog)
-
-        if hasattr(self.appearance_page, 'background_refresh_needed'):
-            self.appearance_page.background_refresh_needed.connect(self._on_background_refresh_needed)
-
-        if hasattr(self.appearance_page, 'opacity_changed'):
-            self.appearance_page.opacity_changed.connect(self._on_opacity_changed)
-
-        if hasattr(self.appearance_page, 'mica_changed'):
-            self.appearance_page.mica_changed.connect(self._on_mica_changed)
-
-        if hasattr(self.appearance_page, 'animations_changed'):
-            self.appearance_page.animations_changed.connect(self._on_animations_changed)
-
-        if hasattr(self.appearance_page, 'smooth_scroll_changed'):
-            self.appearance_page.smooth_scroll_changed.connect(self._on_smooth_scroll_changed)
-
-        if hasattr(self.appearance_page, 'ui_language_changed'):
-            self.appearance_page.ui_language_changed.connect(self._on_ui_language_changed)
-
-        if hasattr(self.about_page, 'premium_btn'):
-            self.about_page.premium_btn.clicked.connect(self._open_subscription_dialog)
-
-        if hasattr(self.about_page, 'update_btn'):
-            self.about_page.update_btn.clicked.connect(lambda: self.show_page(PageName.SERVERS))
-
-        if hasattr(self.premium_page, 'subscription_updated'):
-            self.premium_page.subscription_updated.connect(self._on_subscription_updated)
-
-        self.dpi_settings_page.launch_method_changed.connect(self._on_launch_method_changed)
-        if hasattr(self, 'orchestra_page'):
-            self.orchestra_page.clear_learned_requested.connect(self._on_clear_learned_requested)
-
-        try:
-            from preset_zapret2.preset_store import get_preset_store
-            store = get_preset_store()
-            store.preset_switched.connect(self._on_preset_switched)
-        except Exception:
-            pass
-
-        try:
-            from preset_orchestra_zapret2.preset_store import get_preset_store
-
-            orchestra_store = get_preset_store()
-            orchestra_store.preset_switched.connect(self._on_preset_switched)
-        except Exception:
-            pass
-
-        try:
-            from preset_zapret1.preset_store import get_preset_store_v1
-            store_v1 = get_preset_store_v1()
-            store_v1.preset_switched.connect(self._on_preset_switched)
-        except Exception:
-            pass
-
-        try:
-            self._setup_active_preset_file_watcher()
-        except Exception:
-            pass
-
-        try:
-            from config.reg import get_smooth_scroll_enabled
-            self._on_smooth_scroll_changed(get_smooth_scroll_enabled())
-        except Exception:
-            pass
 
     # ------------------------------------------------------------------
     # All handler methods — PRESERVED from original
@@ -1863,204 +1603,8 @@ class MainWindowUI:
         except Exception:
             pass
 
-    def _setup_active_preset_file_watcher(self) -> None:
-        try:
-            import os
-            from PyQt6.QtCore import QFileSystemWatcher, QTimer
-
-            try:
-                from strategy_menu import get_strategy_launch_method
-
-                method = (get_strategy_launch_method() or "").strip().lower()
-            except Exception:
-                method = ""
-
-            if method == "direct_zapret2_orchestra":
-                from preset_orchestra_zapret2 import get_active_preset_path
-            elif method == "direct_zapret2":
-                from core.services import get_direct_flow_coordinator
-                watched_path = os.fspath(get_direct_flow_coordinator().get_selected_source_path("direct_zapret2"))
-                if not watched_path:
-                    return
-            else:
-                return
-
-            if method == "direct_zapret2_orchestra":
-                watched_path = os.fspath(get_active_preset_path())
-                if not watched_path:
-                    return
-
-            watcher = getattr(self, "_active_preset_file_watcher", None)
-            if watcher is None:
-                watcher = QFileSystemWatcher(self)
-                watcher.fileChanged.connect(self._on_active_preset_file_changed)
-                self._active_preset_file_watcher = watcher
-
-            timer = getattr(self, "_active_preset_file_refresh_timer", None)
-            if timer is None:
-                timer = QTimer(self)
-                timer.setSingleShot(True)
-                timer.timeout.connect(self._schedule_refresh_after_preset_switch)
-                self._active_preset_file_refresh_timer = timer
-
-            self._active_preset_file_path = watched_path
-
-            try:
-                current = set(watcher.files() or [])
-                desired = {watched_path}
-                for p in (current - desired):
-                    watcher.removePath(p)
-                for p in (desired - current):
-                    watcher.addPath(p)
-            except Exception:
-                try:
-                    if watched_path not in (watcher.files() or []):
-                        watcher.addPath(watched_path)
-                except Exception:
-                    pass
-        except Exception:
-            return
-
-    def _on_active_preset_file_changed(self, path: str) -> None:
-        try:
-            watcher = getattr(self, "_active_preset_file_watcher", None)
-            desired = getattr(self, "_active_preset_file_path", None)
-            if watcher is not None:
-                rearm = (desired or path)
-                if rearm and rearm not in (watcher.files() or []):
-                    watcher.addPath(rearm)
-        except Exception:
-            pass
-
-        try:
-            timer = getattr(self, "_active_preset_file_refresh_timer", None)
-            if timer is not None:
-                timer.start(200)
-            else:
-                self._schedule_refresh_after_preset_switch()
-        except Exception:
-            try:
-                self._schedule_refresh_after_preset_switch()
-            except Exception:
-                pass
-
-    def _on_preset_switched(self, preset_file_name: str):
-        from log import log
-        log(f"Пресет переключен: {preset_file_name}", "INFO")
-
-        try:
-            from strategy_menu import get_strategy_launch_method
-            method = (get_strategy_launch_method() or "").strip().lower()
-        except Exception:
-            method = ""
-
-        if method in ("direct_zapret2", "direct_zapret2_orchestra"):
-            try:
-                from dpi.zapret2_core_restart import trigger_dpi_reload
-                trigger_dpi_reload(self, reason="preset_switched")
-            except Exception:
-                pass
-        elif method == "direct_zapret1":
-            # direct_zapret1 has its own hot-reload via StrategyRunnerV1 file watcher.
-            # Avoid duplicate stop/start from UI-level restart debounce.
-            log("direct_zapret1: preset watcher handles reload, skip extra restart", "DEBUG")
-        else:
-            self._schedule_dpi_restart_after_preset_switch()
-
-        self._schedule_refresh_after_preset_switch()
-
-    def _schedule_dpi_restart_after_preset_switch(self, delay_ms: int = 350) -> None:
-        try:
-            if not hasattr(self, 'dpi_controller') or not self.dpi_controller:
-                return
-            if not self.dpi_controller.is_running():
-                return
-
-            from PyQt6.QtCore import QTimer
-            timer = getattr(self, "_preset_switch_restart_timer", None)
-            if timer is None:
-                timer = QTimer(self)
-                timer.setSingleShot(True)
-                timer.timeout.connect(self._restart_dpi_after_preset_switch)
-                self._preset_switch_restart_timer = timer
-            timer.start(max(0, int(delay_ms)))
-        except Exception:
-            return
-
-    def _restart_dpi_after_preset_switch(self) -> None:
-        from log import log
-        try:
-            if not hasattr(self, 'dpi_controller') or not self.dpi_controller:
-                return
-            if not self.dpi_controller.is_running():
-                return
-            log("DPI запущен - выполняем перезапуск после смены пресета (debounce)", "INFO")
-            self.dpi_controller.restart_dpi_async()
-        except Exception as e:
-            log(f"Ошибка перезапуска DPI после смены пресета: {e}", "DEBUG")
-
-    def _schedule_refresh_after_preset_switch(self):
-        try:
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(0, self._refresh_pages_after_preset_switch)
-        except Exception:
-            try:
-                self._refresh_pages_after_preset_switch()
-            except Exception:
-                pass
-
     def _refresh_pages_after_preset_switch(self):
-        from log import log
-
-        try:
-            page = getattr(self, "zapret2_strategies_page", None)
-            if page and hasattr(page, "refresh_from_preset_switch"):
-                page.refresh_from_preset_switch()
-        except Exception as e:
-            log(f"Ошибка обновления zapret2_strategies_page после смены пресета: {e}", "DEBUG")
-
-        try:
-            detail = getattr(self, "strategy_detail_page", None)
-            if detail and hasattr(detail, "refresh_from_preset_switch"):
-                detail.refresh_from_preset_switch()
-        except Exception as e:
-            log(f"Ошибка обновления strategy_detail_page после смены пресета: {e}", "DEBUG")
-
-        # Zapret 1 pages
-        try:
-            z1_page = getattr(self, "zapret1_strategies_page", None)
-            if z1_page and hasattr(z1_page, "reload_for_mode_change"):
-                z1_page.reload_for_mode_change()
-        except Exception as e:
-            log(f"Ошибка обновления zapret1_strategies_page после смены пресета: {e}", "DEBUG")
-
-        try:
-            z1_ctrl = getattr(self, "zapret1_direct_control_page", None)
-            if z1_ctrl and hasattr(z1_ctrl, "_refresh_preset_name"):
-                z1_ctrl._refresh_preset_name()
-        except Exception as e:
-            log(f"Ошибка обновления zapret1_direct_control_page после смены пресета: {e}", "DEBUG")
-
-        try:
-            z2_ctrl = getattr(self, "zapret2_direct_control_page", None)
-            if z2_ctrl and hasattr(z2_ctrl, "_load_advanced_settings"):
-                z2_ctrl._load_advanced_settings()
-        except Exception as e:
-            log(f"Ошибка обновления advanced toggles zapret2_direct_control_page после смены пресета: {e}", "DEBUG")
-
-        try:
-            orchestra_ctrl = getattr(self, "orchestra_zapret2_control_page", None)
-            if orchestra_ctrl and hasattr(orchestra_ctrl, "_load_advanced_settings"):
-                orchestra_ctrl._load_advanced_settings()
-        except Exception as e:
-            log(f"Ошибка обновления advanced toggles orchestra_zapret2_control_page после смены пресета: {e}", "DEBUG")
-
-        try:
-            display_name = self._get_direct_strategy_summary()
-            if display_name:
-                self.update_current_strategy_display(display_name)
-        except Exception as e:
-            log(f"Ошибка обновления display стратегии после смены пресета: {e}", "DEBUG")
+        refresh_main_window_pages_after_preset_switch(self)
 
     def _on_clear_learned_requested(self):
         from log import log
@@ -2119,7 +1663,7 @@ class MainWindowUI:
         if method == "direct_zapret2":
             from preset_zapret2 import ensure_default_preset_exists
             if not ensure_default_preset_exists():
-                log("direct_zapret2: preset-zapret2.txt не создан", "ERROR")
+                log("direct_zapret2: выбранный source-пресет не подготовлен", "ERROR")
                 try:
                     self.set_status("Ошибка: отсутствует Default.txt (built-in пресет)")
                 except Exception:
@@ -2140,13 +1684,13 @@ class MainWindowUI:
             try:
                 from preset_zapret1 import ensure_default_preset_exists_v1
                 if not ensure_default_preset_exists_v1():
-                    log("direct_zapret1: preset-zapret1.txt не создан", "ERROR")
+                    log("direct_zapret1: выбранный source-пресет не подготовлен", "ERROR")
                     can_autostart = False
             except Exception as e:
                 log(f"direct_zapret1: ошибка инициализации пресета: {e}", "WARNING")
 
         try:
-            self._setup_active_preset_file_watcher()
+            self._preset_runtime_coordinator.setup_active_preset_file_watcher()
         except Exception:
             pass
 
@@ -2174,41 +1718,7 @@ class MainWindowUI:
             pass
 
     def _redirect_to_strategies_page_for_method(self, method: str) -> None:
-        from ui.page_names import PageName
-
-        current = None
-        try:
-            current = self.stackedWidget.currentWidget() if hasattr(self, "stackedWidget") else None
-        except Exception:
-            current = None
-
-        strategies_context_pages = set()
-        for attr in (
-            "dpi_settings_page", "zapret2_user_presets_page", "zapret2_strategies_page",
-            "orchestra_zapret2_user_presets_page", "zapret2_orchestra_strategies_page",
-            "orchestra_zapret2_control_page", "zapret1_direct_control_page",
-            "zapret1_strategies_page", "zapret1_user_presets_page", "strategy_detail_page",
-            "orchestra_strategy_detail_page",
-        ):
-            page = getattr(self, attr, None)
-            if page is not None:
-                strategies_context_pages.add(page)
-
-        if current is not None and current not in strategies_context_pages:
-            return
-
-        if method == "orchestra":
-            target_page = PageName.ORCHESTRA
-        elif method == "direct_zapret2_orchestra":
-            target_page = PageName.ZAPRET2_ORCHESTRA_CONTROL
-        elif method == "direct_zapret2":
-            target_page = PageName.ZAPRET2_DIRECT_CONTROL
-        elif method == "direct_zapret1":
-            target_page = PageName.ZAPRET1_DIRECT_CONTROL
-        else:
-            target_page = PageName.CONTROL
-
-        self.show_page(target_page)
+        redirect_to_strategies_page_for_method(self, method)
 
     def _auto_start_after_method_switch(self, method: str):
         from log import log

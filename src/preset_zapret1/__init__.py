@@ -18,8 +18,6 @@ from .preset_defaults import (
     clear_all_deleted_presets_v1,
     get_builtin_preset_content_v1,
     get_deleted_preset_names_v1,
-    get_default_builtin_preset_name_v1,
-    get_all_builtin_preset_names_v1,
     get_template_content_v1,
     get_default_template_content_v1,
     get_builtin_base_from_copy_name_v1,
@@ -34,7 +32,6 @@ from .strategies_loader import (
     load_v1_strategies,
     ensure_v1_strategies_exist,
     get_v1_strategies_dir,
-    BASIC_STRATEGIES_DIR,
 )
 
 __all__ = [
@@ -48,8 +45,6 @@ __all__ = [
     "get_preset_store_v1",
     "get_builtin_preset_content_v1",
     "get_deleted_preset_names_v1",
-    "get_default_builtin_preset_name_v1",
-    "get_all_builtin_preset_names_v1",
     "get_template_content_v1",
     "get_default_template_content_v1",
     "get_builtin_base_from_copy_name_v1",
@@ -63,5 +58,4 @@ __all__ = [
     "load_v1_strategies",
     "ensure_v1_strategies_exist",
     "get_v1_strategies_dir",
-    "BASIC_STRATEGIES_DIR",
 ]

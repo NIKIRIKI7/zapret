@@ -11,7 +11,6 @@ Presets are stored in a stable per-user directory (Windows):
 This avoids reliance on the installation folder location.
 Selected source preset state is managed by the core selection service.
 """
-import os
 import re
 import shutil
 from datetime import datetime
@@ -24,12 +23,6 @@ from .preset_model import DEFAULT_PRESET_ICON_COLOR, normalize_preset_icon_color
 if TYPE_CHECKING:
     from .preset_model import Preset
 
-# Lazy imports to avoid circular dependencies
-# NOTE: APP_CORE_PATH is where the app is installed / located (where Zapret.exe lives).
-_APP_CORE_PATH: Optional[str] = None
-_PRESETS_ROOT_PATH: Optional[str] = None
-_MAIN_DIRECTORY: Optional[str] = None
-
 def _core_engine_id() -> str:
     return "winws2"
 
@@ -40,58 +33,11 @@ def _core_paths():
     return get_app_paths().engine_paths(_core_engine_id()).ensure_directories()
 
 
-def _get_app_core_path() -> str:
-    """Lazily gets the app core path (APP_CORE_PATH) to avoid import cycles."""
-    global _APP_CORE_PATH
-    if _APP_CORE_PATH is None:
-        from config import APP_CORE_PATH
-
-        _APP_CORE_PATH = APP_CORE_PATH
-    return _APP_CORE_PATH
-
-
-def _get_presets_root_path() -> str:
-    """Returns the stable presets root (prefer %APPDATA%\\zapret\\presets_v2)."""
-    global _PRESETS_ROOT_PATH
-    if _PRESETS_ROOT_PATH is None:
-        try:
-            from config import get_zapret_presets_v2_dir
-
-            p = (get_zapret_presets_v2_dir() or "").strip()
-            _PRESETS_ROOT_PATH = p
-        except Exception:
-            _PRESETS_ROOT_PATH = ""
-
-        if not _PRESETS_ROOT_PATH:
-            # Fallback for non-Windows/dev environments.
-            _PRESETS_ROOT_PATH = str(Path(_get_app_core_path()) / "presets_v2")
-    return _PRESETS_ROOT_PATH
-
-
-def _get_main_directory() -> str:
-    """Lazily gets MAIN_DIRECTORY to avoid import cycles."""
-    global _MAIN_DIRECTORY
-    if _MAIN_DIRECTORY is None:
-        from config import MAIN_DIRECTORY
-        _MAIN_DIRECTORY = MAIN_DIRECTORY
-    return _MAIN_DIRECTORY
-
-# ============================================================================
-# PATH FUNCTIONS
-# ============================================================================
-
 def get_presets_dir() -> Path:
     """
-    Returns path to presets directory.
-
-    Creates directory if it doesn't exist.
-
-    Returns:
-        Path to %APPDATA%/zapret/presets_v2/
+    Returns path to the direct_zapret2 source presets directory.
     """
-    presets_dir = Path(_get_presets_root_path())
-    presets_dir.mkdir(parents=True, exist_ok=True)
-    return presets_dir
+    return _core_paths().presets_dir
 
 
 def get_user_settings_path() -> Path:
@@ -125,7 +71,7 @@ def _sanitize_filename(name: str) -> str:
     return safe_name[:100]
 
 
-def _load_preset_from_path(preset_path: Path, fallback_name: str) -> Optional[Preset]:
+def _load_preset_from_path(preset_path: Path) -> Optional[Preset]:
     from .block_semantics import (
         SEMANTIC_STATUS_STRUCTURED_SUPPORTED,
         analyze_block_semantics,
@@ -148,8 +94,9 @@ def _load_preset_from_path(preset_path: Path, fallback_name: str) -> Optional[Pr
 
     try:
         # Convert to Preset model
+        file_stem = Path(preset_path).stem
         preset = Preset(
-            name=data.name if data.name != "Unnamed" else fallback_name,
+            name=data.name if data.name != "Unnamed" else file_stem,
             base_args=data.base_args,
         )
 
@@ -300,11 +247,11 @@ def _load_preset_from_path(preset_path: Path, fallback_name: str) -> Optional[Pr
                 if inferred_id != "none":
                     cat.strategy_id = inferred_id
 
-        log(f"Loaded preset '{fallback_name}': {len(preset.categories)} categories", "DEBUG")
+        log(f"Loaded preset '{file_stem}': {len(preset.categories)} categories", "DEBUG")
         return preset
 
     except Exception as e:
-        log(f"Error loading preset '{fallback_name}': {e}", "ERROR")
+        log(f"Error loading preset '{file_stem}': {e}", "ERROR")
         return None
 def _parse_metadata_from_header(header: str) -> Tuple[str, str, str, str]:
     """
@@ -334,7 +281,7 @@ def _parse_metadata_from_header(header: str) -> Tuple[str, str, str, str]:
         if desc_match:
             description = desc_match.group(1).strip()
 
-        icon_color_match = re.match(r'#\s*(?:IconColor|PresetIconColor):\s*(.+)', line, re.IGNORECASE)
+        icon_color_match = re.match(r'#\s*IconColor:\s*(.+)', line, re.IGNORECASE)
         if icon_color_match:
             icon_color = normalize_preset_icon_color(icon_color_match.group(1).strip())
 
@@ -385,12 +332,6 @@ def _read_existing_template_origin(path: Path) -> Optional[str]:
         return _parse_template_origin_from_header(content)
     except Exception:
         return None
-
-
-def _parse_timestamps_from_header(header: str) -> Tuple[str, str]:
-    """Backward-compatible helper returning (created, modified) only."""
-    created, modified, _desc, _icon = _parse_metadata_from_header(header)
-    return created, modified
 
 
 def save_preset(preset: Preset) -> bool:
@@ -455,10 +396,9 @@ def save_preset(preset: Preset) -> bool:
                 args_lines = list(base_filter_lines)
                 if not args_lines:
                     filter_file_relative = cat.get_filter_file()
-                    filter_file = os.path.normpath(os.path.join(_get_main_directory(), filter_file_relative))
                     args_lines = [f"--filter-tcp={cat.tcp_port}"]
                     if cat.filter_mode in ("hostlist", "ipset"):
-                        args_lines.append(f"--{cat.filter_mode}={filter_file}")
+                        args_lines.append(f"--{cat.filter_mode}={filter_file_relative}")
                 # Use get_full_tcp_args() to include syndata/send/out-range
                 full_tcp_args = cat.get_full_tcp_args()
                 for line in full_tcp_args.strip().split('\n'):
@@ -484,10 +424,9 @@ def save_preset(preset: Preset) -> bool:
                 args_lines = list(base_filter_lines)
                 if not args_lines:
                     filter_file_relative = cat.get_filter_file()
-                    filter_file = os.path.normpath(os.path.join(_get_main_directory(), filter_file_relative))
                     args_lines = [f"--filter-udp={cat.udp_port}"]
                     if cat.filter_mode in ("hostlist", "ipset"):
-                        args_lines.append(f"--{cat.filter_mode}={filter_file}")
+                        args_lines.append(f"--{cat.filter_mode}={filter_file_relative}")
                 # Use get_full_udp_args() to include out-range (UDP has no syndata/send)
                 full_udp_args = cat.get_full_udp_args()
                 for line in full_udp_args.strip().split('\n'):

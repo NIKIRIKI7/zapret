@@ -340,8 +340,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Not selected",
     },
     "page.z1_control.preset.current": {
-        "ru": "Текущий активный пресет",
-        "en": "Current active preset",
+        "ru": "Текущий выбранный source-пресет",
+        "en": "Current selected source preset",
     },
     "page.z1_control.button.my_presets": {
         "ru": "Мои пресеты",
@@ -4180,8 +4180,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Restore default presets",
     },
     "page.z1_user_presets.dialog.reset_all.body": {
-        "ru": "Стандартные пресеты будут восстановлены как после установки.\nВаши изменения в стандартных пресетах будут потеряны.\nПользовательские пресеты с другими именами останутся.\nТекущий активный пресет будет применен заново автоматически.",
-        "en": "Default presets will be restored as after installation.\nYour changes to default presets will be lost.\nCustom presets with other names will remain.\nCurrent active preset will be re-applied automatically.",
+        "ru": "Стандартные пресеты будут восстановлены как после установки.\nВаши изменения в стандартных пресетах будут потеряны.\nПользовательские пресеты с другими именами останутся.\nТекущий выбранный source-пресет будет применён заново автоматически.",
+        "en": "Default presets will be restored as after installation.\nYour changes to default presets will be lost.\nCustom presets with other names will remain.\nCurrent selected source preset will be re-applied automatically.",
     },
     "page.z1_user_presets.dialog.reset_all.button": {
         "ru": "Вернуть заводские",
@@ -4392,8 +4392,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "No active lists",
     },
     "page.z2_control.preset.current": {
-        "ru": "Текущий активный пресет",
-        "en": "Current active preset",
+        "ru": "Текущий выбранный source-пресет",
+        "en": "Current selected source preset",
     },
     "page.z2_control.card.advanced": {
         "ru": "ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ",
@@ -4648,8 +4648,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Restore default presets",
     },
     "page.z2_user_presets.dialog.reset_all.body": {
-        "ru": "Стандартные пресеты будут восстановлены как после установки.\nВаши изменения в стандартных пресетах будут потеряны.\nПользовательские пресеты с другими именами останутся.\nТекущий активный пресет будет применен заново автоматически.",
-        "en": "Default presets will be restored as after installation.\nYour changes to default presets will be lost.\nCustom presets with other names will remain.\nCurrent active preset will be re-applied automatically.",
+        "ru": "Стандартные пресеты будут восстановлены как после установки.\nВаши изменения в стандартных пресетах будут потеряны.\nПользовательские пресеты с другими именами останутся.\nТекущий выбранный source-пресет будет применён заново автоматически.",
+        "en": "Default presets will be restored as after installation.\nYour changes to default presets will be lost.\nCustom presets with other names will remain.\nCurrent selected source preset will be re-applied automatically.",
     },
     "page.z2_user_presets.dialog.reset_all.button": {
         "ru": "Вернуть заводские",
@@ -4964,12 +4964,12 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Failed to create preset.",
     },
     "page.z2_strategy_detail.infobar.preset.no_active.title": {
-        "ru": "Нет активного пресета",
-        "en": "No active preset",
+        "ru": "Нет выбранного source-пресета",
+        "en": "No selected source preset",
     },
     "page.z2_strategy_detail.infobar.preset.no_active.content": {
-        "ru": "Активный пресет не найден.",
-        "en": "Active preset was not found.",
+        "ru": "Выбранный source-пресет не найден.",
+        "en": "Selected source preset was not found.",
     },
     "page.z2_strategy_detail.infobar.preset.renamed.title": {
         "ru": "Переименован",
@@ -4996,8 +4996,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Rename",
     },
     "page.z2_strategy_detail.button.rename_preset.tooltip": {
-        "ru": "Переименовать текущий активный пресет",
-        "en": "Rename current active preset",
+        "ru": "Переименовать текущий выбранный source-пресет",
+        "en": "Rename current selected source preset",
     },
     "page.z2_strategy_detail.button.reset_settings": {
         "ru": "Сбросить настройки",

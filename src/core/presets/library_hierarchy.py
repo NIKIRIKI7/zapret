@@ -149,7 +149,6 @@ class PresetHierarchyStore:
     scope_key: str
     _state: dict | None = None
     _display_name_by_key: dict[str, str] | None = None
-    _keys_by_display_name: dict[str, set[str]] | None = None
 
     @property
     def state_path(self) -> Path:
@@ -206,7 +205,6 @@ class PresetHierarchyStore:
             "top_level_order": top_level_order or list(DEFAULT_TOP_LEVEL_ORDER),
         }
         self._display_name_by_key = {}
-        self._keys_by_display_name = {}
         self._normalize_state()
 
     def _normalize_state(self) -> None:
@@ -347,14 +345,12 @@ class PresetHierarchyStore:
 
     def _register_entries(self, entries: list[dict]) -> None:
         self._display_name_by_key = {}
-        self._keys_by_display_name = {}
         for entry in entries:
             key = str(entry.get("key") or "").strip()
             display_name = str(entry.get("display_name") or "").strip() or key
             if not key:
                 continue
             self._display_name_by_key[key] = display_name
-            self._keys_by_display_name.setdefault(display_name.lower(), set()).add(key)
 
     def _resolve_preset_key(self, preset_key: str, *, display_name: str | None = None) -> str:
         self._ensure_loaded()
@@ -365,43 +361,7 @@ class PresetHierarchyStore:
             return candidate
         if self._display_name_by_key and candidate and candidate in self._display_name_by_key:
             return candidate
-
-        lookup_names: list[str] = []
-        if candidate:
-            lookup_names.append(candidate)
-        display = str(display_name or "").strip()
-        if display and display.lower() not in {item.lower() for item in lookup_names}:
-            lookup_names.append(display)
-
-        for lookup in lookup_names:
-            keys = (self._keys_by_display_name or {}).get(lookup.lower()) or set()
-            if len(keys) == 1:
-                return next(iter(keys))
-            if lookup in self._state["presets"]:
-                return lookup
-
-        return candidate or display
-
-    def _migrate_legacy_meta_keys(self, entries: list[dict]) -> None:
-        self._ensure_loaded()
-        assert self._state is not None
-
-        changed = False
-        for entry in entries:
-            key = str(entry.get("key") or "").strip()
-            display_name = str(entry.get("display_name") or "").strip()
-            if not key or not display_name or key == display_name:
-                continue
-            if key in self._state["presets"]:
-                continue
-            raw = self._state["presets"].pop(display_name, None)
-            if raw is None:
-                continue
-            self._state["presets"][key] = _normalize_preset_meta(raw)
-            changed = True
-
-        if changed:
-            self._save()
+        return candidate
 
     def get_preset_meta(self, preset_name: str, *, display_name: str | None = None) -> dict:
         self._ensure_loaded()
@@ -567,8 +527,6 @@ class PresetHierarchyStore:
         target = str(folder_id or ROOT_FOLDER_ID).strip() or ROOT_FOLDER_ID
         entries = self._normalize_preset_entries(preset_names, is_builtin_resolver=is_builtin_resolver)
         self._register_entries(entries)
-        self._migrate_legacy_meta_keys(entries)
-
         names = []
         for entry in entries:
             key = str(entry.get("key") or "").strip()
@@ -595,8 +553,6 @@ class PresetHierarchyStore:
 
         entries = self._normalize_preset_entries(preset_names, is_builtin_resolver=is_builtin_resolver)
         self._register_entries(entries)
-        self._migrate_legacy_meta_keys(entries)
-
         entry_by_key = {str(item.get("key") or "").strip(): item for item in entries}
         source_name = self._resolve_preset_key(preset_name)
         if not source_name:
@@ -653,8 +609,6 @@ class PresetHierarchyStore:
 
         entries = self._normalize_preset_entries(preset_names, is_builtin_resolver=is_builtin_resolver)
         self._register_entries(entries)
-        self._migrate_legacy_meta_keys(entries)
-
         entry_by_key = {str(item.get("key") or "").strip(): item for item in entries}
         source_name = self._resolve_preset_key(preset_name)
         target_preset = self._resolve_preset_key(target_name)
@@ -721,8 +675,6 @@ class PresetHierarchyStore:
     ) -> bool:
         entries = self._normalize_preset_entries(preset_names, is_builtin_resolver=is_builtin_resolver)
         self._register_entries(entries)
-        self._migrate_legacy_meta_keys(entries)
-
         entry_by_key = {str(item.get("key") or "").strip(): item for item in entries}
         source_name = self._resolve_preset_key(preset_name)
         if not source_name:
@@ -1044,7 +996,6 @@ class PresetHierarchyStore:
         query_text = str(query or "").strip().lower()
         entries = self._normalize_preset_entries(preset_names, is_builtin_resolver=is_builtin_resolver)
         self._register_entries(entries)
-        self._migrate_legacy_meta_keys(entries)
         by_id = {item["id"]: item for item in self._state["folders"]}
         live_keys = {str(item.get("key") or "").strip() for item in entries if str(item.get("key") or "").strip()}
 

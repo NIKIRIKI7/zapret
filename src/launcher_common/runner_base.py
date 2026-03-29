@@ -129,7 +129,7 @@ class StrategyRunnerBase(ABC):
 
     @abstractmethod
     def get_preset_filename(self) -> str:
-        """Returns the preset filename for this runner type (e.g., preset-zapret1.txt)"""
+        """Returns the launch preset filename for this runner type."""
         pass
 
     def start_from_preset_file(self, preset_path: str, strategy_name: str = "Preset") -> bool:
@@ -143,7 +143,7 @@ class StrategyRunnerBase(ABC):
         Subclasses (like StrategyRunnerV2) may override for more efficient handling.
 
         Args:
-            preset_path: Path to preset file (e.g., preset-zapret2.txt)
+            preset_path: Path to the prepared launch preset file
             strategy_name: Strategy name for logs
 
         Returns:

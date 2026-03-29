@@ -568,7 +568,6 @@ class StrategyDetailPage(BasePage):
         self._tcp_last_enabled_args_by_category: dict[str, str] = {}
         self._waiting_for_process_start = False  # Флаг ожидания запуска DPI
         self._process_monitor_connected = False  # Флаг подключения к process_monitor
-        self._fallback_timer = None  # Таймер защиты от бесконечного спиннера
         self._apply_feedback_timer = None  # Быстрый таймер: убрать спиннер после apply
         self._strategies_load_timer = None
         self._strategies_load_generation = 0
@@ -2429,8 +2428,8 @@ class StrategyDetailPage(BasePage):
                 get_direct_flow_coordinator().get_selected_source_file_name("direct_zapret2") or ""
             ).strip()
 
-            selected_document = get_direct_flow_coordinator().get_selected_source_preset("direct_zapret2")
-            old_name = str(selected_document.manifest.name if selected_document is not None else "").strip()
+            selected_manifest = get_direct_flow_coordinator().get_selected_source_manifest("direct_zapret2")
+            old_name = str(selected_manifest.name if selected_manifest is not None else "").strip()
         except Exception as e:
             if InfoBar:
                 InfoBar.error(
@@ -2443,10 +2442,10 @@ class StrategyDetailPage(BasePage):
         if not old_name or not old_file_name:
             if InfoBar:
                 InfoBar.warning(
-                    title=self._tr("page.z2_strategy_detail.infobar.preset.no_active.title", "Нет активного пресета"),
+                    title=self._tr("page.z2_strategy_detail.infobar.preset.no_active.title", "Нет выбранного source-пресета"),
                     content=self._tr(
                         "page.z2_strategy_detail.infobar.preset.no_active.content",
-                        "Активный пресет не найден.",
+                        "Выбранный source-пресет не найден.",
                     ),
                     parent=self.window(),
                 )
@@ -2461,8 +2460,8 @@ class StrategyDetailPage(BasePage):
         try:
             updated = facade.rename_by_file_name(old_file_name, new_name)
             store.notify_presets_changed()
-            if facade.is_selected_file_name(updated.manifest.file_name):
-                store.notify_preset_switched(updated.manifest.file_name)
+            if facade.is_selected_file_name(updated.file_name):
+                store.notify_preset_switched(updated.file_name)
             log(f"Пресет '{old_name}' переименован в '{new_name}'", "INFO")
             if InfoBar:
                 InfoBar.success(
@@ -2592,16 +2591,12 @@ class StrategyDetailPage(BasePage):
         # В direct_zapret2 режимах "apply" часто не меняет состояние процесса (hot-reload),
         # поэтому даём быстрый таймаут, чтобы UI не зависал на спиннере.
         self._start_apply_feedback_timer()
-        # Запускаем fallback таймер на случай если сигнал не придет
-        self._start_fallback_timer()
-
     def _stop_loading(self):
         """Останавливает анимацию загрузки"""
         self._spinner.stop()
         self._spinner.hide()
         self._waiting_for_process_start = False  # Больше не ждём
         self._stop_apply_feedback_timer()
-        self._stop_fallback_timer()
 
     def _start_apply_feedback_timer(self, timeout_ms: int = 1500):
         """Быстрый таймер, который завершает спиннер после apply/hot-reload."""
@@ -2628,26 +2623,6 @@ class StrategyDetailPage(BasePage):
         else:
             self._stop_loading()
             self._success_icon.hide()
-
-    def _start_fallback_timer(self):
-        """Запускает fallback таймер для защиты от бесконечного спиннера"""
-        self._stop_fallback_timer()  # Остановим предыдущий если был
-        self._fallback_timer = QTimer(self)
-        self._fallback_timer.setSingleShot(True)
-        self._fallback_timer.timeout.connect(self._on_fallback_timeout)
-        self._fallback_timer.start(10000)  # 10 секунд максимум
-
-    def _stop_fallback_timer(self):
-        """Останавливает fallback таймер"""
-        if self._fallback_timer:
-            self._fallback_timer.stop()
-            self._fallback_timer = None
-
-    def _on_fallback_timeout(self):
-        """Вызывается если сигнал processStatusChanged не пришел за 10 секунд"""
-        if self._waiting_for_process_start:
-            log("StrategyDetailPage: fallback timeout - показываем галочку", "DEBUG")
-            self.show_success()
 
     def show_success(self):
         """Показывает зелёную галочку успеха"""
@@ -2702,7 +2677,7 @@ class StrategyDetailPage(BasePage):
         if not self._category_key:
             return ""
         try:
-            preset = self._preset_manager.get_active_preset()
+            preset = self._preset_manager.get_selected_source_preset()
             cat = preset.categories.get(self._category_key) if preset else None
             if not cat:
                 return ""
@@ -3021,7 +2996,7 @@ class StrategyDetailPage(BasePage):
         new_args = self._build_tcp_args_from_phase_state()
 
         try:
-            preset = self._preset_manager.get_active_preset()
+            preset = self._preset_manager.get_selected_source_preset()
             if not preset:
                 return
 
@@ -3566,7 +3541,7 @@ class StrategyDetailPage(BasePage):
         if (self._selected_strategy_id or "none") == "none":
             return ""
         try:
-            preset = self._preset_manager.get_active_preset()
+            preset = self._preset_manager.get_selected_source_preset()
             cat = preset.categories.get(self._category_key) if preset else None
             if cat:
                 return (cat.udp_args if self._is_udp_like_category() else cat.tcp_args) or ""
@@ -3592,7 +3567,7 @@ class StrategyDetailPage(BasePage):
         normalized = "\n".join(lines)
 
         try:
-            preset = self._preset_manager.get_active_preset()
+            preset = self._preset_manager.get_selected_source_preset()
             if not preset:
                 return
 

@@ -230,7 +230,7 @@ class DPIStartWorker(QObject):
                     try:
                         from core.services import get_direct_flow_coordinator
 
-                        selected_source_path = get_direct_flow_coordinator().ensure_runtime(self.launch_method)
+                        selected_source_path = get_direct_flow_coordinator().ensure_selected_source_path(self.launch_method)
                         if selected_source_path.exists():
                             preset_path = str(selected_source_path)
                             log(f"Recovered missing selected source preset path: {preset_path}", "INFO")

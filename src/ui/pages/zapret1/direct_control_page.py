@@ -158,7 +158,7 @@ class Zapret1DirectControlPage(BasePage):
         # ── Пресет / Стратегии ──────────────────────────────────────────────
         self.add_section_title(text_key="page.z1_control.section.presets")
 
-        # Card A — Активный пресет
+        # Card A — Выбранный source-пресет
         if _HAS_FLUENT:
             preset_card = CardWidget()
         else:
@@ -332,8 +332,8 @@ class Zapret1DirectControlPage(BasePage):
         try:
             from core.services import get_direct_flow_coordinator
 
-            preset = get_direct_flow_coordinator().get_selected_source_preset("direct_zapret1")
-            active_name = str(getattr(getattr(preset, "manifest", None), "name", "") or "").strip()
+            preset = get_direct_flow_coordinator().get_selected_source_manifest("direct_zapret1")
+            active_name = str(getattr(preset, "name", "") or "").strip()
             if active_name:
                 self.preset_name_label.setText(active_name)
                 set_tooltip(self.preset_name_label, active_name)

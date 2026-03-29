@@ -849,8 +849,8 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
                 try:
                     from core.services import get_direct_flow_coordinator
 
-                    preset = get_direct_flow_coordinator().get_selected_source_preset("direct_zapret2")
-                    preset_name = str(getattr(getattr(preset, "manifest", None), "name", "") or "")
+                    preset = get_direct_flow_coordinator().get_selected_source_manifest("direct_zapret2")
+                    preset_name = str(getattr(preset, "name", "") or "")
                     display_name = f"Пресет: {preset_name}"
                 except Exception:
                     display_name = "Пресет"
@@ -869,8 +869,8 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
                     try:
                         from core.services import get_direct_flow_coordinator
 
-                        preset = get_direct_flow_coordinator().get_selected_source_preset("direct_zapret1")
-                        preset_name = str(getattr(getattr(preset, "manifest", None), "name", "") or "")
+                        preset = get_direct_flow_coordinator().get_selected_source_manifest("direct_zapret1")
+                        preset_name = str(getattr(preset, "name", "") or "")
                         display_name = f"Пресет: {preset_name}"
                     except Exception:
                         display_name = "Пресет"

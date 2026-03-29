@@ -262,8 +262,8 @@ class Zapret1StrategiesPage(BasePage):
             from preset_zapret1.preset_store import get_preset_store_v1
 
             store = get_preset_store_v1()
-            active_file_name = store.get_active_preset_file_name() or ""
-            preset = store.get_preset_by_file_name(active_file_name) if active_file_name else None
+            selected_file_name = store.get_selected_source_preset_file_name() or ""
+            preset = store.get_preset_by_file_name(selected_file_name) if selected_file_name else None
             if not preset:
                 return {}
             return {
@@ -431,7 +431,7 @@ class Zapret1StrategiesPage(BasePage):
             w.setParent(None)
 
     # ------------------------------------------------------------------
-    # Public compatibility API
+    # Main-window callbacks
     # ------------------------------------------------------------------
 
     def reload_for_mode_change(self) -> None:
@@ -441,7 +441,8 @@ class Zapret1StrategiesPage(BasePage):
             self._schedule_build()
 
     def update_current_strategy(self, name: str) -> None:
-        # Compatibility stub (used by legacy paths).
+        # Direct Z1 categories page does not show a separate current-strategy label,
+        # but MainWindow still calls this hook on all strategy pages.
         _ = name
 
     def set_ui_language(self, language: str) -> None:

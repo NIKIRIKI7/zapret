@@ -2,9 +2,9 @@
 """
 Strategy runner for Zapret 1 (winws.exe).
 
-Supports hot-reload via ConfigFileWatcher when preset-zapret1.txt changes.
+Supports hot-reload via ConfigFileWatcher when the launch preset file changes.
 Does NOT support Lua functionality.
-Writes args to preset-zapret1.txt and launches winws.exe via @file syntax.
+Writes args to a launch preset file and launches winws.exe via @file syntax.
 """
 
 import os
@@ -24,6 +24,24 @@ from dpi.process_health_check import (
     get_conflicting_processes_report,
     diagnose_startup_error
 )
+
+
+def _launch_args_from_preset_text(content: str) -> list[str]:
+    """Build argv directly from a source preset file.
+
+    The source preset may contain UI metadata lines like `# Preset: ...`.
+    Keep the source file human-readable, but strip metadata comments before
+    launching winws.exe.
+    """
+    args: list[str] = []
+    for raw in str(content or "").splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            continue
+        args.append(stripped)
+    return args
 
 
 def log_full_command(cmd_list: List[str], strategy_name: str):
@@ -233,7 +251,7 @@ class StrategyRunnerV1:
     def _write_preset_file(self, args: List[str], strategy_name: str) -> str:
         """
         Writes arguments to preset file for loading via @file.
-        Uses preset-zapret1.txt for winws.exe.
+        Uses a launch preset file for winws.exe.
 
         Args:
             args: List of command line arguments
@@ -242,7 +260,7 @@ class StrategyRunnerV1:
         Returns:
             Path to created file
         """
-        preset_filename = "preset-zapret1.txt"
+        preset_filename = "launch_direct_zapret1.txt"
         preset_path = os.path.join(self.work_dir, preset_filename)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -376,8 +394,8 @@ class StrategyRunnerV1:
         stop_and_delete_service("Monkey", retry_count=3)
 
     def _on_config_changed(self) -> None:
-        """Called when preset-zapret1.txt changes. Performs full restart."""
-        log("preset-zapret1.txt changed, restarting winws.exe...", "INFO")
+        """Called when the launch preset file changes. Performs full restart."""
+        log("Launch preset file changed, restarting winws.exe...", "INFO")
         try:
             if self._preset_file_path and os.path.exists(self._preset_file_path):
                 self.start_from_preset_file(
@@ -596,15 +614,15 @@ class StrategyRunnerV1:
         MAX_RETRIES = 2
 
         if not os.path.exists(preset_path):
-            log(f"Preset file not found: {preset_path}, attempting selected-runtime refresh...", "WARNING")
+            log(f"Preset file not found: {preset_path}, attempting selected-source refresh...", "WARNING")
             try:
                 from core.services import get_direct_flow_coordinator
 
-                get_direct_flow_coordinator().ensure_runtime("direct_zapret1")
+                get_direct_flow_coordinator().ensure_selected_source_path("direct_zapret1")
                 if os.path.exists(preset_path):
                     log(f"Preset file became available after refresh: {preset_path}", "INFO")
             except Exception as e:
-                log(f"Selected-runtime refresh failed: {e}", "WARNING")
+                log(f"Selected-source refresh failed: {e}", "WARNING")
 
         if not os.path.exists(preset_path):
             log(f"Preset file not found: {preset_path}", "ERROR")
@@ -612,6 +630,18 @@ class StrategyRunnerV1:
             return False
 
         self._set_last_error(None)
+
+        try:
+            with open(preset_path, "r", encoding="utf-8", errors="replace") as f:
+                launch_args = _launch_args_from_preset_text(f.read())
+        except Exception as e:
+            log(f"Failed to read preset file '{preset_path}': {e}", "ERROR")
+            self._set_last_error(f"Не удалось прочитать preset файл: {e}")
+            return False
+
+        if not launch_args:
+            self._set_last_error("Не удалось подготовить аргументы запуска из preset файла")
+            return False
 
         try:
             # Stop previous process
@@ -649,8 +679,7 @@ class StrategyRunnerV1:
             # Store preset file path for hot-reload
             self._preset_file_path = preset_path
 
-            # Build command with @file
-            cmd = [self.winws_exe, f"@{preset_path}"]
+            cmd = [self.winws_exe, *launch_args]
 
             log(f"Starting from preset file: {preset_path}", "INFO")
             log(f"Strategy: {strategy_name}" + (f" (attempt {_retry_count + 1})" if _retry_count > 0 else ""), "INFO")
@@ -668,7 +697,7 @@ class StrategyRunnerV1:
 
             # Save info
             self.current_strategy_name = strategy_name
-            self.current_strategy_args = [f"@{preset_path}"]
+            self.current_strategy_args = list(launch_args)
 
             # Quick startup check
             time.sleep(0.2)

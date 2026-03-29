@@ -31,8 +31,8 @@ class PresetManagerV1:
     ):
         self.on_preset_switched = on_preset_switched
         self.on_dpi_reload_needed = on_dpi_reload_needed
-        self._active_preset_cache: Optional[PresetV1] = None
-        self._active_preset_mtime: float = 0.0
+        self._selected_source_preset_cache: Optional[PresetV1] = None
+        self._selected_source_preset_mtime: float = 0.0
         self._sync_layer = None
 
     @staticmethod
@@ -46,8 +46,8 @@ class PresetManagerV1:
 
             self._sync_layer = Zapret1PresetSyncLayer(
                 on_dpi_reload_needed=self.on_dpi_reload_needed,
-                invalidate_cache=self._invalidate_active_preset_cache,
-                get_selected_file_name=lambda: str(self.get_active_preset_file_name() or ""),
+                invalidate_cache=self._invalidate_selected_source_preset_cache,
+                get_selected_file_name=lambda: str(self.get_selected_source_preset_file_name() or ""),
             )
         return self._sync_layer
 
@@ -85,10 +85,10 @@ class PresetManagerV1:
 
     def delete_preset_by_file_name(self, file_name: str) -> bool:
         try:
-            document = self._get_facade().get_document_by_file_name(file_name)
-            active_file_name = self.get_active_preset_file_name()
-            if document is not None and active_file_name and document.manifest.file_name == active_file_name:
-                log(f"Cannot delete active V1 preset '{file_name}'", "WARNING")
+            manifest = self._get_facade().get_manifest_by_file_name(file_name)
+            selected_file_name = self.get_selected_source_preset_file_name()
+            if manifest is not None and selected_file_name and manifest.file_name == selected_file_name:
+                log(f"Cannot delete selected V1 source preset '{file_name}'", "WARNING")
                 return False
             self._get_facade().delete_by_file_name(file_name)
             self._notify_list_changed()
@@ -99,12 +99,12 @@ class PresetManagerV1:
 
     def rename_preset_by_file_name(self, file_name: str, new_name: str) -> bool:
         try:
-            document = self._get_facade().get_document_by_file_name(file_name)
-            active_file_name = self.get_active_preset_file_name()
-            was_selected = bool(document is not None and active_file_name and document.manifest.file_name == active_file_name)
+            manifest = self._get_facade().get_manifest_by_file_name(file_name)
+            selected_file_name = self.get_selected_source_preset_file_name()
+            was_selected = bool(manifest is not None and selected_file_name and manifest.file_name == selected_file_name)
             updated = self._get_facade().rename_by_file_name(file_name, new_name)
             if was_selected:
-                self._get_store().notify_preset_switched(updated.manifest.file_name)
+                self._get_store().notify_preset_switched(updated.file_name)
             self._notify_list_changed()
             return True
         except Exception as e:
@@ -128,44 +128,44 @@ class PresetManagerV1:
             log(f"Error exporting V1 preset '{file_name}' to '{dest_path}': {e}", "ERROR")
             return False
 
-    def get_active_preset_file_name(self) -> Optional[str]:
+    def get_selected_source_preset_file_name(self) -> Optional[str]:
         try:
             from core.services import get_direct_flow_coordinator
 
             return get_direct_flow_coordinator().get_selected_source_file_name("direct_zapret1")
         except Exception:
             try:
-                return self._get_store().get_active_preset_file_name()
+                return self._get_store().get_selected_source_preset_file_name()
             except Exception:
                 return None
 
-    def get_active_preset(self) -> Optional[PresetV1]:
+    def get_selected_source_preset(self) -> Optional[PresetV1]:
         """Loads the currently selected source preset with caching."""
-        if self._active_preset_cache is not None:
-            current_mtime = self._get_active_file_mtime()
-            if current_mtime == self._active_preset_mtime and current_mtime > 0:
-                return self._active_preset_cache
+        if self._selected_source_preset_cache is not None:
+            current_mtime = self._get_selected_source_file_mtime()
+            if current_mtime == self._selected_source_preset_mtime and current_mtime > 0:
+                return self._selected_source_preset_cache
 
-        file_name = self.get_active_preset_file_name()
+        file_name = self.get_selected_source_preset_file_name()
         preset = None
         if file_name:
             preset = self._get_store().get_preset_by_file_name(file_name)
 
         if preset:
-            self._active_preset_cache = preset
-            self._active_preset_mtime = self._get_active_file_mtime()
+            self._selected_source_preset_cache = preset
+            self._selected_source_preset_mtime = self._get_selected_source_file_mtime()
 
         return preset
 
     @staticmethod
     def _extract_icon_color_from_header(header: str) -> str:
         for line in (header or "").splitlines():
-            match = re.match(r"#\s*(?:IconColor|PresetIconColor):\s*(.+)", line.strip(), re.IGNORECASE)
+            match = re.match(r"#\s*IconColor:\s*(.+)", line.strip(), re.IGNORECASE)
             if match:
                 return normalize_preset_icon_color_v1(match.group(1).strip())
         return DEFAULT_PRESET_ICON_COLOR
 
-    def _get_active_file_mtime(self) -> float:
+    def _get_selected_source_file_mtime(self) -> float:
         """Gets mtime of the selected source preset file."""
         try:
             from core.services import get_direct_flow_coordinator
@@ -177,16 +177,16 @@ class PresetManagerV1:
         except Exception:
             return 0.0
 
-    def _invalidate_active_preset_cache(self) -> None:
-        self._active_preset_cache = None
-        self._active_preset_mtime = 0.0
+    def _invalidate_selected_source_preset_cache(self) -> None:
+        self._selected_source_preset_cache = None
+        self._selected_source_preset_mtime = 0.0
 
     def _select_source_preset_file_name(self, file_name: str) -> bool:
         try:
             from core.services import get_selection_service
 
             get_selection_service().select_preset("winws1", str(file_name or "").strip())
-            self._invalidate_active_preset_cache()
+            self._invalidate_selected_source_preset_cache()
             return True
         except Exception as e:
             log(f"Error selecting V1 source preset file '{file_name}': {e}", "ERROR")
@@ -207,29 +207,25 @@ class PresetManagerV1:
             created = self._get_facade().create(name, from_current=from_current)
             self._notify_list_changed()
             log(f"Created V1 preset '{name}'", "INFO")
-            return self._get_store().get_preset_by_file_name(created.manifest.file_name)
+            return self._get_store().get_preset_by_file_name(created.file_name)
         except Exception as e:
             log(f"Error creating V1 preset: {e}", "ERROR")
             return None
 
-    def sync_preset_to_active_file(self, preset: PresetV1) -> bool:
+    def sync_preset_to_selected_source_file(self, preset: PresetV1) -> bool:
         """
         Saves the selected Zapret 1 source preset in launch-ready form.
 
-        For the selected preset we must preserve the raw source text, because
+        For the selected source preset we must preserve the raw source text, because
         imported multi-block presets are already launch-ready and a parse +
         regenerate cycle can drop unsupported layout/details. Only fall back to
-        model-based sync for non-selected presets.
+        model-based sync for non-selected source presets.
         """
-        preset_name = str(getattr(preset, "name", "") or "").strip()
-        try:
-            selected_name = str(getattr(self.get_active_preset(), "name", "") or "").strip()
-        except Exception:
-            selected_name = ""
-
-        if preset_name and selected_name and preset_name.lower() == selected_name.lower():
+        preset_file_name = str(getattr(preset, "_source_file_name", "") or "").strip()
+        selected_file_name = str(self.get_selected_source_preset_file_name() or "").strip()
+        if preset_file_name and selected_file_name and preset_file_name.lower() == selected_file_name.lower():
             try:
-                self._invalidate_active_preset_cache()
+                self._invalidate_selected_source_preset_cache()
                 return True
             except PermissionError:
                 raise
@@ -282,7 +278,7 @@ class PresetManagerV1:
 
     def reset_preset_to_default_template(
         self,
-        preset_name: str,
+        preset_file_name: str,
         *,
         make_active: bool = True,
         sync_active_file: bool = True,
@@ -298,16 +294,17 @@ class PresetManagerV1:
             invalidate_templates_cache_v1,
         )
 
-        name = (preset_name or "").strip()
-        if not name:
+        file_name = (preset_file_name or "").strip()
+        if not file_name:
             return False
 
         try:
-            document = self._get_facade().get_document_by_file_name(name)
-            if document is None:
-                log(f"Cannot reset V1: preset '{name}' not found", "ERROR")
+            manifest = self._get_facade().get_manifest_by_file_name(file_name)
+            if manifest is None:
+                log(f"Cannot reset V1: preset file '{file_name}' not found", "ERROR")
                 return False
-            target_file_name = document.manifest.file_name
+            target_file_name = manifest.file_name
+            target_display_name = str(manifest.name or Path(target_file_name).stem).strip()
 
             if invalidate_templates:
                 try:
@@ -315,7 +312,7 @@ class PresetManagerV1:
                 except Exception:
                     pass
 
-            template_key = str(document.manifest.template_origin or document.manifest.name or name).strip()
+            template_key = str(manifest.template_origin or manifest.name or target_display_name).strip()
             template_content = get_template_content_v1(template_key)
             if not template_content:
                 base = get_builtin_base_from_copy_name_v1(template_key)
@@ -333,7 +330,7 @@ class PresetManagerV1:
                 )
                 return False
 
-            rendered_content = self._render_template_for_preset(template_content, name)
+            rendered_content = self._render_template_for_preset(template_content, target_display_name)
 
             preset_path = get_app_paths().engine_paths("winws1").ensure_directories().presets_dir / target_file_name
             try:
@@ -342,7 +339,7 @@ class PresetManagerV1:
                 log(f"Cannot write V1 preset file (locked?): {e}", "ERROR")
                 raise
             except Exception as e:
-                log(f"Error writing reset V1 preset '{name}': {e}", "ERROR")
+                log(f"Error writing reset V1 preset '{target_file_name}': {e}", "ERROR")
                 return False
 
             self.invalidate_preset_cache(target_file_name)
@@ -350,10 +347,10 @@ class PresetManagerV1:
             do_sync = bool(sync_active_file)
             if do_sync and not make_active:
                 try:
-                    current_active = str(getattr(self.get_active_preset(), "name", "") or "").strip().lower()
+                    current_selected_file_name = str(self.get_selected_source_preset_file_name() or "").strip().lower()
                 except Exception:
-                    current_active = ""
-                if current_active != name.lower():
+                    current_selected_file_name = ""
+                if current_selected_file_name != target_file_name.lower():
                     do_sync = False
 
             if make_active:
@@ -362,18 +359,17 @@ class PresetManagerV1:
 
             if do_sync:
                 try:
-                    document = self._get_facade().get_document_by_file_name(name)
-                    preset = self._get_store().get_preset_by_file_name(document.manifest.file_name) if document is not None else None
+                    preset = self._get_store().get_preset_by_file_name(target_file_name)
                     if preset is None:
-                        log(f"Cannot sync reset V1 preset '{name}': failed to reload source preset", "ERROR")
+                        log(f"Cannot sync reset V1 preset '{target_file_name}': failed to reload source preset", "ERROR")
                         return False
-                    if not self.sync_preset_to_active_file(preset):
+                    if not self.sync_preset_to_selected_source_file(preset):
                         return False
                 except PermissionError as e:
                     log(f"Cannot write selected V1 source preset (locked?): {e}", "ERROR")
                     raise
                 except Exception as e:
-                    log(f"Error saving reset V1 preset '{name}' into selected source preset: {e}", "ERROR")
+                    log(f"Error saving reset V1 preset '{target_file_name}' into selected source preset: {e}", "ERROR")
                     return False
 
             if make_active:
@@ -381,23 +377,23 @@ class PresetManagerV1:
                     self._get_store().notify_preset_switched(target_file_name)
                     if self.on_preset_switched:
                         try:
-                            self.on_preset_switched(name)
+                            self.on_preset_switched(target_display_name)
                         except Exception:
                             pass
 
             return True
 
         except Exception as e:
-            log(f"Error resetting V1 preset '{name}' to template: {e}", "ERROR")
+            log(f"Error resetting V1 preset file '{file_name}' to template: {e}", "ERROR")
             return False
 
-    def reset_active_preset_to_default_template(self) -> bool:
-        """Resets currently active V1 preset to its matching template."""
-        active_name = str(getattr(self.get_active_preset(), "name", "") or "").strip()
-        if not active_name:
+    def reset_selected_source_preset_to_default_template(self) -> bool:
+        """Resets the currently selected V1 source preset to its matching template."""
+        selected_file_name = str(self.get_selected_source_preset_file_name() or "").strip()
+        if not selected_file_name:
             return False
         return self.reset_preset_to_default_template(
-            active_name,
+            selected_file_name,
             make_active=True,
             sync_active_file=True,
             emit_switched=True,
@@ -428,8 +424,8 @@ class PresetManagerV1:
             if not file_names:
                 return (success_count, total_count, failed)
 
-            original_active_file_name = (self.get_active_preset_file_name() or "").strip()
-            active_file_name = original_active_file_name if original_active_file_name in file_names else ""
+            original_selected_file_name = (self.get_selected_source_preset_file_name() or "").strip()
+            active_file_name = original_selected_file_name if original_selected_file_name in file_names else ""
             if not active_file_name:
                 active_file_name = file_names[0]
 
@@ -438,7 +434,7 @@ class PresetManagerV1:
                     from core.services import get_direct_flow_coordinator
 
                     profile = get_direct_flow_coordinator().select_preset_file_name("direct_zapret1", active_file_name)
-                    self._invalidate_active_preset_cache()
+                    self._invalidate_selected_source_preset_cache()
                     self._get_store().notify_preset_switched(profile.preset_file_name)
                     if self.on_preset_switched:
                         try:
@@ -446,7 +442,7 @@ class PresetManagerV1:
                         except Exception:
                             pass
                 except Exception as e:
-                    log(f"V1 bulk reset: failed to re-apply selected preset '{active_file_name}': {e}", "WARNING")
+                    log(f"V1 bulk reset: failed to re-apply selected source preset '{active_file_name}': {e}", "WARNING")
 
             return (success_count, total_count, failed)
         except Exception as e:
@@ -455,9 +451,9 @@ class PresetManagerV1:
 
     def set_strategy_selection(self, category_key: str, strategy_id: str, save_and_sync: bool = True) -> bool:
         category_key = str(category_key or "").strip().lower()
-        preset = self.get_active_preset()
+        preset = self.get_selected_source_preset()
         if not preset:
-            log("Cannot set V1 strategy: no selected preset", "WARNING")
+            log("Cannot set V1 strategy: no selected source preset", "WARNING")
             return False
 
         if category_key not in preset.categories:
@@ -473,7 +469,7 @@ class PresetManagerV1:
 
     def get_category_filter_mode(self, category_key: str) -> str:
         category_key = str(category_key or "").strip().lower()
-        preset = self.get_active_preset()
+        preset = self.get_selected_source_preset()
         if not preset:
             return "hostlist"
 
@@ -499,9 +495,9 @@ class PresetManagerV1:
             log(f"Invalid V1 filter_mode: {filter_mode}", "WARNING")
             return False
 
-        preset = self.get_active_preset()
+        preset = self.get_selected_source_preset()
         if not preset:
-            log("Cannot update V1 filter_mode: no selected preset", "WARNING")
+            log("Cannot update V1 filter_mode: no selected source preset", "WARNING")
             return False
 
         if category_key not in preset.categories:
@@ -526,7 +522,7 @@ class PresetManagerV1:
         return sid
 
     def get_strategy_selections(self) -> dict:
-        preset = self.get_active_preset()
+        preset = self.get_selected_source_preset()
         if not preset:
             return {}
 
@@ -537,7 +533,7 @@ class PresetManagerV1:
                 continue
             raw[norm_key] = self._selection_id_from_category(cat)
 
-        # If the selected preset has shared blocks with multiple hostlists in one instance,
+        # If the selected source preset has shared blocks with multiple hostlists in one instance,
         # parser may map only one category from that block. Keep categories visible by
         # marking additionally detected hostlist/ipset categories as custom.
         try:
@@ -585,7 +581,7 @@ class PresetManagerV1:
         if preset.name and preset.name != "Current":
             if not str(getattr(preset, "_source_file_name", "") or "").strip():
                 try:
-                    current_file_name = str(self.get_active_preset_file_name() or "").strip()
+                    current_file_name = str(self.get_selected_source_preset_file_name() or "").strip()
                 except Exception:
                     current_file_name = ""
                 if current_file_name:
@@ -596,4 +592,4 @@ class PresetManagerV1:
             save_preset_v1(preset)
             source_file_name = str(getattr(preset, "_source_file_name", "") or "").strip()
             self.invalidate_preset_cache(source_file_name or None)
-        return self.sync_preset_to_active_file(preset)
+        return self.sync_preset_to_selected_source_file(preset)

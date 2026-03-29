@@ -266,7 +266,7 @@ class Zapret2DirectControlPage(BasePage):
             text_key="page.z2_control.section.preset_switch",
         )
 
-        # Card A — Активный пресет (single-row: icon | text | button)
+        # Card A — Выбранный source-пресет (single-row: icon | text | button)
         preset_card = CardWidget()
         self.preset_card = preset_card
         preset_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -1002,8 +1002,8 @@ class Zapret2DirectControlPage(BasePage):
         try:
             from core.services import get_direct_flow_coordinator
 
-            preset = get_direct_flow_coordinator().get_selected_source_preset("direct_zapret2")
-            active_preset_name = str(getattr(getattr(preset, "manifest", None), "name", "") or "").strip()
+            preset = get_direct_flow_coordinator().get_selected_source_manifest("direct_zapret2")
+            active_preset_name = str(getattr(preset, "name", "") or "").strip()
         except Exception:
             active_preset_name = ""
 

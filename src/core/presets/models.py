@@ -11,9 +11,3 @@ class PresetManifest:
     created_at: str
     updated_at: str
     kind: str = "user"
-
-
-@dataclass(frozen=True)
-class PresetDocument:
-    manifest: PresetManifest
-    source_text: str
