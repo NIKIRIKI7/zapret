@@ -300,6 +300,7 @@ class Zapret2DirectControlPage(BasePage):
 
         _t_adv = _time.perf_counter()
         self._schedule_advanced_settings_reload()
+        self._schedule_preset_summary_reload()
         _log_startup_z2_control_metric("showEvent.load_advanced_settings", (_time.perf_counter() - _t_adv) * 1000)
 
         _t_mode = _time.perf_counter()
@@ -1231,9 +1232,10 @@ class Zapret2DirectControlPage(BasePage):
             self._sync_direct_launch_mode_from_settings()
         if "preset_revision" in changed_fields or "launch_method" in changed_fields or not changed_fields:
             self._advanced_settings_dirty = True
-            self._schedule_advanced_settings_reload(force=True)
             self._preset_summary_dirty = True
-            self._schedule_preset_summary_reload(force=True)
+            if self.isVisible():
+                self._schedule_advanced_settings_reload(force=True)
+                self._schedule_preset_summary_reload(force=True)
         self.set_loading(state.dpi_busy, state.dpi_busy_text)
         self.update_status(state.dpi_running)
         self.update_strategy(state.current_strategy_summary or "")

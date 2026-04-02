@@ -1248,6 +1248,10 @@ class DPIController:
         if verify_gen is not None and verify_gen != self._dpi_start_verify_generation:
             return
 
+        store = getattr(self.app, "ui_state_store", None)
+        if store is not None:
+            store.set_dpi_busy(False)
+
         completed_restart_generation = int(self._restart_active_start_generation or 0)
         if completed_restart_generation:
             self._restart_completed_generation = max(
@@ -1376,10 +1380,6 @@ class DPIController:
 
     def _on_direct_preset_switch_finished(self, success, error_message, generation, launch_method, skipped_as_stale):
         try:
-            store = getattr(self.app, "ui_state_store", None)
-            if store is not None:
-                store.set_dpi_busy(False)
-
             if hasattr(self.app, 'main_window') and hasattr(self.app.main_window, '_show_active_strategy_page_success'):
                 self.app.main_window._show_active_strategy_page_success()
 

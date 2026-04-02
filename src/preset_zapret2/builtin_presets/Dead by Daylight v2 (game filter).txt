@@ -1,6 +1,6 @@
 # Preset: Dead by Daylight v2 (game filter)
 # TemplateOrigin: Dead by Daylight v2 (game filter)
-# BuiltinVersion: 2.15
+# BuiltinVersion: 2.16
 # Modified: 2026-01-21T17:52:34.648239
 # IconColor: #a8c5ff
 

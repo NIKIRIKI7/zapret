@@ -79,6 +79,7 @@ class Zapret1StrategiesPage(BasePage):
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
         self._basic_payload_cache = None
+        self._preset_refresh_pending = False
 
         self._setup_breadcrumb()
 
@@ -140,7 +141,10 @@ class Zapret1StrategiesPage(BasePage):
         if not self._built:
             self._schedule_build()
         else:
-            QTimer.singleShot(0, self._refresh_subtitles)
+            if self._preset_refresh_pending:
+                self._preset_refresh_pending = False
+                self._basic_payload_cache = None
+                QTimer.singleShot(0, self._refresh_subtitles)
 
     def _schedule_build(self) -> None:
         if self._build_scheduled:
@@ -419,6 +423,10 @@ class Zapret1StrategiesPage(BasePage):
 
     def _on_ui_state_changed(self, _state: AppUiState, changed_fields: frozenset[str]) -> None:
         if "preset_revision" in changed_fields or "mode_revision" in changed_fields:
+            if not self.isVisible():
+                self._preset_refresh_pending = True
+                self._basic_payload_cache = None
+                return
             self.reload_for_mode_change()
 
     def set_ui_language(self, language: str) -> None:

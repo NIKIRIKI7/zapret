@@ -645,6 +645,7 @@ class StrategyDetailPage(BasePage):
         self._last_theme_overrides_key = None
         self._last_parent_link_icon_color = None
         self._last_edit_args_icon_color = None
+        self._preset_refresh_pending = False
         self._last_sort_icon_color = None
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
@@ -799,6 +800,7 @@ class StrategyDetailPage(BasePage):
             self._stop_loading()
         except Exception:
             pass
+        self._preset_refresh_pending = True
         try:
             self._strategies_load_generation += 1
             if self._strategies_load_timer:
@@ -807,6 +809,12 @@ class StrategyDetailPage(BasePage):
         except Exception:
             pass
         return super().hideEvent(event)
+
+    def showEvent(self, event):  # noqa: N802 (Qt override)
+        super().showEvent(event)
+        if getattr(self, "_preset_refresh_pending", False):
+            self._preset_refresh_pending = False
+            self.refresh_from_preset_switch()
 
     def _refresh_scroll_range(self) -> None:
         # Ensure QScrollArea recomputes range after dynamic content growth.
@@ -1762,7 +1770,11 @@ class StrategyDetailPage(BasePage):
         Асинхронно перечитывает активный пресет и обновляет текущий target (если открыт).
         Вызывается из MainWindow после активации пресета.
         """
+        if not self.isVisible():
+            self._preset_refresh_pending = True
+            return
         try:
+            self._preset_refresh_pending = False
             QTimer.singleShot(0, self._apply_preset_refresh)
         except Exception:
             try:
@@ -1793,6 +1805,9 @@ class StrategyDetailPage(BasePage):
             self.refresh_from_preset_switch()
 
     def _apply_preset_refresh(self):
+        if not self.isVisible():
+            self._preset_refresh_pending = True
+            return
         if not self._target_key:
             return
 

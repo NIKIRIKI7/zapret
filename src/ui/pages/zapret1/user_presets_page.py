@@ -48,6 +48,7 @@ import qtawesome as qta
 from ui.pages.base_page import BasePage
 from ui.pages.preset_actions_menu import show_preset_actions_menu
 from ui.pages.preset_rating_menu import show_preset_rating_menu
+from ui.pages.user_presets_toolbar import UserPresetsToolbarLayout
 from ui.compat_widgets import ActionButton, SettingsCard, LineEdit, set_tooltip
 from ui.main_window_state import MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
@@ -1317,6 +1318,7 @@ class Zapret1UserPresetsPage(BasePage):
         self._preset_search_timer.setSingleShot(True)
         self._preset_search_timer.timeout.connect(self._apply_preset_search)
         self._preset_search_input: Optional[QLineEdit] = None
+        self._toolbar_layout: Optional[UserPresetsToolbarLayout] = None
 
         self._ui_initialized = False
         self._lazy_show_scheduled = False
@@ -1358,6 +1360,8 @@ class Zapret1UserPresetsPage(BasePage):
         marker_changed = self._apply_active_preset_marker()
         if marker_changed and not self._ui_dirty:
             return
+        if not self._ui_dirty and self._cached_presets_metadata and not marker_changed:
+            return
         self._ui_dirty = True
         if self.isVisible():
             self.refresh_presets_view_if_possible()
@@ -1371,9 +1375,26 @@ class Zapret1UserPresetsPage(BasePage):
             return False
         changed = self._presets_model.set_active_preset(str(file_name or "").strip())
         if changed and hasattr(self, "presets_list"):
+            self._set_current_preset_index(file_name)
             self.presets_list.viewport().update()
             self.presets_list.viewport().repaint()
         return changed
+
+    def _set_current_preset_index(self, file_name: str) -> None:
+        if self._presets_model is None or not hasattr(self, "presets_list"):
+            return
+
+        target_file_name = str(file_name or "").strip()
+        if not target_file_name:
+            return
+
+        for row in range(self._presets_model.rowCount()):
+            index = self._presets_model.index(row, 0)
+            if str(index.data(_PresetListModel.KindRole) or "") != "preset":
+                continue
+            if str(index.data(_PresetListModel.FileNameRole) or "") == target_file_name:
+                self.presets_list.setCurrentIndex(index)
+                return
 
     def _list_preset_entries_light(self) -> list[dict[str, object]]:
         try:
@@ -1606,7 +1627,9 @@ class Zapret1UserPresetsPage(BasePage):
             self._layout_resync_delayed_timer.start(220)
 
     def _resync_layout_metrics(self):
-        self._update_toolbar_buttons_layout()
+        toolbar_layout = getattr(self, "_toolbar_layout", None)
+        if toolbar_layout is not None:
+            toolbar_layout.refresh_for_viewport(self.viewport().width(), self.layout.contentsMargins())
         self._update_presets_view_height()
 
     def set_smooth_scroll_enabled(self, enabled: bool) -> None:
@@ -1732,43 +1755,30 @@ class Zapret1UserPresetsPage(BasePage):
         configs_card.add_layout(configs_layout)
         self.add_widget(configs_card)
 
+        # Buttons: create + import (above the preset list)
+        self.add_spacing(12)
+        toolbar_layout = UserPresetsToolbarLayout(self)
+        self._toolbar_layout = toolbar_layout
+
         # "Restore deleted presets" button
-        self._restore_deleted_btn = ActionButton(
+        self._restore_deleted_btn = toolbar_layout.create_action_button(
             self._tr("page.z1_user_presets.button.restore_deleted", "Восстановить удалённые пресеты"),
             "fa5s.undo",
         )
-        self._restore_deleted_btn.setFixedHeight(32)
         self._restore_deleted_btn.clicked.connect(self._on_restore_deleted)
         self._restore_deleted_btn.setVisible(False)
 
-        self.add_spacing(12)
-
-        # Buttons: create + import (above the preset list)
-        self._buttons_container = QWidget()
-        self._buttons_container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self._buttons_container_layout = QVBoxLayout(self._buttons_container)
-        self._buttons_container_layout.setContentsMargins(0, 0, 0, 0)
-        self._buttons_container_layout.setSpacing(8)
-
-        self._buttons_rows: list[tuple[QWidget, QHBoxLayout]] = []
-        for _ in range(4):
-            row_widget = QWidget()
-            row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(12)
-            row_widget.setVisible(False)
-            self._buttons_container_layout.addWidget(row_widget)
-            self._buttons_rows.append((row_widget, row_layout))
-
-        self.create_btn = PrimaryToolButton(FluentIcon.ADD if FluentIcon else None)
-        self.create_btn.setFixedSize(36, 36)
+        self.create_btn = toolbar_layout.create_primary_tool_button(
+            PrimaryToolButton,
+            FluentIcon.ADD if FluentIcon else None,
+        )
         set_tooltip(
             self.create_btn,
             self._tr("page.z1_user_presets.tooltip.create", "Создать новый пресет"),
         )
         self.create_btn.clicked.connect(self._on_create_clicked)
 
-        self.import_btn = self._create_secondary_row_button(
+        self.import_btn = toolbar_layout.create_action_button(
             self._tr("page.z1_user_presets.button.import", "Импорт"),
             "fa5s.file-import",
         )
@@ -1778,7 +1788,7 @@ class Zapret1UserPresetsPage(BasePage):
         )
         self.import_btn.clicked.connect(self._on_import_clicked)
 
-        self.reset_all_btn = self._create_secondary_row_button(
+        self.reset_all_btn = toolbar_layout.create_action_button(
             self._tr("page.z1_user_presets.button.reset_all", "Вернуть заводские"),
             "fa5s.undo",
         )
@@ -1791,28 +1801,28 @@ class Zapret1UserPresetsPage(BasePage):
         )
         self.reset_all_btn.clicked.connect(self._on_reset_all_presets_clicked)
 
-        self.presets_info_btn = self._create_secondary_row_button(
+        self.presets_info_btn = toolbar_layout.create_action_button(
             self._tr("page.z1_user_presets.button.wiki", "Вики по пресетам"),
             "fa5s.info-circle",
         )
         self.presets_info_btn.clicked.connect(self._open_presets_info)
 
-        self.info_btn = self._create_secondary_row_button(
+        self.info_btn = toolbar_layout.create_action_button(
             self._tr("page.z1_user_presets.button.what_is_this", "Что это такое?"),
             "fa5s.question-circle",
         )
         self.info_btn.clicked.connect(self._on_info_clicked)
 
-        self._toolbar_buttons = [
+        toolbar_layout.set_buttons([
             self.create_btn,
             self.import_btn,
             self._restore_deleted_btn,
             self.reset_all_btn,
             self.presets_info_btn,
             self.info_btn,
-        ]
-        self._update_toolbar_buttons_layout()
-        self.add_widget(self._buttons_container)
+        ])
+        toolbar_layout.refresh_for_viewport(self.viewport().width(), self.layout.contentsMargins())
+        self.add_widget(toolbar_layout.container)
 
         self.add_spacing(4)
 
@@ -1886,11 +1896,6 @@ class Zapret1UserPresetsPage(BasePage):
             box.cancelButton.hide()
             box.exec()
 
-    def _create_secondary_row_button(self, text: str, icon_name: str) -> ActionButton:
-        btn = ActionButton(text, icon_name)
-        btn.setFixedHeight(32)
-        return btn
-
     def _apply_page_theme(self) -> None:
         try:
             tokens = get_theme_tokens()
@@ -1921,82 +1926,6 @@ class Zapret1UserPresetsPage(BasePage):
 
         except Exception as e:
             log(f"Ошибка применения темы на странице пресетов: {e}", "DEBUG")
-
-    def _content_inner_width(self) -> int:
-        margins = self.layout.contentsMargins()
-        return max(0, self.viewport().width() - margins.left() - margins.right())
-
-    def _visible_toolbar_buttons(self) -> list[QPushButton]:
-        buttons: list[QPushButton] = []
-        restore_deleted_btn = getattr(self, "_restore_deleted_btn", None)
-        for button in getattr(self, "_toolbar_buttons", []):
-            if button is None:
-                continue
-            # Most toolbar buttons are always available. Filtering via isHidden()
-            # is unreliable here because unparented Qt widgets report as hidden
-            # before the first layout pass, which made the whole toolbar collapse.
-            if button is restore_deleted_btn and restore_deleted_btn is not None and not restore_deleted_btn.isVisible():
-                continue
-            buttons.append(button)
-        return buttons
-
-    def _compute_toolbar_rows(self, available_width: int) -> list[list[QPushButton]]:
-        buttons = self._visible_toolbar_buttons()
-        if not buttons:
-            return []
-
-        if available_width <= 0:
-            return [buttons]
-
-        spacing = 12
-        rows: list[list[QPushButton]] = []
-        current_row: list[QPushButton] = []
-        current_width = 0
-
-        for button in buttons:
-            button_width = button.sizeHint().width()
-            if not current_row:
-                current_row = [button]
-                current_width = button_width
-                continue
-
-            next_width = current_width + spacing + button_width
-            if next_width <= available_width:
-                current_row.append(button)
-                current_width = next_width
-                continue
-
-            rows.append(current_row)
-            current_row = [button]
-            current_width = button_width
-
-        if current_row:
-            rows.append(current_row)
-
-        return rows
-
-    def _clear_toolbar_row(self, row_layout: QHBoxLayout):
-        while row_layout.count():
-            row_layout.takeAt(0)
-
-    def _update_toolbar_buttons_layout(self):
-        rows = getattr(self, "_buttons_rows", None)
-        if not rows:
-            return
-
-        assigned_rows = self._compute_toolbar_rows(self._content_inner_width())
-
-        for index, (row_widget, row_layout) in enumerate(rows):
-            self._clear_toolbar_row(row_layout)
-            row_buttons = assigned_rows[index] if index < len(assigned_rows) else []
-
-            if row_buttons:
-                for button in row_buttons:
-                    row_layout.addWidget(button)
-                row_layout.addStretch(1)
-                row_widget.setVisible(True)
-            else:
-                row_widget.setVisible(False)
 
     def _format_modified_timestamp(self, modified: str) -> str:
         if not modified:
@@ -2336,6 +2265,8 @@ class Zapret1UserPresetsPage(BasePage):
             "open": self._open_preset_subpage,
             "pin": self._on_toggle_pin_preset,
             "rating": self._on_rate_preset,
+            "move_up": lambda preset_name: self._move_preset_by_step(preset_name, -1),
+            "move_down": lambda preset_name: self._move_preset_by_step(preset_name, 1),
             "edit": self._on_edit_preset,
             "rename": self._on_rename_preset,
             "duplicate": self._on_duplicate_preset,
@@ -2759,5 +2690,7 @@ class Zapret1UserPresetsPage(BasePage):
         if self._presets_delegate is not None:
             self._presets_delegate.set_ui_language(self._ui_language)
 
-        self._update_toolbar_buttons_layout()
+        toolbar_layout = getattr(self, "_toolbar_layout", None)
+        if toolbar_layout is not None:
+            toolbar_layout.refresh_for_viewport(self.viewport().width(), self.layout.contentsMargins())
         self._refresh_presets_view_from_cache()

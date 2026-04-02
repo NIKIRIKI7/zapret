@@ -118,7 +118,7 @@ class TelegramProxyPage(BasePage):
         self._stacked = QStackedWidget(self)
 
         # -- Panel 0: Settings --
-        settings_panel = QWidget()
+        settings_panel = QWidget(self._stacked)
         settings_layout = QVBoxLayout(settings_panel)
         settings_layout.setContentsMargins(0, 0, 0, 0)
         settings_layout.setSpacing(12)
@@ -127,7 +127,7 @@ class TelegramProxyPage(BasePage):
         self._stacked.addWidget(settings_panel)
 
         # -- Panel 1: Logs --
-        logs_panel = QWidget()
+        logs_panel = QWidget(self._stacked)
         logs_layout = QVBoxLayout(logs_panel)
         logs_layout.setContentsMargins(0, 0, 0, 0)
         logs_layout.setSpacing(8)
@@ -136,7 +136,7 @@ class TelegramProxyPage(BasePage):
         self._stacked.addWidget(logs_panel)
 
         # -- Panel 2: Diagnostics --
-        diag_panel = QWidget()
+        diag_panel = QWidget(self._stacked)
         diag_layout = QVBoxLayout(diag_panel)
         diag_layout.setContentsMargins(0, 0, 0, 0)
         diag_layout.setSpacing(8)
@@ -302,7 +302,7 @@ class TelegramProxyPage(BasePage):
         self._upstream_card.add_widget(self._upstream_catalog_hint)
 
         # Manual input container: shown only for "Ручной ввод"
-        self._upstream_manual_widget = QWidget()
+        self._upstream_manual_widget = QWidget(self._upstream_card)
         manual_layout = QVBoxLayout(self._upstream_manual_widget)
         manual_layout.setContentsMargins(0, 0, 0, 0)
         manual_layout.setSpacing(8)
@@ -345,7 +345,7 @@ class TelegramProxyPage(BasePage):
         self._upstream_card.add_widget(self._upstream_manual_widget)
 
         # MTProxy action (visible only when MTProxy preset selected)
-        self._mtproxy_action_widget = QWidget()
+        self._mtproxy_action_widget = QWidget(self._upstream_card)
         mtproxy_action_layout = QVBoxLayout(self._mtproxy_action_widget)
         mtproxy_action_layout.setContentsMargins(0, 0, 0, 0)
         mtproxy_desc = CaptionLabel("MTProxy настраивается в Telegram напрямую. Нажмите для добавления.")

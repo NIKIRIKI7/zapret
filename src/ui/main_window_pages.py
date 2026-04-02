@@ -108,6 +108,62 @@ def get_loaded_strategy_page_for_method(window, method: str | None = None) -> QW
     return get_loaded_page(window, page_name)
 
 
+def has_nav_item(window, name: PageName) -> bool:
+    """Возвращает True только для страниц, реально зарегистрированных в sidebar."""
+    resolved_name = resolve_page_name(window, name)
+    nav_items = getattr(window, "_nav_items", None)
+    if not isinstance(nav_items, dict):
+        return False
+    return resolved_name in nav_items
+
+
+def set_stacked_widget_current_page(window, page: QWidget | None, *, animate: bool = True) -> bool:
+    """Переключает текущую страницу в stacked widget.
+
+    Для внутренних страниц без sidebar-пункта используем прямое переключение без
+    fluent-анимации. Это уменьшает риск побочных переходов при открытии скрытых
+    route'ов вроде страниц пресетов и detail-экранов.
+    """
+    stack = getattr(window, "stackedWidget", None)
+    if page is None or stack is None:
+        return False
+
+    if animate:
+        switch_to = getattr(window, "switchTo", None)
+        if callable(switch_to):
+            try:
+                switch_to(page)
+                return True
+            except Exception:
+                pass
+
+    view = getattr(stack, "view", None)
+    set_animation_enabled = getattr(view, "setAnimationEnabled", None)
+    previous_animation_enabled = getattr(view, "isAnimationEnabled", None)
+    animation_flag_known = isinstance(previous_animation_enabled, bool)
+
+    if callable(set_animation_enabled):
+        try:
+            set_animation_enabled(False)
+        except Exception:
+            pass
+
+    try:
+        try:
+            stack.setCurrentWidget(page, False)
+        except TypeError:
+            stack.setCurrentWidget(page)
+        return True
+    except Exception:
+        return False
+    finally:
+        if callable(set_animation_enabled) and animation_flag_known:
+            try:
+                set_animation_enabled(bool(previous_animation_enabled))
+            except Exception:
+                pass
+
+
 def connect_signal_once(window, key: str, signal_obj, slot_obj) -> None:
     if key in window._lazy_signal_connections:
         return

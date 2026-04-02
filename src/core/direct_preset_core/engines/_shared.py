@@ -58,11 +58,17 @@ def split_preamble_and_profile_lines(body_lines: list[str]) -> tuple[list[str], 
     profiles: list[list[str]] = []
     current: list[str] = []
     saw_profile = False
+
+    def _push_profile(raw_lines: list[str]) -> None:
+        trimmed = _trim_blank_profile_edges(raw_lines)
+        if trimmed:
+            profiles.append(trimmed)
+
     for raw in body_lines:
         stripped = raw.strip()
         if stripped == "--new":
             if saw_profile:
-                profiles.append(current)
+                _push_profile(current)
                 current = []
             elif current:
                 preamble.extend(current)
@@ -77,10 +83,22 @@ def split_preamble_and_profile_lines(body_lines: list[str]) -> tuple[list[str], 
         current.append(raw)
     if current:
         if saw_profile:
-            profiles.append(current)
+            _push_profile(current)
         else:
             preamble.extend(current)
     return preamble, profiles
+
+
+def _trim_blank_profile_edges(lines: list[str]) -> list[str]:
+    start = 0
+    end = len(lines)
+
+    while start < end and not str(lines[start]).strip():
+        start += 1
+    while end > start and not str(lines[end - 1]).strip():
+        end -= 1
+
+    return list(lines[start:end])
 
 
 def _looks_like_profile_line(stripped: str) -> bool:

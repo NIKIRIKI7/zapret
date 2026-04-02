@@ -87,7 +87,9 @@ from ui.main_window_pages import (
     get_loaded_page,
     get_loaded_strategy_page_for_method,
     get_page_route_key,
+    has_nav_item,
     resolve_page_name,
+    set_stacked_widget_current_page,
 )
 from ui.main_window_mode_switch import (
     auto_start_after_main_window_method_switch,
@@ -607,16 +609,15 @@ class MainWindowUI:
         if page is None:
             return False
         self._ensure_page_in_stacked_widget(page)
-        try:
-            self.switchTo(page)
-        except Exception:
-            # Fallback for pages not registered in nav
-            self._ensure_page_in_stacked_widget(page)
-            if hasattr(self, 'stackedWidget'):
-                self.stackedWidget.setCurrentWidget(page)
+        use_nav_route = has_nav_item(self, name)
+
+        switched = set_stacked_widget_current_page(self, page, animate=use_nav_route)
+        if not switched:
+            return False
+
         try:
             route_key = get_page_route_key(self, name)
-            if route_key:
+            if route_key and use_nav_route:
                 self.navigationInterface.setCurrentItem(route_key)
         except Exception:
             pass

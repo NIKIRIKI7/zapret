@@ -108,6 +108,7 @@ class Zapret2StrategiesPageNew(BasePage):
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
         self._basic_payload_cache = None
+        self._preset_refresh_pending = False
         self._request_hint_label = None
         self._request_btn = None
         self._expand_btn = None
@@ -182,10 +183,12 @@ class Zapret2StrategiesPageNew(BasePage):
                 pass
 
         if self._built:
-            try:
-                self.refresh_from_preset_switch()
-            except Exception:
-                pass
+            if self._preset_refresh_pending:
+                self._preset_refresh_pending = False
+                try:
+                    self.refresh_from_preset_switch()
+                except Exception:
+                    pass
 
         if not self._built and not self._build_scheduled:
             self._build_scheduled = True
@@ -483,6 +486,10 @@ class Zapret2StrategiesPageNew(BasePage):
         Перечитывает активный пресет и обновляет UI списка (без перестроения).
         Вызывается асинхронно из MainWindow после активации пресета.
         """
+        if not self.isVisible():
+            self._basic_payload_cache = None
+            self._preset_refresh_pending = True
+            return
         try:
             payload = self._get_basic_payload(refresh=True)
             target_items = payload.target_items or {}
@@ -556,6 +563,10 @@ class Zapret2StrategiesPageNew(BasePage):
             self.reload_for_mode_change()
             return
         if "preset_revision" in changed_fields:
+            if not self.isVisible():
+                self._basic_payload_cache = None
+                self._preset_refresh_pending = True
+                return
             self.refresh_from_preset_switch()
         if "current_strategy_summary" in changed_fields or not changed_fields:
             self.update_current_strategy(state.current_strategy_summary)

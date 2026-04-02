@@ -101,6 +101,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
 
         self._built = False
         self._current_mode = None
+        self._preset_refresh_pending = False
 
         self._process_check_timer = QTimer(self)
         self._process_check_timer.timeout.connect(self._check_process_status)
@@ -127,7 +128,9 @@ class Zapret2OrchestraStrategiesPage(BasePage):
         if not self._built:
             QTimer.singleShot(0, self._rebuild_current_view)
         else:
-            self._refresh_runtime_state()
+            if self._preset_refresh_pending:
+                self._preset_refresh_pending = False
+                self._refresh_runtime_state()
 
     def hideEvent(self, event):
         self._stop_process_monitoring()
@@ -991,9 +994,18 @@ class Zapret2OrchestraStrategiesPage(BasePage):
 
     def _on_ui_state_changed(self, state: AppUiState, changed_fields: frozenset[str]) -> None:
         if "mode_revision" in changed_fields:
+            if not self.isVisible():
+                self._current_mode = None
+                self._built = False
+                self._view_mode = "list"
+                self._selected_category_key = ""
+                return
             self.reload_for_mode_change()
             return
         if "preset_revision" in changed_fields:
+            if not self.isVisible():
+                self._preset_refresh_pending = True
+                return
             self._refresh_runtime_state()
         if "current_strategy_summary" in changed_fields or not changed_fields:
             self.update_current_strategy(state.current_strategy_summary)

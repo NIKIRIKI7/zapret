@@ -406,7 +406,8 @@ class Zapret1DirectControlPage(BasePage):
 
     def _on_ui_state_changed(self, state: AppUiState, changed_fields: frozenset[str]) -> None:
         if "preset_revision" in changed_fields:
-            self._refresh_preset_name()
+            if self.isVisible():
+                self._refresh_preset_name()
         self.set_loading(state.dpi_busy, state.dpi_busy_text)
         self.update_status(state.dpi_running)
         self.update_strategy(state.current_strategy_summary or "")

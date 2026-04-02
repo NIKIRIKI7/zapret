@@ -1,6 +1,6 @@
 # Preset: general ALT10
 # TemplateOrigin: general ALT10
-# BuiltinVersion: 2.15
+# BuiltinVersion: 2.16
 # IconColor: #e6c300ff
 
 --lua-init=@lua/zapret-lib.lua

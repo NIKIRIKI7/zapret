@@ -1,6 +1,6 @@
 # Preset: Ростелеком
 # TemplateOrigin: Ростелеком
-# BuiltinVersion: 2.15
+# BuiltinVersion: 2.16
 # Created: 2026-02-06T14:19:01.572248
 # Modified: 2026-02-06T14:19:01.572930
 # Description: 
