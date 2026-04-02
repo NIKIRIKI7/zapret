@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import time
+import webbrowser
 
 from PyQt6.QtCore import Q_ARG, QMetaObject, QObject, Qt, QTimer, pyqtSlot
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 
+from app_notifications import advisory_notification, normalize_notification_payload
 from log import global_logger, log
 
 
 class WindowNotificationController(QObject):
-    """Единый контроллер верхнеуровневых уведомлений приложения."""
+    """Единый центр показа верхнеуровневых системных уведомлений."""
 
     def __init__(self, host) -> None:
         super().__init__(host)
@@ -18,133 +20,110 @@ class WindowNotificationController(QObject):
         self._startup_notification_timer = QTimer(self)
         self._startup_notification_timer.setSingleShot(True)
         self._startup_notification_timer.timeout.connect(self.flush_startup_notification_queue)
-
-        self._last_launch_error_message = ""
-        self._last_launch_error_ts = 0.0
-        self._last_launch_warning_message = ""
-        self._last_launch_warning_ts = 0.0
+        self._recent_signatures: dict[str, float] = {}
 
     def register_global_error_notifier(self) -> None:
-        """Подключает глобальные ERROR/CRITICAL логи к верхнему InfoBar."""
+        """Подключает глобальные ERROR/CRITICAL логи к общему центру уведомлений."""
         try:
             if hasattr(global_logger, "set_ui_error_notifier"):
-                global_logger.set_ui_error_notifier(self.enqueue_global_error_infobar)
+                global_logger.set_ui_error_notifier(self.enqueue_global_error_notification)
         except Exception as e:
             log(f"Ошибка подключения глобального error-notifier: {e}", "DEBUG")
 
-    def enqueue_global_error_infobar(self, message: str) -> None:
-        """Thread-safe постановка ошибки в GUI очередь."""
+    def enqueue_global_error_notification(self, message: str) -> None:
         text = str(message or "").strip()
         if not text:
+            return
+
+        self.notify_threadsafe(
+            advisory_notification(
+                level="error",
+                title="Ошибка",
+                content=text,
+                source="global_logger",
+                presentation="infobar",
+                queue="immediate",
+                duration=10000,
+                dedupe_key=f"global_logger:{' '.join(text.split()).lower()}",
+                dedupe_window_ms=2000,
+            )
+        )
+
+    def notify_threadsafe(self, payload: dict | None) -> None:
+        normalized = normalize_notification_payload(payload)
+        if normalized is None:
             return
 
         try:
             QMetaObject.invokeMethod(
                 self,
-                "show_launch_error",
+                "_notify_from_payload",
                 Qt.ConnectionType.QueuedConnection,
-                Q_ARG(str, text),
+                Q_ARG(object, dict(normalized)),
             )
         except Exception:
+            self.notify(normalized)
+
+    @pyqtSlot(object)
+    def _notify_from_payload(self, payload: object) -> None:
+        self.notify(payload if isinstance(payload, dict) else None)
+
+    def notify_many(self, payloads: list[dict] | tuple[dict, ...] | None) -> None:
+        for payload in payloads or ():
+            self.notify(payload)
+
+    def notify(self, payload: dict | None) -> None:
+        normalized = normalize_notification_payload(payload)
+        if normalized is None:
+            return
+
+        try:
+            log(
+                "Notification received: "
+                f"source={normalized.get('source', '')}, "
+                f"level={normalized.get('level', '')}, "
+                f"impact={normalized.get('impact', '')}, "
+                f"queue={normalized.get('queue', '')}",
+                "⏱ STARTUP",
+            )
+        except Exception:
+            pass
+
+        if self._should_skip_duplicate(normalized):
             try:
-                self.show_launch_error(text)
+                log(
+                    f"Notification skipped as duplicate: source={normalized.get('source', '')}",
+                    "⏱ STARTUP",
+                )
             except Exception:
                 pass
-
-    @pyqtSlot(str)
-    def show_launch_error(self, message: str) -> None:
-        import re as _re
-
-        text = str(message or "").strip()
-        if not text:
-            text = "Не удалось запустить DPI"
-
-        auto_fix_action: str | None = None
-        match = _re.match(r"^\[AUTOFIX:(\w+)]", text)
-        if match:
-            auto_fix_action = match.group(1)
-            text = text[match.end():]
-
-        try:
-            now = time.time()
-            if text == self._last_launch_error_message and (now - self._last_launch_error_ts) < 1.5:
-                return
-            self._last_launch_error_message = text
-            self._last_launch_error_ts = now
-        except Exception:
-            pass
-
-        try:
-            from qfluentwidgets import InfoBar as _InfoBar, InfoBarPosition as _IBPos
-
-            duration = -1 if auto_fix_action else 10000
-
-            bar = _InfoBar.error(
-                title="Ошибка",
-                content=text,
-                orient=Qt.Orientation.Vertical if len(text) > 90 else Qt.Orientation.Horizontal,
-                isClosable=True,
-                position=_IBPos.TOP,
-                duration=duration,
-                parent=self.host,
-            )
-
-            if auto_fix_action and bar is not None:
-                self._add_autofix_button(bar, auto_fix_action)
-        except Exception as e:
-            log(f"Ошибка показа InfoBar запуска DPI: {e}", "DEBUG")
-
-    @pyqtSlot(str)
-    def show_launch_warning(self, message: str) -> None:
-        text = str(message or "").strip()
-        if not text:
             return
 
-        try:
-            now = time.time()
-            if text == self._last_launch_warning_message and (now - self._last_launch_warning_ts) < 1.5:
-                return
-            self._last_launch_warning_message = text
-            self._last_launch_warning_ts = now
-        except Exception:
-            pass
-
-        try:
-            from qfluentwidgets import InfoBar as _InfoBar, InfoBarPosition as _IBPos
-
-            _InfoBar.warning(
-                title="Предупреждение",
-                content=text,
-                orient=Qt.Orientation.Vertical if len(text) > 90 else Qt.Orientation.Horizontal,
-                isClosable=True,
-                position=_IBPos.TOP,
-                duration=9000,
-                parent=self.host,
-            )
-        except Exception as e:
-            log(f"Ошибка показа warning InfoBar запуска DPI: {e}", "DEBUG")
-
-    def copy_to_clipboard_with_feedback(self, text: str, *, label: str = "Текст") -> None:
-        try:
-            clipboard = QApplication.clipboard()
-            if clipboard is None:
-                raise RuntimeError("Буфер обмена недоступен")
-            clipboard.setText(str(text or ""))
-            self.show_launch_warning(f"{label} скопирован в буфер обмена")
-        except Exception as e:
-            log(f"Не удалось скопировать в буфер обмена: {e}", "DEBUG")
-            self.show_launch_warning(f"Не удалось скопировать {label.lower()}")
-
-    def enqueue_startup_notification(self, payload: dict | None) -> None:
-        if not payload:
+        if self._show_tray_notification_if_needed(normalized):
+            try:
+                log(
+                    f"Notification redirected to tray: source={normalized.get('source', '')}",
+                    "⏱ STARTUP",
+                )
+            except Exception:
+                pass
             return
 
-        if self.can_show_startup_notification_now():
-            QTimer.singleShot(0, lambda data=dict(payload): self.show_startup_notification(data))
+        if self._should_enqueue_for_startup(normalized):
+            self._startup_notification_queue.append(dict(normalized))
+            try:
+                log(
+                    "Notification queued for startup display: "
+                    f"source={normalized.get('source', '')}, "
+                    f"queue_size={len(self._startup_notification_queue)}",
+                    "⏱ STARTUP",
+                )
+            except Exception:
+                pass
+            self.schedule_startup_notification_queue()
             return
 
-        self._startup_notification_queue.append(dict(payload))
-        self.schedule_startup_notification_queue()
+        self._present_notification(normalized)
 
     def can_show_startup_notification_now(self) -> bool:
         if not bool(getattr(self.host, "_startup_post_init_ready", False)):
@@ -161,15 +140,134 @@ class WindowNotificationController(QObject):
             return
         self._startup_notification_timer.start(max(0, int(delay_ms)))
 
-    def show_startup_notification(self, payload: dict) -> None:
+    def flush_startup_notification_queue(self) -> None:
+        if not bool(getattr(self.host, "_startup_post_init_ready", False)):
+            self.schedule_startup_notification_queue(300)
+            return
+        if not bool(getattr(self.host, "_startup_background_init_started", False)):
+            self.schedule_startup_notification_queue(300)
+            return
+        if not self.host.isVisible():
+            self.schedule_startup_notification_queue(500)
+            return
+        if not self._startup_notification_queue:
+            return
+
+        payload = self._startup_notification_queue.pop(0)
+        try:
+            log(
+                "Notification dequeued for display: "
+                f"source={payload.get('source', '')}, "
+                f"remaining={len(self._startup_notification_queue)}",
+                "⏱ STARTUP",
+            )
+        except Exception:
+            pass
+        self._present_notification(payload)
+
+        if self._startup_notification_queue:
+            self.schedule_startup_notification_queue(900)
+
+    def copy_to_clipboard_with_feedback(self, text: str, *, label: str = "Текст") -> None:
+        try:
+            clipboard = QApplication.clipboard()
+            if clipboard is None:
+                raise RuntimeError("Буфер обмена недоступен")
+            clipboard.setText(str(text or ""))
+            self.notify(
+                advisory_notification(
+                    level="info",
+                    title="Скопировано",
+                    content=f"{label} скопирован в буфер обмена",
+                    source="system.clipboard",
+                    presentation="infobar",
+                    queue="immediate",
+                    duration=5000,
+                    dedupe_key=f"clipboard.success:{label.lower()}",
+                )
+            )
+        except Exception as e:
+            log(f"Не удалось скопировать в буфер обмена: {e}", "DEBUG")
+            self.notify(
+                advisory_notification(
+                    level="warning",
+                    title="Не удалось скопировать",
+                    content=f"Не удалось скопировать {label.lower()}",
+                    source="system.clipboard",
+                    presentation="infobar",
+                    queue="immediate",
+                    duration=7000,
+                    dedupe_key=f"clipboard.failure:{label.lower()}",
+                )
+            )
+
+    def _should_enqueue_for_startup(self, payload: dict) -> bool:
+        if str(payload.get("impact") or "").lower() == "blocking":
+            return False
+
+        queue_mode = str(payload.get("queue") or "auto").lower()
+        if queue_mode == "immediate":
+            return False
+        if queue_mode == "startup":
+            return not self.can_show_startup_notification_now()
+
+        source = str(payload.get("source") or "")
+        if source.startswith(("startup.", "deferred.")):
+            return not self.can_show_startup_notification_now()
+
+        return False
+
+    def _present_notification(self, payload: dict) -> None:
+        impact = str(payload.get("impact") or "advisory").lower()
+        presentation = str(payload.get("presentation") or "auto").lower()
+
+        try:
+            log(
+                "Notification presenting: "
+                f"source={payload.get('source', '')}, "
+                f"presentation={presentation}, "
+                f"impact={impact}",
+                "⏱ STARTUP",
+            )
+        except Exception:
+            pass
+
+        if impact == "blocking" or presentation == "dialog":
+            self._show_dialog_notification(payload)
+            return
+
+        self._show_infobar_notification(payload)
+
+    def _show_dialog_notification(self, payload: dict) -> None:
+        title = str(payload.get("title") or "Ошибка").strip() or "Ошибка"
+        content = str(payload.get("content") or "").strip()
+        level = str(payload.get("level") or "error").strip().lower()
+        parent = self.host if self._window_available_for_parenting() else None
+
+        try:
+            if level == "warning":
+                QMessageBox.warning(parent, title, content)
+            elif level == "info":
+                QMessageBox.information(parent, title, content)
+            else:
+                QMessageBox.critical(parent, title, content)
+        except Exception as e:
+            log(f"Не удалось показать dialog уведомление: {e}", "DEBUG")
+
+    def _show_infobar_notification(self, payload: dict) -> None:
         try:
             from qfluentwidgets import InfoBar as _InfoBar, InfoBarPosition as _IBPos, PushButton
 
             level = str(payload.get("level") or "warning").strip().lower()
-            title = str(payload.get("title") or "Предупреждение").strip()
+            title = self._resolve_title(payload)
             content = str(payload.get("content") or "").strip()
             duration = int(payload.get("duration", 12000) or 12000)
             orient = Qt.Orientation.Vertical if len(content) > 120 or "\n" in content else Qt.Orientation.Horizontal
+            position = (
+                _IBPos.TOP
+                if str(payload.get("source") or "").startswith(("launch.", "global_logger"))
+                else _IBPos.TOP_RIGHT
+            )
 
             factory = {
                 "success": _InfoBar.success,
@@ -183,15 +281,18 @@ class WindowNotificationController(QObject):
                 content=content,
                 orient=orient,
                 isClosable=True,
-                position=_IBPos.TOP_RIGHT,
+                position=position,
                 duration=duration,
                 parent=self.host,
             )
 
-            for button_info in payload.get("buttons") or []:
-                button_text = str(button_info.get("text") or "").strip()
-                callback = button_info.get("callback")
-                if not button_text or not callable(callback) or bar is None:
+            for action in payload.get("buttons") or []:
+                button_text = str(action.get("text") or "").strip()
+                if not button_text or bar is None:
+                    continue
+
+                callback = self._build_action_callback(action, bar)
+                if callback is None:
                     continue
 
                 btn = PushButton(button_text)
@@ -208,66 +309,187 @@ class WindowNotificationController(QObject):
                 btn.clicked.connect(_wrap)
                 bar.addWidget(btn)
         except Exception as e:
-            log(f"Не удалось показать startup InfoBar: {e}", "DEBUG")
+            log(f"Не удалось показать InfoBar уведомление: {e}", "DEBUG")
 
-    def flush_startup_notification_queue(self) -> None:
-        if not bool(getattr(self.host, "_startup_post_init_ready", False)):
-            self.schedule_startup_notification_queue(300)
-            return
-        if not bool(getattr(self.host, "_startup_background_init_started", False)):
-            self.schedule_startup_notification_queue(300)
-            return
-        if not self.host.isVisible():
-            self.schedule_startup_notification_queue(500)
-            return
-        if not self._startup_notification_queue:
-            return
+    def _build_action_callback(self, action: dict, bar):
+        kind = str(action.get("kind") or "").strip().lower()
+        if not kind:
+            return None
 
-        payload = self._startup_notification_queue.pop(0)
-        self.show_startup_notification(payload)
+        if kind == "copy_text":
+            return lambda: self.copy_to_clipboard_with_feedback(
+                str(action.get("value") or ""),
+                label=str(action.get("feedback_label") or "Текст"),
+            )
 
-        if self._startup_notification_queue:
-            self.schedule_startup_notification_queue(900)
+        if kind == "open_url":
+            return lambda: webbrowser.open(str(action.get("value") or ""))
 
-    def _add_autofix_button(self, bar, action: str) -> None:
+        if kind == "disable_proxy":
+            return self._disable_proxy_with_feedback
+
+        if kind == "disable_kaspersky_warning":
+            return self._disable_kaspersky_warning_forever
+
+        if kind == "disable_telega_warning":
+            return self._disable_telega_warning_forever
+
+        if kind == "autofix":
+            return lambda: self._run_windivert_autofix(str(action.get("value") or ""), bar)
+
+        return None
+
+    def _disable_proxy_with_feedback(self) -> None:
         try:
-            from qfluentwidgets import PushButton, InfoBar as _InfoBar, InfoBarPosition as _IBPos
+            from startup.check_start import _disable_proxy
 
-            btn = PushButton("Исправить")
-            btn.setFixedWidth(100)
-
-            def on_fix():
-                btn.setEnabled(False)
-                btn.setText("...")
-                try:
-                    from dpi.process_health_check import execute_windivert_auto_fix
-
-                    ok, msg = execute_windivert_auto_fix(action)
-                    bar.close()
-                    if ok:
-                        _InfoBar.success(
-                            title="Готово",
-                            content=msg,
-                            isClosable=True,
-                            position=_IBPos.TOP,
-                            duration=5000,
-                            parent=self.host,
-                        )
-                    else:
-                        _InfoBar.warning(
-                            title="Не удалось",
-                            content=msg,
-                            isClosable=True,
-                            position=_IBPos.TOP,
-                            duration=8000,
-                            parent=self.host,
-                        )
-                except Exception as e:
-                    log(f"Auto-fix error: {e}", "ERROR")
-                    btn.setEnabled(True)
-                    btn.setText("Исправить")
-
-            btn.clicked.connect(on_fix)
-            bar.addWidget(btn)
+            success, disable_error = _disable_proxy()
         except Exception as e:
-            log(f"Error adding auto-fix button: {e}", "DEBUG")
+            success, disable_error = False, str(e)
+
+        self.notify(
+            advisory_notification(
+                level="success" if success else "warning",
+                title="Прокси отключен" if success else "Не удалось отключить прокси",
+                content=(
+                    "Ручной системный прокси был отключен."
+                    if success else str(disable_error or "Настройки прокси не были изменены.")
+                ),
+                source="startup.proxy.action",
+                presentation="infobar",
+                queue="immediate",
+                duration=7000 if success else 10000,
+                dedupe_key="startup.proxy.action",
+            )
+        )
+
+    def _disable_kaspersky_warning_forever(self) -> None:
+        try:
+            from startup.kaspersky import disable_kaspersky_warning_forever
+
+            disable_kaspersky_warning_forever()
+        except Exception as e:
+            log(f"Не удалось отключить предупреждение Kaspersky: {e}", "DEBUG")
+
+    def _disable_telega_warning_forever(self) -> None:
+        try:
+            from startup.telega_check import disable_telega_warning_forever
+
+            disable_telega_warning_forever()
+        except Exception as e:
+            log(f"Не удалось отключить предупреждение Telega: {e}", "DEBUG")
+
+    def _run_windivert_autofix(self, action: str, bar) -> None:
+        if not action:
+            return
+
+        try:
+            from dpi.process_health_check import execute_windivert_auto_fix
+
+            ok, message = execute_windivert_auto_fix(action)
+            try:
+                if bar is not None:
+                    bar.close()
+            except Exception:
+                pass
+
+            self.notify(
+                advisory_notification(
+                    level="success" if ok else "warning",
+                    title="Готово" if ok else "Не удалось",
+                    content=str(message or ""),
+                    source="launch.autofix",
+                    presentation="infobar",
+                    queue="immediate",
+                    duration=5000 if ok else 8000,
+                    dedupe_key=f"launch.autofix:{action}",
+                )
+            )
+        except Exception as e:
+            log(f"Auto-fix error: {e}", "ERROR")
+
+    def _show_tray_notification_if_needed(self, payload: dict) -> bool:
+        tray_title = str(payload.get("tray_title") or "").strip()
+        tray_content = str(payload.get("tray_content") or "").strip()
+        if not tray_title or not tray_content:
+            return False
+
+        tray_manager = getattr(self.host, "tray_manager", None)
+        if tray_manager is None:
+            return False
+
+        if self._window_available_for_parenting():
+            return False
+
+        try:
+            tray_manager.show_notification(tray_title, tray_content)
+            return True
+        except Exception as e:
+            log(f"Не удалось показать tray-уведомление: {e}", "DEBUG")
+            return False
+
+    def _window_available_for_parenting(self) -> bool:
+        try:
+            if not self.host.isVisible():
+                return False
+        except Exception:
+            return False
+
+        try:
+            if self.host.isMinimized():
+                return False
+        except Exception:
+            pass
+
+        return True
+
+    def _resolve_title(self, payload: dict) -> str:
+        title = str(payload.get("title") or "").strip()
+        if title:
+            return title
+
+        level = str(payload.get("level") or "info").strip().lower()
+        return {
+            "success": "Готово",
+            "info": "Информация",
+            "warning": "Предупреждение",
+            "error": "Ошибка",
+        }.get(level, "Уведомление")
+
+    def _should_skip_duplicate(self, payload: dict) -> bool:
+        self._prune_old_signatures()
+
+        dedupe_window_ms = int(payload.get("dedupe_window_ms", 1500) or 0)
+        if dedupe_window_ms <= 0:
+            return False
+
+        signature = str(payload.get("dedupe_key") or "").strip()
+        if not signature:
+            signature = "|".join(
+                [
+                    str(payload.get("source") or ""),
+                    str(payload.get("level") or ""),
+                    str(payload.get("title") or ""),
+                    " ".join(str(payload.get("content") or "").split()),
+                ]
+            ).lower()
+
+        if not signature:
+            return False
+
+        now_ts = time.time()
+        last_ts = float(self._recent_signatures.get(signature, 0.0) or 0.0)
+        if last_ts and (now_ts - last_ts) < (dedupe_window_ms / 1000.0):
+            return True
+
+        self._recent_signatures[signature] = now_ts
+        return False
+
+    def _prune_old_signatures(self) -> None:
+        if not self._recent_signatures:
+            return
+
+        cutoff = time.time() - 30.0
+        stale_keys = [key for key, ts in self._recent_signatures.items() if ts < cutoff]
+        for key in stale_keys:
+            self._recent_signatures.pop(key, None)

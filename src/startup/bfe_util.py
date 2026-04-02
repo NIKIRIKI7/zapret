@@ -4,17 +4,13 @@ from typing import Optional, Tuple
 import time
 import win32service
 import win32serviceutil
-import ctypes
 import threading
 from queue import Queue
-from PyQt6.QtWidgets import QWidget
+
+from app_notifications import advisory_notification
 
 SERVICE_RUNNING = win32service.SERVICE_RUNNING
 ERROR_SERVICE_DOES_NOT_EXIST = 1060
-
-def _native_msg(title: str, text: str, icon: int = 0x40):
-    # icon: 0x40 = MB_ICONINFORMATION, 0x10 = MB_ICONERROR
-    ctypes.windll.user32.MessageBoxW(None, text, title, icon)
 
 def is_service_running(name: str) -> bool:
     """Быстрая проверка состояния службы через Win32 API."""
@@ -155,10 +151,25 @@ def start_service(service_name: str, timeout: int = 10) -> bool:
         return False
 
 
-def ensure_bfe_running(show_ui: bool = False) -> bool:
+def ensure_bfe_running() -> tuple[bool, dict | None]:
     """
     Проверяет и запускает службу BFE с асинхронной оптимизацией.
+
+    Возвращает:
+    - (is_running, notification)
     """
+    notification: dict | None = None
+
+    def _build_bfe_notification(message: str) -> dict:
+        return advisory_notification(
+            level="warning",
+            title="Проблема со службой BFE",
+            content=message,
+            source="startup.bfe",
+            queue="startup",
+            duration=16000,
+            dedupe_key="startup.bfe",
+        )
     from startup.check_cache import startup_cache
     from log import log
     
@@ -167,13 +178,13 @@ def ensure_bfe_running(show_ui: bool = False) -> bool:
     if cached_status is not None:
         # Запускаем фоновую проверку для обновления кэша
         async_checker.check_async("BFE")
-        return cached_status
+        return cached_status, None
     
     # 2. Проверяем startup кэш
     has_cache, cached_result = startup_cache.is_cached_and_valid("bfe_check")
     if has_cache:
         # Используем кэшированный результат
-        return cached_result
+        return cached_result, None
     
     log("Выполняется проверка службы Base Filtering Engine (BFE)", "🧹 bfe_util")
     
@@ -183,22 +194,16 @@ def ensure_bfe_running(show_ui: bool = False) -> bool:
         
         if not is_running:
             log("Служба BFE остановлена, пытаемся запустить", "⚠ WARNING")
-            
-            # Показываем UI если требуется
-            if show_ui:
-                _native_msg("Служба BFE", 
-                           "Служба Base Filtering Engine остановлена.\n"
-                           "Выполняется попытка запуска...", 0x40)
-            
+
             # Пытаемся запустить службу
             is_running = start_service("BFE", timeout=5)
-            
+
             if not is_running:
                 log("Не удалось запустить службу BFE", "❌ ERROR")
-                if show_ui:
-                    _native_msg("Ошибка", 
-                               "Не удалось запустить службу Base Filtering Engine.\n"
-                               "Брандмауэр Windows может работать некорректно.", 0x10)
+                notification = _build_bfe_notification(
+                    "Не удалось запустить службу Base Filtering Engine.\n"
+                    "Это не блокирует запуск программы, но сетевые компоненты Windows могут работать нестабильно."
+                )
         
         # 4. Сохраняем результат в кэши
         service_cache.set("BFE", is_running)
@@ -207,14 +212,16 @@ def ensure_bfe_running(show_ui: bool = False) -> bool:
         # 5. Запускаем периодическую фоновую проверку
         if is_running:
             schedule_periodic_check("BFE", interval=300)  # каждые 5 минут
-        
-        return is_running
+
+        return is_running, notification
         
     except Exception as e:
         log(f"Ошибка при проверке службы BFE: {e}", "❌ ERROR")
         service_cache.set("BFE", False, ttl=30)  # кэшируем ошибку на 30 секунд
         startup_cache.cache_result("bfe_check", False)
-        return False
+        return False, _build_bfe_notification(
+            f"Не удалось проверить службу Base Filtering Engine.\n\nПодробности: {e}"
+        )
 
 # Хранилище для периодических проверок
 _periodic_checks = {}

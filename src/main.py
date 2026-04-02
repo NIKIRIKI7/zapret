@@ -287,6 +287,7 @@ from config import WIDTH, HEIGHT, MIN_WIDTH
 from config import APP_VERSION
 from utils import run_hidden
 
+from app_notifications import advisory_notification
 from ui.theme_subscription_manager import ThemeSubscriptionManager
 from ui.theme import install_qtawesome_icon_theme_patch
 
@@ -1375,10 +1376,21 @@ def main():
 
     if start_in_tray:
         log("Запуск приложения скрыто в трее", "TRAY")
-        if hasattr(window, 'tray_manager'):
-            window.tray_manager.show_notification(
-                "Zapret работает в трее", 
-                "Приложение запущено в фоновом режиме"
+        controller = getattr(window, "window_notification_controller", None)
+        if controller is not None:
+            controller.notify(
+                advisory_notification(
+                    level="info",
+                    title="Zapret работает в трее",
+                    content="Приложение запущено в фоновом режиме",
+                    source="startup.tray_launch",
+                    presentation="infobar",
+                    queue="immediate",
+                    duration=5000,
+                    dedupe_key="startup.tray_launch",
+                    tray_title="Zapret работает в трее",
+                    tray_content="Приложение запущено в фоновом режиме",
+                )
             )
 
     # ✅ НЕКРИТИЧЕСКИЕ ПРОВЕРКИ ПОСЛЕ ПОКАЗА ОКНА
@@ -1407,111 +1419,29 @@ def main():
 
     def _on_startup_checks_finished(payload: dict) -> None:
         try:
-            fatal_error = payload.get("fatal_error")
-            warnings = payload.get("warnings") or []
-            proxy_prompt = payload.get("proxy_prompt") or None
-            kaspersky_detected = bool(payload.get("kaspersky_detected", False))
+            controller = getattr(window, "window_notification_controller", None)
+            blocking_notification = payload.get("blocking_notification")
+            notifications = payload.get("notifications") or []
             duration_ms = int(payload.get("duration_ms") or 0)
 
             if duration_ms > 0:
                 window.log_startup_metric("StartupChecksFinished", f"{duration_ms}ms")
 
-            if fatal_error:
-                try:
-                    QMessageBox.critical(window, "Ошибка", str(fatal_error))
-                except Exception:
-                    _native_message_safe("Ошибка", str(fatal_error), 0x10)
+            if blocking_notification:
+                if controller is not None:
+                    controller.notify(blocking_notification)
+                else:
+                    title = str(blocking_notification.get("title") or "Ошибка")
+                    content = str(blocking_notification.get("content") or "")
+                    try:
+                        QMessageBox.critical(window, title, content)
+                    except Exception:
+                        _native_message_safe(title, content, 0x10)
                 QApplication.quit()
                 return
 
-            if warnings:
-                for warning_text in [str(w).strip() for w in warnings if str(w).strip()]:
-                    window.window_notification_controller.enqueue_startup_notification(
-                        {
-                            "level": "warning",
-                            "title": "Проверка при запуске",
-                            "content": warning_text,
-                            "duration": 15000,
-                        }
-                    )
-
-            if kaspersky_detected:
-                log("Обнаружен антивирус Kaspersky", "⚠️ KASPERSKY")
-                try:
-                    from startup.kaspersky import (
-                        disable_kaspersky_warning_forever,
-                        get_kaspersky_warning_details,
-                    )
-
-                    kaspersky_details = get_kaspersky_warning_details()
-                    if kaspersky_details:
-                        window.window_notification_controller.enqueue_startup_notification(
-                            {
-                                "level": "warning",
-                                "title": str(kaspersky_details.get("title") or "Обнаружен Kaspersky"),
-                                "content": str(kaspersky_details.get("content") or ""),
-                                "duration": 20000,
-                                "buttons": [
-                                    {
-                                        "text": "Копировать папку",
-                                        "callback": lambda details=kaspersky_details: window.window_notification_controller.copy_to_clipboard_with_feedback(
-                                            str(details.get("base_dir") or ""),
-                                            label="Путь к папке",
-                                        ),
-                                    },
-                                    {
-                                        "text": "Копировать exe",
-                                        "callback": lambda details=kaspersky_details: window.window_notification_controller.copy_to_clipboard_with_feedback(
-                                            str(details.get("exe_path") or ""),
-                                            label="Путь к exe",
-                                        ),
-                                    },
-                                    {
-                                        "text": "Не напоминать",
-                                        "callback": lambda: disable_kaspersky_warning_forever(),
-                                    },
-                                ],
-                            }
-                        )
-                except Exception as e:
-                    log(f"Не удалось показать предупреждение Kaspersky: {e}", "⚠️ KASPERSKY")
-
-            if proxy_prompt:
-                try:
-                    from startup.check_start import _disable_proxy
-
-                    title = str(proxy_prompt.get("title") or "Включен системный прокси").strip()
-                    message = str(proxy_prompt.get("message") or "").strip()
-                    window.window_notification_controller.enqueue_startup_notification(
-                        {
-                            "level": "warning",
-                            "title": title,
-                            "content": message,
-                            "duration": 18000,
-                            "buttons": [
-                                {
-                                    "text": "Отключить прокси",
-                                    "callback": lambda: (
-                                        (lambda success, disable_error: (
-                                            window.window_notification_controller.enqueue_startup_notification(
-                                                {
-                                                    "level": "success" if success else "warning",
-                                                    "title": "Прокси отключен" if success else "Не удалось отключить прокси",
-                                                    "content": (
-                                                        "Ручной системный прокси был отключен."
-                                                        if success else str(disable_error or "Настройки прокси не были изменены.")
-                                                    ),
-                                                    "duration": 7000 if success else 10000,
-                                                }
-                                            )
-                                        ))(*_disable_proxy())
-                                    ),
-                                }
-                            ],
-                        }
-                    )
-                except Exception as e:
-                    log(f"Не удалось показать Fluent-диалог прокси: {e}", "WARNING")
+            if controller is not None:
+                controller.notify_many([item for item in notifications if isinstance(item, dict)])
 
             log("✅ Все проверки пройдены", "🔹 main")
         except Exception as e:
@@ -1521,6 +1451,7 @@ def main():
 
     def _on_deferred_maintenance_finished(payload: dict) -> None:
         try:
+            controller = getattr(window, "window_notification_controller", None)
             duration_ms = int(payload.get("duration_ms") or 0)
             if duration_ms > 0:
                 window.log_startup_metric("DeferredMaintenanceFinished", f"{duration_ms}ms")
@@ -1528,39 +1459,8 @@ def main():
             if bool(payload.get("association_ok")):
                 log("Ассоциация успешно установлена", level="INFO")
 
-            telega_found_path = payload.get("telega_found_path")
-            if telega_found_path:
-                log(f"Обнаружена Telega Desktop: {telega_found_path}", "🚨 TELEGA")
-                try:
-                    from startup.telega_check import (
-                        disable_telega_warning_forever,
-                        get_telega_warning_details,
-                    )
-
-                    telega_details = get_telega_warning_details(found_path=str(telega_found_path))
-                    if telega_details:
-                        window.window_notification_controller.enqueue_startup_notification(
-                            {
-                                "level": "error",
-                                "title": str(telega_details.get("title") or "Обнаружена Telega Desktop"),
-                                "content": str(telega_details.get("content") or ""),
-                                "duration": 20000,
-                                "buttons": [
-                                    {
-                                        "text": "Открыть сайт Telegram",
-                                        "callback": lambda details=telega_details: __import__("webbrowser").open(
-                                            str(details.get("official_url") or "https://desktop.telegram.org")
-                                        ),
-                                    },
-                                    {
-                                        "text": "Не напоминать",
-                                        "callback": lambda: disable_telega_warning_forever(),
-                                    },
-                                ],
-                            }
-                        )
-                except Exception as e:
-                    log(f"Не удалось показать предупреждение Telega: {e}", "🚨 TELEGA")
+            if controller is not None:
+                controller.notify_many(payload.get("notifications") or [])
         except Exception as e:
             log(f"Ошибка поздней служебной проверки: {e}", "❌ ERROR")
 
@@ -1601,31 +1501,71 @@ def main():
         started_at = time.perf_counter()
         try:
             from startup.bfe_util import preload_service_status, ensure_bfe_running, cleanup as bfe_cleanup
-            from startup.check_start import collect_startup_warnings, check_goodbyedpi, check_mitmproxy
+            from startup.check_start import collect_startup_notifications, check_goodbyedpi, check_mitmproxy
+            notifications: list[dict] = []
+            blocking_notification: dict | None = None
 
             preload_service_status("BFE")
 
-            if not ensure_bfe_running(show_ui=True):
+            bfe_ok, bfe_notification = ensure_bfe_running()
+            if bfe_notification is not None:
+                notifications.append(bfe_notification)
+            if not bfe_ok:
                 log("BFE не запущен, продолжаем работу после предупреждения", "⚠ WARNING")
 
-            can_continue, warnings, fatal_error, proxy_prompt = collect_startup_warnings()
-            warnings = list(warnings or [])
+            startup_notifications, blocking_notification = collect_startup_notifications()
+            notifications.extend(startup_notifications or [])
+            log(
+                "Startup notifications collected: "
+                f"count={len(startup_notifications or [])}, "
+                f"blocking={'yes' if blocking_notification else 'no'}",
+                "⏱ STARTUP",
+            )
 
             # Нефатальные, но потенциально долгие проверки — только в фоне после показа окна.
             has_gdpi, gdpi_msg = check_goodbyedpi()
             if has_gdpi and gdpi_msg:
-                warnings.append(gdpi_msg)
+                notifications.append(
+                    advisory_notification(
+                        level="warning",
+                        title="Проверка при запуске",
+                        content=gdpi_msg,
+                        source="startup.goodbyedpi",
+                        queue="startup",
+                        duration=15000,
+                        dedupe_key="startup.goodbyedpi",
+                    )
+                )
 
             has_mitmproxy, mitmproxy_msg = check_mitmproxy()
             if has_mitmproxy and mitmproxy_msg:
-                warnings.append(mitmproxy_msg)
+                notifications.append(
+                    advisory_notification(
+                        level="warning",
+                        title="Проверка при запуске",
+                        content=mitmproxy_msg,
+                        source="startup.mitmproxy",
+                        queue="startup",
+                        duration=15000,
+                        dedupe_key="startup.mitmproxy",
+                    )
+                )
 
-            kaspersky_detected = False
             try:
-                from startup.kaspersky import _check_kaspersky_antivirus
-                kaspersky_detected = bool(_check_kaspersky_antivirus(None))
+                from startup.kaspersky import _check_kaspersky_antivirus, build_kaspersky_notification
+
+                kaspersky_detected = bool(_check_kaspersky_antivirus())
+                log(
+                    f"Kaspersky startup check: detected={'yes' if kaspersky_detected else 'no'}",
+                    "⏱ STARTUP",
+                )
+                if kaspersky_detected:
+                    kaspersky_notification = build_kaspersky_notification()
+                    if kaspersky_notification is not None:
+                        log("Обнаружен антивирус Kaspersky", "⚠️ KASPERSKY")
+                        notifications.append(kaspersky_notification)
             except Exception:
-                kaspersky_detected = False
+                pass
 
             if is_verbose_logging_enabled():
                 from startup.admin_check_debug import debug_admin_status
@@ -1638,11 +1578,8 @@ def main():
 
             _startup_bridge.finished.emit(
                 {
-                    "ok": bool(can_continue),
-                    "warnings": warnings,
-                    "fatal_error": fatal_error,
-                    "proxy_prompt": proxy_prompt,
-                    "kaspersky_detected": kaspersky_detected,
+                    "notifications": notifications,
+                    "blocking_notification": blocking_notification,
                     "duration_ms": int((time.perf_counter() - started_at) * 1000),
                 }
             )
@@ -1655,10 +1592,8 @@ def main():
                     pass
             _startup_bridge.finished.emit(
                 {
-                    "ok": True,
-                    "warnings": [],
-                    "fatal_error": None,
-                    "proxy_prompt": None,
+                    "notifications": [],
+                    "blocking_notification": None,
                     "duration_ms": int((time.perf_counter() - started_at) * 1000),
                 }
             )
@@ -1682,10 +1617,22 @@ def main():
         started_at = time.perf_counter()
         telega_found_path = None
         association_ok = False
+        notifications: list[dict] = []
         try:
             try:
-                from startup.telega_check import _check_telega_installed
+                from startup.telega_check import _check_telega_installed, build_telega_notification
                 telega_found_path = _check_telega_installed()
+                log(
+                    "Telega deferred check: "
+                    f"found={'yes' if bool(telega_found_path) else 'no'}"
+                    + (f", value={telega_found_path}" if telega_found_path else ""),
+                    "⏱ STARTUP",
+                )
+                if telega_found_path:
+                    log(f"Обнаружена Telega Desktop: {telega_found_path}", "🚨 TELEGA")
+                    telega_notification = build_telega_notification(found_path=str(telega_found_path))
+                    if telega_notification is not None:
+                        notifications.append(telega_notification)
             except Exception:
                 telega_found_path = None
 
@@ -1696,9 +1643,17 @@ def main():
         except Exception as e:
             log(f"Ошибка поздних служебных проверок: {e}", "❌ ERROR")
         finally:
+            try:
+                log(
+                    f"Deferred maintenance notifications collected: count={len(notifications)}",
+                    "⏱ STARTUP",
+                )
+            except Exception:
+                pass
             _deferred_maintenance_bridge.finished.emit(
                 {
                     "association_ok": association_ok,
+                    "notifications": notifications,
                     "telega_found_path": telega_found_path,
                     "duration_ms": int((time.perf_counter() - started_at) * 1000),
                 }
@@ -1775,14 +1730,20 @@ def main():
                 window.set_status(f"Обновлений нет, установлена версия {current_version}")
             except Exception:
                 pass
-            from qfluentwidgets import InfoBar as _InfoBar, InfoBarPosition as _IBPos
-            _InfoBar.success(
-                title="Обновлений нет",
-                content=f"Установлена актуальная версия {current_version}",
-                parent=window,
-                duration=4000,
-                position=_IBPos.TOP_RIGHT,
-            )
+            controller = getattr(window, "window_notification_controller", None)
+            if controller is not None:
+                controller.notify(
+                    advisory_notification(
+                        level="success",
+                        title="Обновлений нет",
+                        content=f"Установлена актуальная версия {current_version}",
+                        source="startup.update_check",
+                        presentation="infobar",
+                        queue="immediate",
+                        duration=4000,
+                        dedupe_key=f"startup.update_check:{current_version}",
+                    )
+                )
         except Exception as e:
             log(f"Ошибка при показе InfoBar: {e}", "❌ ERROR")
 

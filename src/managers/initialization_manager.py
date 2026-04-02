@@ -454,7 +454,7 @@ class InitializationManager:
             )
 
         try:
-            from ui.close_dialog import show_start_strategy_warning
+            from ui.start_strategy_warning_dialog import show_start_strategy_warning
 
             show_start_strategy_warning(parent=self.app, subtitle=subtitle)
             return

@@ -3,10 +3,7 @@ from __future__ import annotations
 import os
 import sys
 
-def _open_url(url: str):
-    from PyQt6.QtCore import QUrl
-    from PyQt6.QtGui import QDesktopServices
-    QDesktopServices.openUrl(QUrl(url))
+from app_notifications import advisory_notification, notification_action
 
 
 def _resolve_kaspersky_paths() -> tuple[str, str]:
@@ -21,7 +18,7 @@ def _resolve_kaspersky_paths() -> tuple[str, str]:
         base_dir = os.path.dirname(exe_path)
     return exe_path, base_dir
 
-def _check_kaspersky_antivirus(self):
+def _check_kaspersky_antivirus() -> bool:
     """
     Проверяет наличие антивируса Касперского в системе.
     
@@ -78,7 +75,7 @@ def _check_kaspersky_antivirus(self):
         # Если ни один процесс не найден и папки пустые/не найдены, считаем что Касперского нет
         return False
         
-    except Exception as e:
+    except Exception:
         # В случае ошибки считаем, что Касперского нет
         return False
 
@@ -139,102 +136,39 @@ def disable_kaspersky_warning_forever() -> None:
     _set_kaspersky_warning_disabled(True)
 
 
-def get_kaspersky_warning_details() -> dict | None:
-    """Возвращает данные предупреждения для неблокирующего показа на старте."""
+def build_kaspersky_notification() -> dict | None:
+    """Возвращает нормализованное неблокирующее событие для центра уведомлений."""
     if _check_kaspersky_warning_disabled():
         return None
 
     exe_path, base_dir = _resolve_kaspersky_paths()
-    content = (
-        "Обнаружен антивирус Kaspersky.\n"
-        "Чтобы Zapret работал стабильно, добавьте программу в исключения.\n"
-        f"Папка: {base_dir}\n"
-        f"Файл: {exe_path}\n"
-        "Без исключения антивирус может мешать запуску и работе программы."
+    return advisory_notification(
+        level="warning",
+        title="Обнаружен Kaspersky",
+        content=(
+            "Обнаружен антивирус Kaspersky.\n"
+            "Чтобы Zapret работал стабильнее, лучше добавить программу в исключения.\n"
+            f"Папка: {base_dir}\n"
+            f"Файл: {exe_path}\n"
+            "Без исключения антивирус может мешать запуску и работе программы."
+        ),
+        source="startup.kaspersky",
+        queue="startup",
+        duration=20000,
+        dedupe_key="startup.kaspersky",
+        buttons=[
+            notification_action(
+                "copy_text",
+                "Копировать папку",
+                value=base_dir,
+                feedback_label="Путь к папке",
+            ),
+            notification_action(
+                "copy_text",
+                "Копировать exe",
+                value=exe_path,
+                feedback_label="Путь к exe",
+            ),
+            notification_action("disable_kaspersky_warning", "Не напоминать"),
+        ],
     )
-    return {
-        "title": "Обнаружен Kaspersky",
-        "content": content,
-        "base_dir": base_dir,
-        "exe_path": exe_path,
-    }
-
-def show_kaspersky_warning(parent=None) -> None:
-    """
-    Показывает Qt-диалог с предупреждением, «кликабельными» путями и
-    кнопками копирования.  Требует уже созданный QApplication.
-    """
-    # Проверяем, не отключено ли предупреждение
-    if _check_kaspersky_warning_disabled():
-        return
-
-    exe_path, base_dir = _resolve_kaspersky_paths()
-
-    # -- сам QMessageBox -----------------------------------------------------------
-    from PyQt6.QtWidgets import QMessageBox, QPushButton, QApplication, QCheckBox
-    from PyQt6.QtCore    import Qt, QUrl
-    from PyQt6.QtGui     import QDesktopServices, QIcon
-
-    mb = QMessageBox(parent)
-    mb.setWindowTitle("Zapret – Обнаружен Kaspersky")
-    mb.setIcon(QMessageBox.Icon.Warning)
-    mb.setTextFormat(Qt.TextFormat.RichText)
-
-    # ✨ HTML-текст со ссылками (file:// …) – Windows их открывает проводником
-    mb.setText(
-        "⚠️ <b>ВНИМАНИЕ: Обнаружен антивирус Kaspersky!</b><br><br>"
-        "Для корректной работы Zapret необходимо добавить программу в исключения.<br><br>"
-        "<b>ИНСТРУКЦИЯ</b>:<br>"
-        "1. Откройте Kaspersky → Настройки<br>"
-        "2. «Исключения» / «Доверенная зона»<br>"
-        "3. Добавьте:<br>"
-        f"&nbsp;&nbsp;• Папку:&nbsp;"
-        f"<a href='file:///{base_dir.replace(os.sep, '/')}'>{base_dir}</a><br>"
-        f"&nbsp;&nbsp;• Файл:&nbsp;"
-        f"<a href='file:///{exe_path.replace(os.sep, '/')}'>{exe_path}</a><br>"
-        "4. Сохраните и перезапустите Zapret.<br><br>"
-        "Без добавления в исключения программа может работать некорректно."
-    )
-
-    # -- добавляем чекбокс "Больше не показывать" ---------------------------------
-    dont_show_checkbox = QCheckBox("Больше никогда не показывать это предупреждение")
-    mb.setCheckBox(dont_show_checkbox)
-
-    # -- добавляем 2 кастомных «копирующих» кнопки --------------------------------
-    copy_dir_btn  = QPushButton("📋 Копировать папку")
-    copy_exe_btn  = QPushButton("📋 Копировать exe")
-    mb.addButton(copy_dir_btn, QMessageBox.ButtonRole.ActionRole)
-    mb.addButton(copy_exe_btn, QMessageBox.ButtonRole.ActionRole)
-
-    # 2) отключаем «кнопка по умолчанию» – иначе клик интерпретируется
-    #    как Accept и QMessageBox закрывается
-    for btn in (copy_dir_btn, copy_exe_btn):
-        btn.setAutoDefault(False)
-        btn.setDefault(False)
-
-    # стандартный OK, который действительно закрывает окно
-    ok_btn = mb.addButton(QMessageBox.StandardButton.Ok)
-    mb.setDefaultButton(ok_btn)
-
-    # -- обработка копирования -----------------------------------------------------
-    def copy_to_clipboard(text: str):
-        QApplication.clipboard().setText(text)
-    copy_dir_btn.clicked.connect(lambda: copy_to_clipboard(base_dir))
-    copy_exe_btn.clicked.connect(lambda: copy_to_clipboard(exe_path))
-
-    if hasattr(mb, "linkActivated"):
-        mb.linkActivated.connect(_open_url)
-    else:
-        # fallback для старых/обрезанных сборок
-        from PyQt6.QtWidgets import QLabel
-        lbl = mb.findChild(QLabel, "qt_msgbox_label")
-        if lbl is not None and hasattr(lbl, "linkActivated"):
-            lbl.setOpenExternalLinks(False)
-            lbl.linkActivated.connect(_open_url)
-
-    # Показываем диалог
-    mb.exec()
-    
-    # Сохраняем настройку в реестр, если пользователь поставил галочку
-    if dont_show_checkbox.isChecked():
-        _set_kaspersky_warning_disabled(True)

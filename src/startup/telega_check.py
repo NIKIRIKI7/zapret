@@ -5,7 +5,8 @@
 """
 from __future__ import annotations
 import os
-import sys
+
+from app_notifications import advisory_notification, notification_action
 
 
 def _check_telega_installed() -> str | None:
@@ -112,65 +113,31 @@ def disable_telega_warning_forever() -> None:
     _set_telega_warning_disabled(True)
 
 
-def get_telega_warning_details(found_path: str = "") -> dict | None:
-    """Возвращает данные предупреждения для неблокирующего показа на старте."""
+def build_telega_notification(found_path: str = "") -> dict | None:
+    """Возвращает нормализованное неблокирующее событие для центра уведомлений."""
     if _check_telega_warning_disabled():
         return None
 
     path_line = f"\nОбнаружено: {found_path}" if found_path else ""
-    content = (
-        "Обнаружена программа Telega Desktop.\n"
-        "Это неофициальная модификация Telegram, которая может читать переписку."
-        f"{path_line}\n"
-        "Рекомендуется удалить её, поставить официальный Telegram и завершить сторонние сессии."
+    return advisory_notification(
+        level="error",
+        title="Обнаружена Telega Desktop",
+        content=(
+            "Обнаружена программа Telega Desktop.\n"
+            "Это неофициальная модификация Telegram, которая может читать переписку."
+            f"{path_line}\n"
+            "Рекомендуется удалить её, поставить официальный Telegram и завершить сторонние сессии."
+        ),
+        source="deferred.telega",
+        queue="startup",
+        duration=20000,
+        dedupe_key="deferred.telega",
+        buttons=[
+            notification_action(
+                "open_url",
+                "Открыть сайт Telegram",
+                value="https://desktop.telegram.org",
+            ),
+            notification_action("disable_telega_warning", "Не напоминать"),
+        ],
     )
-    return {
-        "title": "Обнаружена Telega Desktop",
-        "content": content,
-        "found_path": found_path,
-        "official_url": "https://desktop.telegram.org",
-    }
-
-
-def show_telega_warning(parent=None, found_path: str = "") -> None:
-    """
-    Показывает предупреждение о поддельном клиенте «Telega Desktop».
-    """
-    if _check_telega_warning_disabled():
-        return
-
-    from PyQt6.QtWidgets import QMessageBox, QCheckBox
-    from PyQt6.QtCore import Qt
-
-    mb = QMessageBox(parent)
-    mb.setWindowTitle("Zapret – Обнаружена Telega Desktop")
-    mb.setIcon(QMessageBox.Icon.Critical)
-    mb.setTextFormat(Qt.TextFormat.RichText)
-
-    path_line = ""
-    if found_path:
-        path_line = f"<br>Обнаружено: <code>{found_path}</code><br>"
-
-    mb.setText(
-        "🚨 <b>ВНИМАНИЕ: Обнаружена программа «Telega Desktop»!</b><br><br>"
-        "«Telega Desktop» — это <b>не Telegram</b>. Это неофициальная модификация, "
-        "которая может <b>перехватывать и читать ваши сообщения</b>."
-        f"{path_line}<br>"
-        "<b>Рекомендуется:</b><br>"
-        "1. <b>Немедленно удалите</b> «Telega Desktop»<br>"
-        "2. Установите официальный клиент Telegram с сайта "
-        "<a href='https://desktop.telegram.org'>desktop.telegram.org</a><br>"
-        "3. Смените пароль и завершите все сторонние сессии в настройках Telegram<br><br>"
-        "⚠️ <b>Ваши сообщения могут быть скомпрометированы!</b>"
-    )
-
-    dont_show_checkbox = QCheckBox("Больше не показывать это предупреждение")
-    mb.setCheckBox(dont_show_checkbox)
-
-    mb.addButton(QMessageBox.StandardButton.Ok)
-    mb.setDefaultButton(QMessageBox.StandardButton.Ok)
-
-    mb.exec()
-
-    if dont_show_checkbox.isChecked():
-        _set_telega_warning_disabled(True)

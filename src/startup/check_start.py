@@ -1,10 +1,12 @@
 #startup/check_start.py
 import os
 import sys
-from PyQt6.QtWidgets import QMessageBox, QApplication
-import ctypes, sys, subprocess, winreg
+import ctypes
+import subprocess
+import winreg
 
 # Импортируем константы из конфига
+from app_notifications import advisory_notification, blocking_notification, notification_action
 from config import BIN_FOLDER
 
 # Добавляем импорт кэша
@@ -427,135 +429,85 @@ def check_path_for_special_chars():
     startup_cache.cache_result("special_chars", False, paths_context)
     return False, ""
 
-def display_startup_warnings():
-    """
-    Выполняет НЕКРИТИЧЕСКИЕ проверки запуска и отображает предупреждения
-    
-    Возвращает:
-    - bool: True если запуск можно продолжать, False если запуск следует прервать
-    """
+def collect_startup_notifications() -> tuple[list[dict], dict | None]:
+    """Собирает стартовые системные события в одном нормализованном формате."""
+    notifications: list[dict] = []
 
-    from log import log
-    try:
-        # ❌ КРИТИЧЕСКАЯ ПРОВЕРКА: версия Windows
-        has_old_windows, win_error = check_windows_version()
-        if has_old_windows:
-            app_exists = QApplication.instance() is not None
-            if app_exists:
-                try:
-                    QMessageBox.critical(None, "Ошибка", win_error)
-                except Exception:
-                    _native_message("Ошибка", win_error, 0x10)  # MB_ICONERROR
-            else:
-                _native_message("Ошибка", win_error, 0x10)
-            return False  # Не продолжаем запуск
-        
-        warnings = []
-        
-        # ✅ ТОЛЬКО НЕКРИТИЧЕСКИЕ ПРОВЕРКИ
-        has_cmd_issues, cmd_msg = check_system_commands()
-        if has_cmd_issues and cmd_msg:
-            warnings.append(cmd_msg)
-        
-        if check_if_in_archive():
-            error_message = (
-                "Программа запущена из временной директории.\n\n"
-                "Для корректной работы необходимо распаковать архив в постоянную директорию "
-                "(например, C:\\zapretgui) и запустить программу оттуда.\n\n"
-                "Продолжение работы возможно, но некоторые функции могут работать некорректно."
-            )
-            warnings.append(error_message)
-
-        in_onedrive, msg = check_path_for_onedrive()
-        if in_onedrive:
-            warnings.append(msg)
-                
-        has_special_chars, error_message = check_path_for_special_chars()
-        if has_special_chars:
-            warnings.append(error_message)
-        
-        # Проверяем ручной прокси-сервер, но не меняем его без явного согласия.
-        proxy_enabled, proxy_msg = check_proxy_warning()
-        if proxy_enabled and proxy_msg:
-            warnings.append(proxy_msg)
-        
-        # Если есть предупреждения - показываем
-        if warnings:
-            full_message = "\n\n".join(warnings) + "\n\nПродолжить работу?"
-            
-            app_exists = QApplication.instance() is not None
-            
-            if app_exists:
-                try:
-                    result = QMessageBox.warning(
-                        None, "Предупреждение",
-                        full_message,
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.No
-                    )
-                    return result == QMessageBox.StandardButton.Yes
-                except Exception as e:
-                    log(f"Ошибка показа предупреждения: {e}", level="❌ ERROR")
-                    btn = _native_message("Предупреждение",
-                                        full_message,
-                                        0x34)  # MB_ICONWARNING | MB_YESNO
-                    return btn == 6  # IDYES
-            else:
-                btn = _native_message("Предупреждение", full_message, 0x34)
-                return btn == 6
-        
-        return True
-        
-    except Exception as e:
-        error_msg = f"Ошибка при проверке условий запуска: {str(e)}"
-        log(error_msg, level="❌ CRITICAL")
-        return False
-
-def collect_startup_warnings() -> tuple[bool, list[str], str | None, dict | None]:
-    """
-    Собирает НЕКРИТИЧЕСКИЕ предупреждения старта без показа UI.
-
-    Returns:
-        (can_continue, warnings, fatal_error, proxy_prompt)
-        fatal_error != None означает, что запуск не поддерживается (например, Windows 7/8).
-    """
-    warnings: list[str] = []
-    proxy_prompt: dict | None = None
-
-    # "Критичное": версия Windows
     has_old_windows, win_error = check_windows_version()
     if has_old_windows:
-        return False, warnings, win_error, None
+        return notifications, blocking_notification(
+            level="error",
+            title="Неподдерживаемая Windows",
+            content=win_error,
+            source="startup.windows_version",
+            dedupe_key="startup.windows_version",
+        )
 
-    # Некритические проверки
     has_cmd_issues, cmd_msg = check_system_commands()
     if has_cmd_issues and cmd_msg:
-        warnings.append(cmd_msg)
+        notifications.append(
+            advisory_notification(
+                level="warning",
+                title="Проверка при запуске",
+                content=cmd_msg,
+                source="startup.system_commands",
+                queue="startup",
+                duration=15000,
+                dedupe_key="startup.system_commands",
+            )
+        )
 
     if check_if_in_archive():
-        warnings.append(
-            "Программа запущена из временной директории.\n\n"
-            "Для корректной работы необходимо распаковать архив в постоянную директорию "
-            "(например, C:\\zapretgui) и запустить программу оттуда.\n\n"
-            "Продолжение работы возможно, но некоторые функции могут работать некорректно."
+        notifications.append(
+            advisory_notification(
+                level="warning",
+                title="Проверка при запуске",
+                content=(
+                    "Программа запущена из временной директории.\n\n"
+                    "Для корректной работы необходимо распаковать архив в постоянную директорию "
+                    "(например, C:\\zapretgui) и запустить программу оттуда.\n\n"
+                    "Продолжение работы возможно, но некоторые функции могут работать некорректно."
+                ),
+                source="startup.archive_path",
+                queue="startup",
+                duration=15000,
+                dedupe_key="startup.archive_path",
+            )
         )
 
     in_onedrive, msg = check_path_for_onedrive()
     if in_onedrive and msg:
-        warnings.append(msg)
+        notifications.append(
+            advisory_notification(
+                level="warning",
+                title="Проверка при запуске",
+                content=msg,
+                source="startup.onedrive_path",
+                queue="startup",
+                duration=15000,
+                dedupe_key="startup.onedrive_path",
+            )
+        )
 
     has_special_chars, error_message = check_path_for_special_chars()
     if has_special_chars and error_message:
-        warnings.append(error_message)
+        notifications.append(
+            advisory_notification(
+                level="warning",
+                title="Проверка при запуске",
+                content=error_message,
+                source="startup.special_chars_path",
+                queue="startup",
+                duration=15000,
+                dedupe_key="startup.special_chars_path",
+            )
+        )
 
-    proxy_enabled, proxy_msg = check_proxy_warning()
-    if proxy_enabled:
-        proxy_prompt = {
-            "title": "Включен системный прокси",
-            "message": proxy_msg or "",
-        }
+    proxy_notification = build_proxy_notification()
+    if proxy_notification is not None:
+        notifications.append(proxy_notification)
 
-    return True, warnings, None, proxy_prompt
+    return notifications, None
         
 def _service_exists_reg(name: str) -> bool:
     """
@@ -748,70 +700,6 @@ def _disable_proxy() -> tuple[bool, str]:
         return False, f"Ошибка отключения прокси: {e}"
 
 
-def check_and_disable_proxy() -> tuple[bool, str]:
-    """
-    Проверяет и отключает ручной прокси-сервер Windows.
-    
-    Прокси-сервер (Настройки → Сеть и Интернет → Прокси-сервер → "Использовать прокси-сервер")
-    может конфликтовать с работой Zapret.
-    
-    Возвращает:
-    - (was_enabled_and_disabled, message)
-    - was_enabled_and_disabled = True если прокси был включен и мы его отключили
-    """
-    try:
-        from log import log
-    except ImportError:
-        log = lambda msg, **kw: print(msg)
-    
-    # Проверяем, включен ли прокси
-    is_enabled, proxy_server, error = _is_proxy_enabled()
-    
-    if error:
-        log(f"Ошибка проверки прокси: {error}", level="WARNING")
-        return False, ""
-    
-    if not is_enabled:
-        log("Ручной прокси-сервер не включен", level="DEBUG")
-        return False, ""
-    
-    # Прокси включен - логируем и отключаем
-    proxy_info = f" ({proxy_server})" if proxy_server else ""
-    log(f"Обнаружен включенный ручной прокси-сервер{proxy_info}", level="WARNING")
-    
-    # Пытаемся отключить
-    success, disable_error = _disable_proxy()
-    
-    if success:
-        log(f"Ручной прокси-сервер{proxy_info} автоматически отключен", level="INFO")
-        
-        # Проверяем, действительно ли отключился
-        is_still_enabled, _, _ = _is_proxy_enabled()
-        if is_still_enabled:
-            log("Предупреждение: прокси всё ещё включен после попытки отключения", level="WARNING")
-            return True, (
-                f"Обнаружен включенный прокси-сервер{proxy_info}.\n\n"
-                "Попытка автоматического отключения не удалась.\n"
-                "Пожалуйста, отключите его вручную:\n"
-                "Настройки → Сеть и Интернет → Прокси-сервер → "
-                "\"Использовать прокси-сервер\" → Выкл"
-            )
-        
-        return True, (
-            f"Был включен ручной прокси-сервер{proxy_info}.\n"
-            "Прокси автоматически отключен для корректной работы Zapret."
-        )
-    else:
-        log(f"Не удалось отключить прокси: {disable_error}", level="ERROR")
-        return True, (
-            f"Обнаружен включенный прокси-сервер{proxy_info}.\n\n"
-            f"Автоматическое отключение не удалось: {disable_error}\n\n"
-            "Пожалуйста, отключите прокси вручную:\n"
-            "Настройки → Сеть и Интернет → Прокси-сервер → "
-            "\"Использовать прокси-сервер\" → Выкл"
-        )
-
-
 def check_proxy_warning() -> tuple[bool, str]:
     """
     Проверяет включён ли ручной прокси Windows, но не меняет настройки.
@@ -841,6 +729,26 @@ def check_proxy_warning() -> tuple[bool, str]:
         "Он может мешать работе Zapret.\n"
         "Приложение может предложить отключить его, но по умолчанию настройки прокси "
         "изменяться не будут."
+    )
+
+
+def build_proxy_notification() -> dict | None:
+    """Возвращает неблокирующее системное событие о включенном прокси."""
+    proxy_enabled, proxy_msg = check_proxy_warning()
+    if not proxy_enabled:
+        return None
+
+    return advisory_notification(
+        level="warning",
+        title="Включен системный прокси",
+        content=proxy_msg or "",
+        source="startup.proxy",
+        queue="startup",
+        duration=18000,
+        dedupe_key="startup.proxy",
+        buttons=[
+            notification_action("disable_proxy", "Отключить прокси"),
+        ],
     )
 
 

@@ -5,6 +5,7 @@
 from PyQt6.QtCore import QThread, QObject, pyqtSignal, QMetaObject, Qt, QTimer
 from pathlib import Path
 from strategy_menu import get_strategy_launch_method
+from app_notifications import advisory_notification, notification_action
 from log import log
 from dpi.process_health_check import (
     diagnose_startup_error,
@@ -752,7 +753,32 @@ class DPIController:
         try:
             controller = getattr(self.app, "window_notification_controller", None)
             if controller is not None:
-                controller.show_launch_error(text)
+                auto_fix_action = None
+                if text.startswith("[AUTOFIX:"):
+                    end_idx = text.find("]")
+                    if end_idx > 0:
+                        auto_fix_action = text[9:end_idx]
+                        text = text[end_idx + 1 :].strip()
+
+                buttons = []
+                duration = 10000
+                if auto_fix_action:
+                    buttons.append(notification_action("autofix", "Исправить", value=auto_fix_action))
+                    duration = -1
+
+                controller.notify(
+                    advisory_notification(
+                        level="error",
+                        title="Ошибка",
+                        content=text,
+                        source="launch.dpi_error",
+                        presentation="infobar",
+                        queue="immediate",
+                        duration=duration,
+                        buttons=buttons,
+                        dedupe_key=f"launch.dpi_error:{' '.join(text.split()).lower()}",
+                    )
+                )
         except Exception as e:
             log(f"Не удалось показать InfoBar ошибки запуска: {e}", "DEBUG")
 
@@ -771,7 +797,18 @@ class DPIController:
         try:
             controller = getattr(self.app, "window_notification_controller", None)
             if controller is not None:
-                controller.show_launch_warning(text)
+                controller.notify(
+                    advisory_notification(
+                        level="warning",
+                        title="Предупреждение",
+                        content=text,
+                        source="launch.dpi_warning",
+                        presentation="infobar",
+                        queue="immediate",
+                        duration=9000,
+                        dedupe_key=f"launch.dpi_warning:{' '.join(text.split()).lower()}",
+                    )
+                )
         except Exception as e:
             log(f"Не удалось показать InfoBar предупреждения запуска: {e}", "DEBUG")
 

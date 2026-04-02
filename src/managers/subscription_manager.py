@@ -3,12 +3,8 @@
 from typing import Any, Dict, Optional
 
 from PyQt6.QtCore import QThread, QObject, pyqtSignal
+from app_notifications import advisory_notification
 from log import log
-
-try:
-    from qfluentwidgets import InfoBar
-except ImportError:
-    InfoBar = None
 
 
 class SubscriptionManager:
@@ -182,45 +178,53 @@ class SubscriptionManager:
 
     def _show_subscription_notifications(self, was_premium, is_premium):
         """Показывает уведомления об изменении статуса подписки"""
+        controller = getattr(self.app, 'window_notification_controller', None)
+
         if is_premium and not was_premium:
             # Подписка активирована
             self.app.set_status("✅ Подписка активирована! Премиум темы доступны")
-            
-            if hasattr(self.app, 'tray_manager') and self.app.tray_manager:
-                self.app.tray_manager.show_notification(
-                    "Подписка активирована", 
-                    "Премиум темы теперь доступны!"
-                )
-            
-            if InfoBar:
-                InfoBar.success(
-                    title="Подписка активирована",
-                    content="Ваша Premium подписка успешно активирована! Теперь доступны эксклюзивные темы оформления, приоритетная поддержка и ранний доступ к новым функциям.",
-                    parent=self.app,
-                    duration=6000
+
+            if controller is not None:
+                controller.notify(
+                    advisory_notification(
+                        level="success",
+                        title="Подписка активирована",
+                        content=(
+                            "Ваша Premium подписка успешно активирована. Теперь доступны "
+                            "эксклюзивные темы оформления, приоритетная поддержка и ранний доступ к новым функциям."
+                        ),
+                        source="subscription.activated",
+                        presentation="infobar",
+                        queue="immediate",
+                        duration=6000,
+                        dedupe_key="subscription.activated",
+                        tray_title="Подписка активирована",
+                        tray_content="Премиум темы теперь доступны!",
+                    )
                 )
             
         elif not is_premium and was_premium:
             # Подписка истекла
             self.app.set_status("❌ Подписка истекла. Премиум темы недоступны")
-            
-            if hasattr(self.app, 'tray_manager') and self.app.tray_manager:
-                self.app.tray_manager.show_notification(
-                    "Подписка истекла", 
-                    "Премиум темы больше недоступны"
-                )
-            
-            self._show_subscription_expired_dialog()
 
-    def _show_subscription_expired_dialog(self):
-        """Показывает уведомление истечения подписки"""
-        if InfoBar:
-            InfoBar.warning(
-                title="Подписка истекла",
-                content="Ваша Premium подписка истекла. Премиум функции больше недоступны. Продлите подписку для доступа к эксклюзивным темам.",
-                parent=self.app,
-                duration=6000
-            )
+            if controller is not None:
+                controller.notify(
+                    advisory_notification(
+                        level="warning",
+                        title="Подписка истекла",
+                        content=(
+                            "Ваша Premium подписка истекла. Премиум функции больше недоступны. "
+                            "Продлите подписку для доступа к эксклюзивным темам."
+                        ),
+                        source="subscription.expired",
+                        presentation="infobar",
+                        queue="immediate",
+                        duration=6000,
+                        dedupe_key="subscription.expired",
+                        tray_title="Подписка истекла",
+                        tray_content="Премиум темы больше недоступны",
+                    )
+                )
 
     def _update_subscription_ui_elements(self):
         pass
