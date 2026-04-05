@@ -21,6 +21,28 @@ from log import log
 _BASIC_UI_PAYLOAD_CACHE: dict[tuple[str, str, str, str, int, int], BasicUiPayload] = {}
 
 
+def _normalize_strategy_selection_value(value: object) -> str:
+    return str(value or "").strip() or "none"
+
+
+def _collect_changed_strategy_selections(current: dict | None, requested: dict | None) -> dict[str, str]:
+    current_map = {
+        str(key or "").strip().lower(): _normalize_strategy_selection_value(val)
+        for key, val in (current or {}).items()
+        if str(key or "").strip()
+    }
+    changed: dict[str, str] = {}
+    for key, value in (requested or {}).items():
+        normalized_key = str(key or "").strip().lower()
+        if not normalized_key:
+            continue
+        normalized_value = _normalize_strategy_selection_value(value)
+        if current_map.get(normalized_key, "none") == normalized_value:
+            continue
+        changed[normalized_key] = normalized_value
+    return changed
+
+
 def _log_startup_payload_metric(scope: str | None, section: str, elapsed_ms: float, *, extra: str | None = None) -> None:
     resolved_scope = str(scope or "").strip()
     if not resolved_scope:
@@ -897,17 +919,27 @@ class DirectPresetFacadeBackend:
         preset = self.get_selected_source_preset_model()
         if not preset:
             return {}
-        return self._service().get_strategy_selections(preset)
+        return self._service().get_strategy_selections(
+            preset,
+            strategy_set=self._current_direct_strategy_set(),
+        )
 
     def set_strategy_selections(self, selections: dict, *, save_and_sync: bool = True) -> bool:
         preset = self.get_selected_source_preset_model()
         if not preset:
             return False
-        for target_key, strategy_id in (selections or {}).items():
-            normalized_key = str(target_key or "").strip().lower()
-            if not normalized_key:
-                continue
-            self._service().update_strategy_selection(preset, normalized_key, str(strategy_id or "").strip() or "none")
+        strategy_set = self._current_direct_strategy_set()
+        current = self._service().get_strategy_selections(preset, strategy_set=strategy_set)
+        changed = _collect_changed_strategy_selections(current, selections)
+        if not changed:
+            return True
+        for target_key, strategy_id in changed.items():
+            self._service().update_strategy_selection(
+                preset,
+                target_key,
+                strategy_id,
+                strategy_set=strategy_set,
+            )
         return self.save_preset_model(preset) if save_and_sync else True
 
     def set_strategy_selection(self, target_key: str, strategy_id: str, *, save_and_sync: bool = True) -> bool:
@@ -917,7 +949,20 @@ class DirectPresetFacadeBackend:
         preset = self.get_selected_source_preset_model()
         if not preset:
             return False
-        ok = self._service().update_strategy_selection(preset, normalized_key, strategy_id)
+        strategy_set = self._current_direct_strategy_set()
+        current = self._service().get_strategy_selections(preset, strategy_set=strategy_set)
+        normalized_strategy_id = _normalize_strategy_selection_value(strategy_id)
+        if (
+            normalized_strategy_id != "none"
+            and _normalize_strategy_selection_value(current.get(normalized_key, "none")) == normalized_strategy_id
+        ):
+            return True
+        ok = self._service().update_strategy_selection(
+            preset,
+            normalized_key,
+            normalized_strategy_id,
+            strategy_set=strategy_set,
+        )
         if not ok:
             return False
         return self.save_preset_model(preset, changed_target=normalized_key) if save_and_sync else True

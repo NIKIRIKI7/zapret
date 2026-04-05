@@ -22,20 +22,25 @@ class CloseDialog(MessageBoxBase):
       - True    -> закрыть GUI + остановить DPI
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, dpi_running: bool = True):
         if parent and not parent.isWindow():
             parent = parent.window()
         super().__init__(parent)
         self.result_stop_dpi = None
         self.result_tray = False
+        self._dpi_running = bool(dpi_running)
 
         # --- Заголовок и описание ---
         self.titleLabel = SubtitleLabel("Закрыть приложение", self.widget)
-        self.bodyLabel = BodyLabel(
+        description = (
             "DPI обход (winws) продолжит работать в фоне,\n"
-            "если вы закроете только GUI.",
-            self.widget,
+            "если закрыть только GUI или свернуть окно в трей."
+            if self._dpi_running
+            else
+            "DPI сейчас не запущен.\n"
+            "Вы можете свернуть окно в трей или просто закрыть GUI."
         )
+        self.bodyLabel = BodyLabel(description, self.widget)
         self.bodyLabel.setWordWrap(True)
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.bodyLabel)
@@ -65,11 +70,10 @@ class CloseDialog(MessageBoxBase):
         self.stopDpiButton = create_dialog_action_button(
             self.widget,
             text="Закрыть и остановить DPI",
-            icon_name="fa5s.stop-circle",
-            icon_color="#ffffff",
             danger=True,
         )
         self.stopDpiButton.clicked.connect(self._on_stop_dpi)
+        self.stopDpiButton.setEnabled(self._dpi_running)
         self.viewLayout.addWidget(self.stopDpiButton)
 
         # --- Кнопка "Отмена" (прозрачная, по центру) ---
@@ -114,11 +118,18 @@ def ask_close_action(parent=None):
       - False  -> закрыть только GUI
       - True   -> закрыть GUI + остановить DPI
 
-    Если DPI-процесс не запущен, диалог не показывается и
-    сразу возвращается False (закрыть только GUI).
     """
-    is_dpi_running = True
+    is_dpi_running = _is_dpi_running(parent)
 
+    dlg = CloseDialog(parent, dpi_running=is_dpi_running)
+    dlg.exec()
+    if dlg.result_tray:
+        return "tray"
+    return dlg.result_stop_dpi
+
+
+def _is_dpi_running(parent=None) -> bool:
+    is_dpi_running = True
     try:
         dpi_controller = getattr(parent, "dpi_controller", None)
         if dpi_controller and hasattr(dpi_controller, "is_running"):
@@ -134,11 +145,4 @@ def ask_close_action(parent=None):
         except Exception:
             pass
 
-    if not is_dpi_running:
-        return False
-
-    dlg = CloseDialog(parent)
-    dlg.exec()
-    if dlg.result_tray:
-        return "tray"
-    return dlg.result_stop_dpi
+    return is_dpi_running

@@ -127,18 +127,6 @@ class Zapret1DirectControlPage(BasePage):
 
         control_card = SettingsCard()
 
-        self.progress_bar = IndeterminateProgressBar(self)
-        self.progress_bar.setVisible(False)
-        control_card.add_widget(self.progress_bar)
-
-        if _HAS_FLUENT:
-            self.loading_label = CaptionLabel("")
-        else:
-            from PyQt6.QtWidgets import QLabel
-            self.loading_label = QLabel("")
-        self.loading_label.setVisible(False)
-        control_card.add_widget(self.loading_label)
-
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(12)
 
@@ -168,6 +156,20 @@ class Zapret1DirectControlPage(BasePage):
 
         buttons_layout.addStretch()
         control_card.add_layout(buttons_layout)
+
+        # Полоса загрузки должна быть ниже кнопок, чтобы кнопки не смещались,
+        # когда состояние страницы переходит в busy/loading.
+        self.progress_bar = IndeterminateProgressBar(self)
+        self.progress_bar.setVisible(False)
+        control_card.add_widget(self.progress_bar)
+
+        if _HAS_FLUENT:
+            self.loading_label = CaptionLabel("")
+        else:
+            from PyQt6.QtWidgets import QLabel
+            self.loading_label = QLabel("")
+        self.loading_label.setVisible(False)
+        control_card.add_widget(self.loading_label)
         self.add_widget(control_card)
 
         self.add_spacing(16)

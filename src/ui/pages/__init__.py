@@ -1,85 +1,73 @@
-# ui/pages/__init__.py
-"""Страницы контента для главного окна"""
+"""Ленивые экспорты страниц главного окна.
 
-from .home_page import HomePage
-from .control_page import ControlPage
-from .zapret2_orchestra_strategies_page import Zapret2OrchestraStrategiesPage
-from .zapret2 import (
-    Zapret2DirectControlPage,
-    Zapret2PresetDetailPage,
-    Zapret2StrategiesPageNew,
-    Zapret2UserPresetsPage,
-    StrategyDetailPage,
-)
-from .zapret1 import (
-    Zapret1DirectControlPage,
-    Zapret1PresetDetailPage,
-    Zapret1StrategiesPage,
-    Zapret1UserPresetsPage,
-)
-from .hostlist_page import HostlistPage
-from .ipset_page import IpsetPage
-from .blobs_page import BlobsPage
-from .dpi_settings_page import DpiSettingsPage
-from .autostart_page import AutostartPage
-from .network_page import NetworkPage
-from .hosts_page import HostsPage
-from .appearance_page import AppearancePage
-from .about_page import AboutPage
-from .support_page import SupportPage
-from .logs_page import LogsPage
-from .premium_page import PremiumPage
-from .blockcheck_page import BlockcheckPage
-from .servers_page import ServersPage  # ✅ НОВАЯ СТРАНИЦА
-from .custom_domains_page import CustomDomainsPage  # Страница управления other.user.txt
-from .custom_ipset_page import CustomIpSetPage  # Страница управления ipset-all.user.txt
-from .netrogat_page import NetrogatPage  # Страница управления netrogat.txt
-from .connection_page import ConnectionTestPage
-from .dns_check_page import DNSCheckPage
-from .orchestra_page import OrchestraPage
-from .orchestra import (
-    OrchestraSettingsPage,
-    OrchestraLockedPage,
-    OrchestraBlockedPage,
-    OrchestraWhitelistPage,
-    OrchestraRatingsPage,
-)
-__all__ = [
-    'HomePage',
-    'ControlPage',
-    'Zapret2OrchestraStrategiesPage',
-    'Zapret2StrategiesPageNew',  # Новая страница Zapret2 из zapret2/
-    'Zapret2DirectControlPage',  # Управление для direct_zapret2 (вкладка внутри "Стратегии")
-    'Zapret2PresetDetailPage',  # Подстраница конкретного пресета Z2
-    'Zapret2UserPresetsPage',  # Пользовательские пресеты (direct_zapret2)
-    'StrategyDetailPage',  # Страница детального просмотра стратегии
-    'Zapret1DirectControlPage',  # Управление для direct_zapret1
-    'Zapret1PresetDetailPage',  # Подстраница конкретного пресета Z1
-    'Zapret1StrategiesPage',  # Стратегии для direct_zapret1
-    'Zapret1UserPresetsPage',  # Пользовательские пресеты для direct_zapret1
-    'HostlistPage',
-    'IpsetPage',
-    'BlobsPage',  # Управление блобами для Zapret 2
-    'DpiSettingsPage',
-    'AutostartPage',
-    'NetworkPage',
-    'HostsPage',
-    'AppearancePage',
-    'AboutPage',
-    'SupportPage',
-    'LogsPage',
-    'PremiumPage',
-    'BlockcheckPage',
-    'ServersPage',  # ✅ НОВАЯ СТРАНИЦА
-    'CustomDomainsPage',  # Страница управления other.user.txt
-    'CustomIpSetPage',  # Страница управления ipset-all.user.txt
-    'NetrogatPage',  # Страница управления netrogat.txt
-    'ConnectionTestPage',
-    'DNSCheckPage',  # Страница проверки DNS подмены
-    'OrchestraPage',  # Страница оркестратора автообучения
-    'OrchestraSettingsPage',  # Объединённая страница настроек оркестратора (вкладки)
-    'OrchestraLockedPage',  # Страница залоченных стратегий оркестратора
-    'OrchestraBlockedPage',  # Страница заблокированных стратегий оркестратора
-    'OrchestraWhitelistPage',  # Страница белого списка оркестратора
-    'OrchestraRatingsPage',  # Страница истории стратегий с рейтингами
-]
+Важно: пакет `ui.pages` не должен eagerly импортировать все страницы сразу.
+Главное окно загружает страницы по прямым путям вроде `ui.pages.home_page`,
+и если `__init__.py` тянет весь пакет целиком, то первая lazy-инициализация
+любой страницы фактически импортирует десятки чужих модулей и их зависимости.
+
+Это ломает изоляцию lazy-загрузки, ухудшает старт и может показывать ошибку
+не той страницы, которая реально открывалась первой.
+"""
+
+from __future__ import annotations
+
+from importlib import import_module
+
+
+_PAGE_EXPORTS: dict[str, tuple[str, str]] = {
+    "HomePage": (".home_page", "HomePage"),
+    "ControlPage": (".control_page", "ControlPage"),
+    "Zapret2OrchestraStrategiesPage": (".zapret2_orchestra_strategies_page", "Zapret2OrchestraStrategiesPage"),
+    "Zapret2DirectControlPage": (".zapret2", "Zapret2DirectControlPage"),
+    "Zapret2PresetDetailPage": (".zapret2", "Zapret2PresetDetailPage"),
+    "Zapret2StrategiesPageNew": (".zapret2", "Zapret2StrategiesPageNew"),
+    "Zapret2UserPresetsPage": (".zapret2", "Zapret2UserPresetsPage"),
+    "StrategyDetailPage": (".zapret2", "StrategyDetailPage"),
+    "Zapret1DirectControlPage": (".zapret1", "Zapret1DirectControlPage"),
+    "Zapret1PresetDetailPage": (".zapret1", "Zapret1PresetDetailPage"),
+    "Zapret1StrategiesPage": (".zapret1", "Zapret1StrategiesPage"),
+    "Zapret1UserPresetsPage": (".zapret1", "Zapret1UserPresetsPage"),
+    "HostlistPage": (".hostlist_page", "HostlistPage"),
+    "IpsetPage": (".ipset_page", "IpsetPage"),
+    "BlobsPage": (".blobs_page", "BlobsPage"),
+    "DpiSettingsPage": (".dpi_settings_page", "DpiSettingsPage"),
+    "AutostartPage": (".autostart_page", "AutostartPage"),
+    "NetworkPage": (".network_page", "NetworkPage"),
+    "HostsPage": (".hosts_page", "HostsPage"),
+    "AppearancePage": (".appearance_page", "AppearancePage"),
+    "AboutPage": (".about_page", "AboutPage"),
+    "SupportPage": (".support_page", "SupportPage"),
+    "LogsPage": (".logs_page", "LogsPage"),
+    "PremiumPage": (".premium_page", "PremiumPage"),
+    "BlockcheckPage": (".blockcheck_page", "BlockcheckPage"),
+    "ServersPage": (".servers_page", "ServersPage"),
+    "CustomDomainsPage": (".custom_domains_page", "CustomDomainsPage"),
+    "CustomIpSetPage": (".custom_ipset_page", "CustomIpSetPage"),
+    "NetrogatPage": (".netrogat_page", "NetrogatPage"),
+    "ConnectionTestPage": (".connection_page", "ConnectionTestPage"),
+    "DNSCheckPage": (".dns_check_page", "DNSCheckPage"),
+    "OrchestraPage": (".orchestra_page", "OrchestraPage"),
+    "OrchestraSettingsPage": (".orchestra", "OrchestraSettingsPage"),
+    "OrchestraLockedPage": (".orchestra", "OrchestraLockedPage"),
+    "OrchestraBlockedPage": (".orchestra", "OrchestraBlockedPage"),
+    "OrchestraWhitelistPage": (".orchestra", "OrchestraWhitelistPage"),
+    "OrchestraRatingsPage": (".orchestra", "OrchestraRatingsPage"),
+}
+
+__all__ = list(_PAGE_EXPORTS)
+
+
+def __getattr__(name: str):
+    spec = _PAGE_EXPORTS.get(name)
+    if spec is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    module_name, attr_name = spec
+    module = import_module(module_name, __name__)
+    value = getattr(module, attr_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

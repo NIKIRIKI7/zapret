@@ -69,12 +69,41 @@ class PremiumService:
         """
         with self._lock:
             device_id = PremiumStorage.get_device_id()
+            try:
+                from log import log
+
+                log(
+                    f"PremiumService.pair_start begin: api_base={self._api.base_url!r}, device_id={device_id[:12]}...",
+                    "DEBUG",
+                )
+            except Exception:
+                pass
+
             raw, nonce = self._api.post_pair_start(device_id=device_id, device_name=device_name)
             if not raw:
+                try:
+                    from log import log
+
+                    log("PremiumService.pair_start: raw response is empty", "WARNING")
+                except Exception:
+                    pass
                 return False, "Сервер недоступен", None
 
             signed = verify_signed_response(raw, expected_device_id=device_id, expected_nonce=nonce)
             if not signed or signed.get("type") != "zapret_pair_start":
+                try:
+                    from log import log
+
+                    log(
+                        "PremiumService.pair_start invalid signed response: "
+                        f"http={raw.get('_http_status') if isinstance(raw, dict) else None}, "
+                        f"type={raw.get('type') if isinstance(raw, dict) else None}, "
+                        f"error={raw.get('error') if isinstance(raw, dict) else None}, "
+                        f"message={raw.get('message') if isinstance(raw, dict) else None}",
+                        "WARNING",
+                    )
+                except Exception:
+                    pass
                 if isinstance(raw, dict):
                     http = raw.get("_http_status")
                     err = (raw.get("error") or raw.get("message") or raw.get("detail") or raw.get("status") or "").strip()
@@ -94,9 +123,27 @@ class PremiumService:
                 expires_at_i = 0
 
             if not code or expires_at_i <= 0:
+                try:
+                    from log import log
+
+                    log(
+                        f"PremiumService.pair_start bad payload: code={code!r}, expires_at={expires_at!r}",
+                        "WARNING",
+                    )
+                except Exception:
+                    pass
                 return False, "Сервер вернул некорректный код", None
 
-            PremiumStorage.set_pair_code(code=code, expires_at=expires_at_i)
+            stored = PremiumStorage.set_pair_code(code=code, expires_at=expires_at_i)
+            try:
+                from log import log
+
+                log(
+                    f"PremiumService.pair_start success: code={code}, expires_at={expires_at_i}, stored={stored}",
+                    "INFO",
+                )
+            except Exception:
+                pass
             return True, str(signed.get("message") or "Код создан"), code
 
     def clear_activation(self) -> bool:

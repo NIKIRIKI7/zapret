@@ -273,8 +273,8 @@ def _target_details_to_settings_payload(details) -> dict[str, object]:
             "autottl_delta": 0,
             "autottl_min": 3,
             "autottl_max": 20,
-            "out_range": 0,
-            "out_range_mode": "n",
+            "out_range": 8,
+            "out_range_mode": "d",
             "tcp_flags_unset": "none",
             "send_enabled": False,
             "send_repeats": 2,
@@ -287,6 +287,7 @@ def _target_details_to_settings_payload(details) -> dict[str, object]:
     out_range = details.out_range_settings
     send = details.send_settings
     syndata = details.syndata_settings
+    out_range_enabled = bool(out_range.enabled and int(out_range.value or 0) > 0)
     return {
         "enabled": bool(syndata.enabled),
         "blob": str(syndata.blob or "tls_google"),
@@ -294,8 +295,8 @@ def _target_details_to_settings_payload(details) -> dict[str, object]:
         "autottl_delta": int(syndata.autottl_delta or 0),
         "autottl_min": int(syndata.autottl_min or 3),
         "autottl_max": int(syndata.autottl_max or 20),
-        "out_range": int(out_range.value or 0) if out_range.enabled else 0,
-        "out_range_mode": str(out_range.mode or "n"),
+        "out_range": int(out_range.value or 8) if out_range_enabled else 8,
+        "out_range_mode": str((out_range.mode if out_range_enabled else "d") or "d"),
         "tcp_flags_unset": str(syndata.tcp_flags_unset or "none"),
         "send_enabled": bool(send.enabled),
         "send_repeats": int(send.repeats or 0),
@@ -1082,8 +1083,8 @@ class StrategyDetailPage(BasePage):
                 "n = количество пакетов с самого первого, d = отсчитывать ТОЛЬКО количество пакетов с данными",
             ),
         )
-        self._out_range_mode = "n"
-        self._out_range_seg.setCurrentItem("n")
+        self._out_range_mode = "d"
+        self._out_range_seg.setCurrentItem("d")
         self._out_range_frame.control_container.addWidget(self._out_range_seg)
 
         self._out_range_value_label = BodyLabel(self._tr("page.z2_strategy_detail.out_range.value", "Значение:"))
@@ -2412,9 +2413,9 @@ class StrategyDetailPage(BasePage):
             self._autottl_delta_selector.setValue(int(data.get("autottl_delta", -2)), block_signals=True)
             self._autottl_min_selector.setValue(int(data.get("autottl_min", 3)), block_signals=True)
             self._autottl_max_selector.setValue(int(data.get("autottl_max", 20)), block_signals=True)
-            self._out_range_spin.setValue(int(data.get("out_range", 8)))
+            self._out_range_spin.setValue(max(1, int(data.get("out_range", 8) or 8)))
 
-            self._out_range_mode = str(data.get("out_range_mode", "n") or "n")
+            self._out_range_mode = str(data.get("out_range_mode", "d") or "d")
             try:
                 self._out_range_seg.setCurrentItem(self._out_range_mode)
             except Exception:

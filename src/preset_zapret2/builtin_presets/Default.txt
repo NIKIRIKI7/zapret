@@ -1,6 +1,6 @@
 # Preset: Default
 # TemplateOrigin: Default
-# BuiltinVersion: 2.17
+# BuiltinVersion: 2.18
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -97,7 +97,7 @@
 --new
 
 --filter-tcp=80,443,8080
---hostlist-domains=googlevideo.com,speedtest.net,ooklaserver.net,speedtest.omega-connect.net,psts.net.ua
+--hostlist-domains=googlevideo.com
 --out-range=-d8
 --lua-desync=multisplit:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
 
@@ -144,6 +144,7 @@
 --hostlist=lists/facebook.txt
 --hostlist=lists/instagram.txt
 --hostlist=lists/whatsapp.txt
+--hostlist=lists/speedtest.txt
 --out-range=-d10
 --lua-desync=send:repeats=2
 --lua-desync=syndata:blob=stun_pat

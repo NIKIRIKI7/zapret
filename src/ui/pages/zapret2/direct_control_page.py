@@ -374,19 +374,6 @@ class Zapret2DirectControlPage(BasePage):
         control_card = SettingsCard()
         self.control_card_card = control_card
 
-        # Индикатор загрузки (бегающая полоска) - показываем рядом с кнопками управления
-        self.progress_bar = IndeterminateProgressBar(self)
-        self.progress_bar.setVisible(False)
-        control_card.add_widget(self.progress_bar)
-
-        if _HAS_FLUENT_LABELS:
-            self.loading_label = CaptionLabel("")
-        else:
-            self.loading_label = QLabel("")
-            self.loading_label.setStyleSheet("QLabel { font-size: 12px; padding-top: 4px; }")
-        self.loading_label.setVisible(False)
-        control_card.add_widget(self.loading_label)
-
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(12)
 
@@ -406,6 +393,20 @@ class Zapret2DirectControlPage(BasePage):
 
         buttons_layout.addStretch()
         control_card.add_layout(buttons_layout)
+
+        # Индикатор загрузки держим под кнопками, чтобы при показе
+        # не сдвигать основной ряд действий вниз.
+        self.progress_bar = IndeterminateProgressBar(self)
+        self.progress_bar.setVisible(False)
+        control_card.add_widget(self.progress_bar)
+
+        if _HAS_FLUENT_LABELS:
+            self.loading_label = CaptionLabel("")
+        else:
+            self.loading_label = QLabel("")
+            self.loading_label.setStyleSheet("QLabel { font-size: 12px; padding-top: 4px; }")
+        self.loading_label.setVisible(False)
+        control_card.add_widget(self.loading_label)
         self.add_widget(control_card)
         _log_startup_z2_control_metric("_build_ui.control_card", (_time.perf_counter() - _t_control) * 1000)
 

@@ -150,20 +150,6 @@ class ControlPage(BasePage):
         
         control_card = SettingsCard()
 
-        # Индикатор загрузки (бегающая полоска) - показываем рядом с кнопками управления
-        self.progress_bar = IndeterminateProgressBar(self)
-        self.progress_bar.setVisible(False)
-        control_card.add_widget(self.progress_bar)
-
-        # Метка статуса загрузки
-        if _HAS_FLUENT_LABELS:
-            self.loading_label = CaptionLabel("")
-        else:
-            self.loading_label = QLabel("")
-            self.loading_label.setStyleSheet("font-size: 12px;")
-        self.loading_label.setVisible(False)
-        control_card.add_widget(self.loading_label)
-        
         # Кнопки управления
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(12)
@@ -196,6 +182,21 @@ class ControlPage(BasePage):
         
         buttons_layout.addStretch()
         control_card.add_layout(buttons_layout)
+
+        # Индикатор загрузки держим под кнопками, чтобы при показе
+        # ряд действий не прыгал вниз.
+        self.progress_bar = IndeterminateProgressBar(self)
+        self.progress_bar.setVisible(False)
+        control_card.add_widget(self.progress_bar)
+
+        # Метка статуса загрузки
+        if _HAS_FLUENT_LABELS:
+            self.loading_label = CaptionLabel("")
+        else:
+            self.loading_label = QLabel("")
+            self.loading_label.setStyleSheet("font-size: 12px;")
+        self.loading_label.setVisible(False)
+        control_card.add_widget(self.loading_label)
         
         self.add_widget(control_card)
         

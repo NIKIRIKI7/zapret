@@ -2,6 +2,7 @@
 
 import threading
 
+from app_notifications import advisory_notification
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from log import log
 
@@ -40,6 +41,15 @@ class InitializationManager:
                 self.app.log_startup_metric(marker, details)
         except Exception:
             pass
+
+    def ensure_tray_initialized(self):
+        """Синхронно гарантирует наличие tray manager перед сценарием сворачивания."""
+        tray_manager = getattr(self.app, "tray_manager", None)
+        if tray_manager is not None:
+            return tray_manager
+
+        self._init_tray()
+        return getattr(self.app, "tray_manager", None)
 
     # ───────────────────────── запуск и планирование ─────────────────────────
 
@@ -666,6 +676,25 @@ class InitializationManager:
             log("Системный трей инициализирован", "INFO")
             self._log_startup_step("TrayInit", f"{(_t.perf_counter() - t0)*1000:.0f}ms")
             self.init_tasks_completed.add('tray')
+
+            if bool(getattr(self.app, "_tray_launch_notification_pending", False)):
+                controller = getattr(self.app, "window_notification_controller", None)
+                if controller is not None:
+                    controller.notify(
+                        advisory_notification(
+                            level="info",
+                            title="Zapret работает в трее",
+                            content="Приложение запущено в фоновом режиме",
+                            source="startup.tray_launch",
+                            presentation="infobar",
+                            queue="immediate",
+                            duration=5000,
+                            dedupe_key="startup.tray_launch",
+                            tray_title="Zapret работает в трее",
+                            tray_content="Приложение запущено в фоновом режиме",
+                        )
+                    )
+                self.app._tray_launch_notification_pending = False
         except Exception as e:
             log(f"Ошибка инициализации трея: {e}", "❌ ERROR")
 

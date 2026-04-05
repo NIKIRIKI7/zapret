@@ -1,6 +1,8 @@
 # ui/pages/premium_page.py
 """Страница управления Premium подпиской"""
 
+import time
+
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QApplication, QSizePolicy
 
@@ -124,6 +126,7 @@ class PremiumPage(BasePage):
     """Страница управления Premium подпиской"""
 
     subscription_updated = pyqtSignal(bool, int)  # is_premium, days_remaining
+    _PAIRING_AUTOPOLL_INTERVAL_MS = 4000
 
     def __init__(self, parent=None):
         super().__init__(
@@ -161,6 +164,9 @@ class PremiumPage(BasePage):
             "text_default": "",
             "text_kwargs": {},
         }
+        self._pairing_status_timer = QTimer(self)
+        self._pairing_status_timer.setInterval(self._PAIRING_AUTOPOLL_INTERVAL_MS)
+        self._pairing_status_timer.timeout.connect(self._poll_pairing_status)
 
         self._build_ui()
         self._initialized = False
@@ -418,8 +424,14 @@ class PremiumPage(BasePage):
             self._server_status_message = ""
             self._server_status_success = None
             self._render_server_status()
+        self._sync_pairing_status_autopoll()
+
+    def hideEvent(self, event):
+        self._stop_pairing_status_autopoll()
+        super().hideEvent(event)
 
     def closeEvent(self, event):
+        self._stop_pairing_status_autopoll()
         if self.current_thread and self.current_thread.isRunning():
             self.current_thread.quit()
             self.current_thread.wait()
@@ -630,6 +642,59 @@ class PremiumPage(BasePage):
         if hasattr(self, "key_input_container"):
             self.key_input_container.setVisible(visible)
 
+    def _has_pending_pair_code(self) -> bool:
+        if not self.RegistryManager:
+            return False
+
+        try:
+            pair_code = self.RegistryManager.get_pair_code()
+            pair_expires_at = self.RegistryManager.get_pair_expires_at()
+            if not pair_code or not pair_expires_at:
+                return False
+            return int(pair_expires_at) >= int(time.time())
+        except Exception:
+            return False
+
+    def _can_poll_pairing_status(self) -> bool:
+        if not self.checker or not self.RegistryManager:
+            return False
+        if not self.isVisible():
+            return False
+        if self._activation_in_progress or self._connection_test_in_progress:
+            return False
+        if self.current_thread and self.current_thread.isRunning():
+            return False
+
+        try:
+            if self.RegistryManager.get_device_token():
+                return False
+        except Exception:
+            pass
+
+        return self._has_pending_pair_code()
+
+    def _start_pairing_status_autopoll(self) -> None:
+        if not self._can_poll_pairing_status():
+            return
+        if not self._pairing_status_timer.isActive():
+            self._pairing_status_timer.start()
+
+    def _stop_pairing_status_autopoll(self) -> None:
+        if self._pairing_status_timer.isActive():
+            self._pairing_status_timer.stop()
+
+    def _sync_pairing_status_autopoll(self) -> None:
+        if self._can_poll_pairing_status():
+            self._start_pairing_status_autopoll()
+        else:
+            self._stop_pairing_status_autopoll()
+
+    def _poll_pairing_status(self) -> None:
+        if not self._can_poll_pairing_status():
+            self._stop_pairing_status_autopoll()
+            return
+        self._check_status()
+
     def _update_device_info(self):
         if not self.checker:
             return
@@ -649,10 +714,20 @@ class PremiumPage(BasePage):
                 pass
 
             pair_code = None
+            pair_expires_at = None
             try:
                 pair_code = self.RegistryManager.get_pair_code()
+                pair_expires_at = self.RegistryManager.get_pair_expires_at()
             except Exception:
                 pass
+
+            if pair_code and pair_expires_at:
+                try:
+                    if int(pair_expires_at) < int(time.time()):
+                        self.RegistryManager.clear_pair_code()
+                        pair_code = None
+                except Exception:
+                    pass
 
             parts = [
                 self._tr("page.premium.label.device_token.present", "device token: ✅")
@@ -713,6 +788,8 @@ class PremiumPage(BasePage):
                 return
 
         self._activation_in_progress = True
+        self._stop_pairing_status_autopoll()
+        self.key_input.clear()
         self.activate_btn.setEnabled(False)
         self.activate_btn.setText(
             self._tr("page.premium.button.create_code.loading", "Создание...")
@@ -748,11 +825,17 @@ class PremiumPage(BasePage):
                 text_key="page.premium.activation.success.code_created",
                 text_default="✅ Код создан и скопирован. Отправьте его боту в Telegram.",
             )
+            self._update_device_info()
+            self._start_pairing_status_autopoll()
         else:
+            self.key_input.clear()
             self._set_activation_status(text=f"❌ {message}")
+            self._update_device_info()
+            self._stop_pairing_status_autopoll()
 
     def _on_activation_error(self, error):
         self._activation_in_progress = False
+        self.key_input.clear()
         self.activate_btn.setEnabled(True)
         self.activate_btn.setText(self._tr("page.premium.button.create_code", "Создать код"))
         self._set_activation_status(
@@ -760,10 +843,14 @@ class PremiumPage(BasePage):
             text_default="❌ Ошибка: {error}",
             text_kwargs={"error": error},
         )
+        self._update_device_info()
+        self._stop_pairing_status_autopoll()
 
     # ── status check ─────────────────────────────────────────────────────────
 
     def _check_status(self):
+        if self.current_thread and self.current_thread.isRunning():
+            return
         if not self.checker:
             self._init_checker()
             if not self.checker:
@@ -819,6 +906,7 @@ class PremiumPage(BasePage):
             is_linked = bool(result.get("found"))
 
             if is_premium:
+                self._stop_pairing_status_autopoll()
                 days_remaining = result.get('days_remaining')
                 self._set_activation_section_visible(False)
 
@@ -873,6 +961,10 @@ class PremiumPage(BasePage):
                     self.subscription_updated.emit(True, 0)
             else:
                 self._set_activation_section_visible(not is_linked)
+                if is_linked:
+                    self._stop_pairing_status_autopoll()
+                else:
+                    self._sync_pairing_status_autopoll()
                 details = result.get('status', '') or (
                     self._tr(
                         "page.premium.status.inactive.linked_hint",
@@ -896,6 +988,7 @@ class PremiumPage(BasePage):
                 self.subscription_updated.emit(False, 0)
 
         except Exception as e:
+            self._sync_pairing_status_autopoll()
             self._set_status_badge(
                 status="expired",
                 text_key="page.premium.status.error.title",
@@ -905,6 +998,7 @@ class PremiumPage(BasePage):
             self._set_activation_section_visible(True)
 
     def _on_status_error(self, error):
+        self._sync_pairing_status_autopoll()
         self.refresh_btn.set_loading(False)
         self._set_status_badge(
             status="expired",
@@ -999,4 +1093,5 @@ class PremiumPage(BasePage):
         self._days_state_value = 0
         self._render_days_label()
         self._set_activation_section_visible(True)
+        self._stop_pairing_status_autopoll()
         self.subscription_updated.emit(False, 0)

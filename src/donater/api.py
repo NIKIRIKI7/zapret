@@ -89,14 +89,49 @@ class PremiumApiClient:
     def post_pair_start(self, *, device_id: str, device_name: str | None = None) -> Tuple[Optional[Dict[str, Any]], str]:
         nonce = secrets.token_urlsafe(16)
         try:
+            try:
+                from log import log
+
+                log(
+                    f"Premium pair_start request: base_url={self.base_url!r}, device_id={device_id[:12]}..., nonce={nonce[:8]}...",
+                    "DEBUG",
+                )
+            except Exception:
+                pass
+
             r = self._session.post(
                 self._url("pair_start"),
                 json={"device_id": device_id, "device_name": device_name, "nonce": nonce},
                 timeout=self.timeout,
             )
-            return (self._response_to_dict(r, nonce=nonce), nonce)
+            data = self._response_to_dict(r, nonce=nonce)
+            try:
+                from log import log
+
+                log(
+                    "Premium pair_start response: "
+                    f"http={data.get('_http_status')}, "
+                    f"success={data.get('success')}, "
+                    f"type={data.get('type')}, "
+                    f"error={data.get('error')!r}, "
+                    f"message={data.get('message')!r}",
+                    "DEBUG",
+                )
+            except Exception:
+                pass
+            return (data, nonce)
         except Exception as e:
-            return (self._exception_to_dict(e, nonce=nonce), nonce)
+            data = self._exception_to_dict(e, nonce=nonce)
+            try:
+                from log import log
+
+                log(
+                    f"Premium pair_start exception: base_url={self.base_url!r}, error={data.get('detail')!r}",
+                    "WARNING",
+                )
+            except Exception:
+                pass
+            return (data, nonce)
 
     def post_pair_finish(self, *, device_id: str, pair_code: str) -> Tuple[Optional[Dict[str, Any]], str]:
         nonce = secrets.token_urlsafe(16)

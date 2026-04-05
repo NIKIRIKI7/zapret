@@ -220,14 +220,16 @@ def _get_cached_or_fetch(url: str, timeout: int = 10) -> Optional[Dict[str, Any]
         
         return json_data
         
+    # Ошибка одного источника при multi-source проверке обновлений не должна
+    # выглядеть как фатальная поломка: дальше ещё есть Telegram и VPS fallback.
     except requests.exceptions.HTTPError as e:
         if e.response and e.response.status_code == 403:
-            log(f"🚫 HTTP 403: {e}", "❌ ERROR")
+            log(f"🚫 HTTP 403: {e}", "⚠️ UPDATE")
         else:
-            log(f"❌ HTTP ошибка: {e}", "❌ ERROR")
+            log(f"⚠️ HTTP ошибка GitHub: {e}", "⚠️ UPDATE")
     except Exception as e:
-        log(f"❌ Ошибка запроса к GitHub: {e}", "❌ ERROR")
-        maybe_log_disable_dpi_for_update(e, scope="update_check", level="❌ ERROR")
+        log(f"⚠️ Ошибка запроса к GitHub: {e}", "⚠️ UPDATE")
+        maybe_log_disable_dpi_for_update(e, scope="update_check", level="⚠️ UPDATE")
     
     return None
 

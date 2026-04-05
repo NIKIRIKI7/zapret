@@ -829,7 +829,7 @@ class DPIController:
 
             service = DirectPresetService(get_app_paths(), "winws2")
             source = service.read_source_preset(Path(preset_path))
-            labels = service.collect_missing_out_range_warning_labels(source)
+            labels = service.collect_out_range_autofix_warning_labels(source)
         except Exception as e:
             log(f"Не удалось собрать предупреждения out-range для запуска: {e}", "DEBUG")
             return []
@@ -841,12 +841,58 @@ class DPIController:
         shown = labels[:max_show]
         hidden = len(labels) - len(shown)
         message = (
-            "У некоторых фильтров не задан explicit out-range; helper args будут применяться "
-            f"без сужения: {', '.join(shown)}"
+            "У некоторых фильтров out-range отсутствует или записан некорректно. "
+            f"Перед запуском будет автоматически применён --out-range=-d8 или исправлен формат: {', '.join(shown)}"
         )
         if hidden > 0:
             message += f" (+{hidden} ещё)"
         return [message]
+
+    def _sanitize_direct_preset_before_launch(self, selected_mode, launch_method: str) -> tuple[list[str], str | None]:
+        method = str(launch_method or "").strip().lower()
+        if method != "direct_zapret2":
+            return [], None
+        if not isinstance(selected_mode, dict) or not bool(selected_mode.get("is_preset_file")):
+            return [], None
+
+        preset_path = Path(str(selected_mode.get("preset_path") or "").strip())
+        if not preset_path.exists():
+            return [], "Preset файл не найден. Создайте пресет в настройках"
+
+        try:
+            from core.direct_preset_core.service import DirectPresetService
+            from core.services import get_app_paths
+
+            service = DirectPresetService(get_app_paths(), "winws2")
+            source = service.read_source_preset(preset_path)
+            changed = False
+            warnings: list[str] = []
+
+            if service.remove_placeholder_profiles(source):
+                changed = True
+                warnings.append("Из launch-пресета автоматически убраны placeholder-фильтры unknown.txt.")
+
+            repaired_labels = service.repair_out_range_profiles(source)
+            if repaired_labels:
+                changed = True
+                max_show = 5
+                shown = repaired_labels[:max_show]
+                hidden = len(repaired_labels) - len(shown)
+                message = (
+                    "В source-пресете автоматически исправлен out-range. "
+                    f"Для этих фильтров записан канонический формат или подставлен --out-range=-d8: {', '.join(shown)}"
+                )
+                if hidden > 0:
+                    message += f" (+{hidden} ещё)"
+                warnings.append(message)
+
+            if changed:
+                service.write_source_preset(preset_path, source)
+
+            return warnings, None
+        except Exception as e:
+            log(f"Не удалось подготовить direct preset перед запуском: {e}", "DEBUG")
+            return [], None
 
     def start_dpi_async(self, selected_mode=None, launch_method=None):
         """Асинхронно запускает DPI без блокировки UI
@@ -1050,7 +1096,19 @@ class DPIController:
                 self._show_launch_error_top("Неизвестный метод запуска")
                 return
 
-        self._pending_launch_warnings = self._collect_soft_launch_warnings(selected_mode, launch_method)
+        prelaunch_warnings, prelaunch_error = self._sanitize_direct_preset_before_launch(selected_mode, launch_method)
+        if prelaunch_error:
+            log(prelaunch_error, "❌ ERROR")
+            self.app.set_status(f"❌ {prelaunch_error}")
+            self._show_launch_error_top(prelaunch_error)
+            if hasattr(self.app, 'ui_manager'):
+                self.app.ui_manager.update_ui_state(running=False)
+            return
+
+        self._pending_launch_warnings = [
+            *prelaunch_warnings,
+            *self._collect_soft_launch_warnings(selected_mode, launch_method),
+        ]
         
         # ✅ ОБРАБОТКА всех типов стратегий (остальной код без изменений)
         mode_name = "Неизвестная стратегия"

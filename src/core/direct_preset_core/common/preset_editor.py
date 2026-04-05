@@ -2,10 +2,93 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from ..engines._shared import target_keys_for_selector_line
 from .source_preset_models import FilterProfile, ProfileSegment, SourcePreset
 
 
 _POSITIVE_SELECTOR_FAMILIES = {"hostlist", "hostlist-domains", "ipset", "ipset-ip"}
+
+
+def _split_selector_segment_for_target(
+    segment: ProfileSegment,
+    target_key: str,
+    protocol_kind: str,
+) -> tuple[ProfileSegment | None, ProfileSegment | None]:
+    family = str(getattr(segment, "selector_family", "") or "").strip().lower()
+    value = str(getattr(segment, "selector_value", "") or "").strip()
+    text = str(getattr(segment, "text", "") or "").strip()
+    target_tuple = tuple(getattr(segment, "target_keys", ()) or ())
+
+    if target_key not in target_tuple:
+        return None, segment
+
+    if family == "hostlist-domains":
+        tokens = [token.strip() for token in value.split(",") if token.strip()]
+        target_tokens: list[str] = []
+        residual_tokens: list[str] = []
+        for token in tokens:
+            candidate_keys = target_keys_for_selector_line(f"--hostlist-domains={token}", protocol_kind)
+            if target_key in candidate_keys:
+                target_tokens.append(token)
+            else:
+                residual_tokens.append(token)
+
+        if not target_tokens:
+            return None, segment
+
+        target_text = f"--hostlist-domains={','.join(target_tokens)}"
+        target_segment = replace(
+            segment,
+            text=target_text,
+            target_keys=target_keys_for_selector_line(target_text, protocol_kind),
+            selector_value=",".join(target_tokens),
+        )
+
+        residual_segment = None
+        if residual_tokens:
+            residual_text = f"--hostlist-domains={','.join(residual_tokens)}"
+            residual_segment = replace(
+                segment,
+                text=residual_text,
+                target_keys=target_keys_for_selector_line(residual_text, protocol_kind),
+                selector_value=",".join(residual_tokens),
+            )
+        return target_segment, residual_segment
+
+    if family == "ipset-ip":
+        tokens = [token.strip() for token in value.split(",") if token.strip()]
+        target_tokens: list[str] = []
+        residual_tokens: list[str] = []
+        for token in tokens:
+            candidate_keys = target_keys_for_selector_line(f"--ipset-ip={token}", protocol_kind)
+            if target_key in candidate_keys:
+                target_tokens.append(token)
+            else:
+                residual_tokens.append(token)
+
+        if not target_tokens:
+            return None, segment
+
+        target_text = f"--ipset-ip={','.join(target_tokens)}"
+        target_segment = replace(
+            segment,
+            text=target_text,
+            target_keys=target_keys_for_selector_line(target_text, protocol_kind),
+            selector_value=",".join(target_tokens),
+        )
+
+        residual_segment = None
+        if residual_tokens:
+            residual_text = f"--ipset-ip={','.join(residual_tokens)}"
+            residual_segment = replace(
+                segment,
+                text=residual_text,
+                target_keys=target_keys_for_selector_line(residual_text, protocol_kind),
+                selector_value=",".join(residual_tokens),
+            )
+        return target_segment, residual_segment
+
+    return None, segment
 
 
 def _profile_target_keys(profile: FilterProfile) -> list[str]:
@@ -60,6 +143,18 @@ def split_profile_for_target(source: SourcePreset, profile_index: int, target_ke
             if len(segment.target_keys) == 1 and target_key in segment.target_keys:
                 _flush_pending_to(target_segments)
                 target_segments.append(segment)
+            elif target_key in segment.target_keys:
+                target_segment, residual_segment = _split_selector_segment_for_target(
+                    segment,
+                    target_key,
+                    profile.protocol_kind,
+                )
+                if target_segment is not None:
+                    _flush_pending_to(target_segments)
+                    target_segments.append(target_segment)
+                if residual_segment is not None:
+                    _flush_pending_to(residual_segments)
+                    residual_segments.append(residual_segment)
             else:
                 _flush_pending_to(residual_segments)
                 residual_segments.append(segment)

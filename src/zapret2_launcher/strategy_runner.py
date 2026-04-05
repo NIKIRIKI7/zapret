@@ -428,6 +428,37 @@ class StrategyRunnerV2(StrategyRunnerBase):
         cleaned = strip_strategy_tags(normalized)
         if cleaned != normalized:
             log("Ignoring legacy :strategy=N tags in launch artifact", "DEBUG")
+
+        try:
+            from core.direct_preset_core.common.preset_editor import replace_profile_action_lines
+            from core.direct_preset_core.engines import winws2_parser, winws2_rules, winws2_serializer
+
+            source = winws2_parser.parse(cleaned)
+            repaired_profiles = 0
+            defaulted_profiles = 0
+            rewritten_profiles = 0
+
+            for index, profile in enumerate(list(source.profiles or [])):
+                current_action_lines = [str(line).strip() for line in getattr(profile, "action_lines", ()) or () if str(line).strip()]
+                normalized_action_lines, fixes, _resolved = winws2_rules.normalize_action_lines(current_action_lines)
+                if not fixes or normalized_action_lines == current_action_lines:
+                    continue
+                if "applied_default_out_range" in fixes:
+                    defaulted_profiles += 1
+                if any(flag in fixes for flag in ("canonicalized_out_range", "replaced_invalid_out_range", "lifted_inline_out_range", "removed_duplicate_out_range")):
+                    rewritten_profiles += 1
+                replace_profile_action_lines(source, index, normalized_action_lines)
+                repaired_profiles += 1
+
+            if repaired_profiles:
+                cleaned = winws2_serializer.serialize(source)
+                log(
+                    "Normalized out-range in launch artifact "
+                    f"(profiles={repaired_profiles}, defaulted={defaulted_profiles}, rewritten={rewritten_profiles})",
+                    "WARNING",
+                )
+        except Exception as e:
+            log(f"Failed to normalize out-range in launch artifact: {e}", "DEBUG")
         return cleaned
 
     def _compile_preset_artifact(self, preset_path: str) -> PreparedPresetArtifact:
@@ -571,6 +602,21 @@ class StrategyRunnerV2(StrategyRunnerBase):
         self.current_launch_label = None
         self.current_strategy_args = None
 
+    def _prepare_state_for_spawn_locked(self, preset_path: str, strategy_name: str) -> None:
+        """Normalize stale runner state before a new spawn attempt."""
+        snapshot = self._runner_state.snapshot()
+        has_live_process = bool(self.running_process and self.is_running())
+        if has_live_process:
+            return
+        if snapshot.state in (PresetRunnerState.RUNNING, PresetRunnerState.STARTING, PresetRunnerState.STOPPING):
+            self._clear_process_state_locked()
+            self._set_runner_state_locked(
+                PresetRunnerState.IDLE,
+                preset_path=preset_path,
+                strategy_name=strategy_name,
+                reason="stale_state_recovered_before_spawn",
+            )
+
     def _spawn_readiness_check_locked(self, process: subprocess.Popen) -> bool:
         try:
             pid = int(process.pid)
@@ -602,6 +648,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
             log(f"Strategy: {strategy_name}", "INFO")
 
         try:
+            self._prepare_state_for_spawn_locked(artifact.preset_path, strategy_name)
             self._set_runner_state_locked(
                 PresetRunnerState.STARTING,
                 preset_path=artifact.preset_path,

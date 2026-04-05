@@ -84,6 +84,26 @@ class DirectPresetService:
         source.profiles = kept_profiles
         return True
 
+    def repair_out_range_profiles(self, source: SourcePreset) -> list[str]:
+        labels: list[str] = []
+        seen: set[str] = set()
+        contexts = self.collect_target_contexts(source)
+
+        for index, profile in enumerate(list(source.profiles or [])):
+            current_action_lines = [str(line).strip() for line in getattr(profile, "action_lines", ()) or () if str(line).strip()]
+            normalized_action_lines, fixes, _resolved = self._rules().normalize_action_lines(current_action_lines)
+            if not fixes or normalized_action_lines == current_action_lines:
+                continue
+
+            replace_profile_action_lines(source, index, normalized_action_lines)
+            label = self._warning_label_for_profile(profile, contexts, index)
+            dedupe_key = label.strip().lower()
+            if dedupe_key and dedupe_key not in seen:
+                seen.add(dedupe_key)
+                labels.append(label)
+
+        return labels
+
     def collect_target_contexts(
         self,
         source: SourcePreset,
@@ -350,13 +370,27 @@ class DirectPresetService:
         replace_profile_selector_line(source, profile_index, normalized_key, new_line, normalized_mode)
         return True
 
-    def update_strategy_selection(self, source: SourcePreset, target_key: str, strategy_id: str) -> bool:
+    def update_strategy_selection(
+        self,
+        source: SourcePreset,
+        target_key: str,
+        strategy_id: str,
+        *,
+        strategy_set: str | None = None,
+    ) -> bool:
         normalized_key = str(target_key or "").strip().lower()
         contexts = self.collect_target_contexts(source)
         ctx = contexts.get(normalized_key)
         if ctx is None:
             return False
         profile_index = split_profile_for_target(source, ctx.profile_index, normalized_key)
+        requested_strategy_id = str(strategy_id or "").strip() or "none"
+        if requested_strategy_id == "none":
+            try:
+                source.profiles.pop(profile_index)
+            except Exception:
+                return False
+            return True
         details = self.get_target_details(source, normalized_key) or PresetTargetDetails(
             target_key=normalized_key,
             display_name=ctx.display_name,
@@ -365,13 +399,22 @@ class DirectPresetService:
             send_settings=SendSettings(),
             syndata_settings=SyndataSettings(),
         )
-        strategy_args = self._strategy_args_by_id(str(strategy_id or "").strip(), ctx.strategy_candidates)
-        action_lines = self._rules().compose_action_lines(
-            strategy_args,
-            details.out_range_settings,
-            details.send_settings,
-            details.syndata_settings,
-        )
+        strategy_args = self._strategy_args_by_id(requested_strategy_id, ctx.strategy_candidates)
+        compare_mode = next(iter(self._strategy_identity_modes(strategy_set)), "helpers_stripped")
+        if compare_mode == "keep_send_syndata":
+            action_lines = self._rules().compose_action_lines(
+                self._rules().strip_helper_lines(strategy_args),
+                details.out_range_settings,
+                self._rules().parse_send(strategy_args),
+                self._rules().parse_syndata(strategy_args),
+            )
+        else:
+            action_lines = self._rules().compose_action_lines(
+                strategy_args,
+                details.out_range_settings,
+                details.send_settings,
+                details.syndata_settings,
+            )
         replace_profile_action_lines(source, profile_index, action_lines)
         return True
 
@@ -463,9 +506,33 @@ class DirectPresetService:
         contexts = self.collect_target_contexts(source)
 
         for index, profile in enumerate(source.profiles):
+            action_lines = [str(line).strip() for line in getattr(profile, "action_lines", ()) or () if str(line).strip()]
+            if not action_lines:
+                continue
             if self._profile_has_explicit_out_range(profile):
                 continue
 
+            label = self._warning_label_for_profile(profile, contexts, index)
+            dedupe_key = label.strip().lower()
+            if not dedupe_key or dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            labels.append(label)
+
+        return labels
+
+    def collect_out_range_autofix_warning_labels(self, source: SourcePreset) -> list[str]:
+        labels: list[str] = []
+        seen: set[str] = set()
+        contexts = self.collect_target_contexts(source)
+
+        for index, profile in enumerate(source.profiles):
+            current_action_lines = [str(line).strip() for line in getattr(profile, "action_lines", ()) or () if str(line).strip()]
+            if not current_action_lines:
+                continue
+            _normalized, fixes, _resolved = self._rules().normalize_action_lines(current_action_lines)
+            if not fixes:
+                continue
             label = self._warning_label_for_profile(profile, contexts, index)
             dedupe_key = label.strip().lower()
             if not dedupe_key or dedupe_key in seen:
@@ -704,10 +771,26 @@ class DirectPresetService:
                     continue
                 if lowered == "--payload=all":
                     continue
-                normalized_lines.append(line)
+                cleaned = line
+                try:
+                    cleaned = self._rules()._cleanup_action_line_after_inline_out_range(cleaned)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                if cleaned:
+                    normalized_lines.append(cleaned)
             lines = normalized_lines
         else:
             lines = self._rules().strip_helper_lines(lines)
+            normalized_lines = []
+            for line in lines:
+                cleaned = line
+                try:
+                    cleaned = self._rules()._cleanup_action_line_after_inline_out_range(cleaned)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                if cleaned:
+                    normalized_lines.append(cleaned)
+            lines = normalized_lines
         return self._normalize_args(lines)
 
     @staticmethod

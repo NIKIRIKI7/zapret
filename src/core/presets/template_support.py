@@ -97,7 +97,7 @@ def get_default_target_settings_v2(category_key: str | None = None) -> dict:
             "autottl_max": 20,
             "tcp_flags_unset": "none",
             "out_range": 8,
-            "out_range_mode": "n",
+            "out_range_mode": "d",
             "send_enabled": True,
             "send_repeats": 2,
             "send_ip_ttl": 0,

@@ -32,7 +32,9 @@ class WindowCloseController:
                 return False
 
             if result == "tray":
-                self.host.minimize_to_tray()
+                minimized = bool(self.host.minimize_to_tray())
+                if not minimized:
+                    log("Сценарий 'свернуть в трей' не выполнен: tray manager не готов", "WARNING")
                 return False
 
             self.host.request_exit(stop_dpi=bool(result))

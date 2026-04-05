@@ -482,6 +482,14 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         except Exception as e:
             log(f"Ошибка при очистке потоков: {e}", "❌ ERROR")
 
+        try:
+            tray_manager = getattr(self, "tray_manager", None)
+            if tray_manager is not None:
+                tray_manager.cleanup()
+                self.tray_manager = None
+        except Exception as e:
+            log(f"Ошибка очистки системного трея: {e}", "DEBUG")
+
         super().closeEvent(event)
 
     def _release_input_interaction_states(self) -> None:
@@ -538,7 +546,7 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         # Скрываем иконку трея (если есть) — пользователь выбрал полный выход.
         try:
             if hasattr(self, "tray_manager") and self.tray_manager:
-                self.tray_manager.tray_icon.hide()
+                self.tray_manager.hide_icon()
         except Exception:
             pass
 
@@ -570,19 +578,31 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         QApplication.processEvents()
         QApplication.quit()
 
-    def minimize_to_tray(self) -> None:
-        """Скрывает окно в трей (без выхода из GUI)."""
-        try:
-            if hasattr(self, "tray_manager") and self.tray_manager:
-                self.tray_manager.hide_to_tray(show_hint=True)
-                return
-        except Exception:
-            pass
+    def ensure_tray_manager(self):
+        """Создаёт tray manager по требованию, если пользователь уже выбрал сценарий трея."""
+        tray_manager = getattr(self, "tray_manager", None)
+        if tray_manager is not None:
+            return tray_manager
 
         try:
-            self.hide()
-        except Exception:
-            pass
+            initialization_manager = getattr(self, "initialization_manager", None)
+            if initialization_manager is not None:
+                return initialization_manager.ensure_tray_initialized()
+        except Exception as e:
+            log(f"Не удалось инициализировать системный трей по требованию: {e}", "WARNING")
+
+        return None
+
+    def minimize_to_tray(self) -> bool:
+        """Скрывает окно в трей (без выхода из GUI)."""
+        try:
+            tray_manager = self.ensure_tray_manager()
+            if tray_manager is not None:
+                return bool(tray_manager.hide_to_tray(show_hint=True))
+        except Exception as e:
+            log(f"Ошибка сценария сворачивания в трей: {e}", "WARNING")
+
+        return False
 
     def set_status(self, text: str) -> None:
         """Sets the status text."""
@@ -791,6 +811,7 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         self._startup_post_init_ready = False
         self._startup_subscription_ready = False
         self._startup_background_init_started = False
+        self._tray_launch_notification_pending = bool(self.start_in_tray)
 
         # FluentWindow handles: frameless, titlebar, acrylic, resize, drag
         # We only need to set title and restore geometry
@@ -1376,22 +1397,6 @@ def main():
 
     if start_in_tray:
         log("Запуск приложения скрыто в трее", "TRAY")
-        controller = getattr(window, "window_notification_controller", None)
-        if controller is not None:
-            controller.notify(
-                advisory_notification(
-                    level="info",
-                    title="Zapret работает в трее",
-                    content="Приложение запущено в фоновом режиме",
-                    source="startup.tray_launch",
-                    presentation="infobar",
-                    queue="immediate",
-                    duration=5000,
-                    dedupe_key="startup.tray_launch",
-                    tray_title="Zapret работает в трее",
-                    tray_content="Приложение запущено в фоновом режиме",
-                )
-            )
 
     # ✅ НЕКРИТИЧЕСКИЕ ПРОВЕРКИ ПОСЛЕ ПОКАЗА ОКНА
     # Важно: тяжёлые проверки должны выполняться НЕ в GUI-потоке, иначе окно "замирает".
