@@ -2,6 +2,7 @@ name: "Запрос функции"
 description: "Предложить новую функцию или улучшение для Zapret GUI"
 title: "[Фича]: "
 labels: ["enhancement"]
+type: "feature"
 body:
   - type: markdown
     attributes:
