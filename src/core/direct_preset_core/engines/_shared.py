@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path, PureWindowsPath
 import re
 
+from ..common.target_metadata_loader import load_target_metadata
 from ..common.target_key_aliases import resolve_canonical_target_key
 from ..common.source_preset_models import FilterProfile, ProfileSegment, SourcePreset
 
@@ -142,6 +143,85 @@ def target_keys_for_selector_line(line: str, protocol_kind: str) -> tuple[str, .
     return ()
 
 
+def _selector_lines_from_metadata(raw: dict[str, object]) -> tuple[str, ...]:
+    selector = (
+        str(raw.get("base_filter_hostlist") or "").strip()
+        or str(raw.get("base_filter_ipset") or "").strip()
+        or str(raw.get("base_filter") or "").strip()
+    )
+    if not selector:
+        return ()
+    lines = [f"--{token.strip()}" for token in selector.split("--") if token.strip()]
+    return tuple(line for line in lines if any(line.startswith(prefix) for prefix in _MATCH_PREFIXES))
+
+
+def _normalize_match_signature(lines: list[str] | tuple[str, ...], *, strip_payload: bool = False) -> tuple[str, ...]:
+    normalized: list[str] = []
+    for raw in lines:
+        line = str(raw or "").strip()
+        lowered = line.lower()
+        if not lowered:
+            continue
+        if strip_payload and lowered.startswith("--payload="):
+            continue
+        family = selector_family_for_line(line)
+        if family in {"hostlist", "hostlist-exclude", "ipset", "ipset-exclude"}:
+            value = line.split("=", 1)[1].strip() if "=" in line else ""
+            value = PureWindowsPath(value.lstrip("@").strip('"').strip("'")).name.lower()
+            normalized.append(f"{family}={value}")
+            continue
+        if family == "hostlist-domains":
+            value = line.split("=", 1)[1].strip() if "=" in line else ""
+            tokens = sorted(token.strip().lower() for token in value.split(",") if token.strip())
+            normalized.append(f"{family}={','.join(tokens)}")
+            continue
+        if family == "ipset-ip":
+            value = line.split("=", 1)[1].strip() if "=" in line else ""
+            tokens = sorted(token.strip().lower() for token in value.split(",") if token.strip())
+            normalized.append(f"{family}={','.join(tokens)}")
+            continue
+        line = lowered
+        if not line:
+            continue
+        normalized.append(line)
+    return tuple(sorted(normalized))
+
+
+def infer_broad_target_keys(match_lines: list[str], protocol_kind: str) -> tuple[str, ...]:
+    if not match_lines:
+        return ()
+
+    matches: list[str] = []
+    for canonical_key, raw in load_target_metadata().items():
+        metadata = dict(raw or {})
+        if str(metadata.get("base_filter") or "").strip() == "":
+            continue
+        strategy_type = str(metadata.get("strategy_type") or "").strip().lower()
+        if strategy_type not in {"tcp", "udp", "discord_voice"}:
+            continue
+
+        metadata_lines = _selector_lines_from_metadata(metadata)
+        if not metadata_lines:
+            continue
+
+        strip_payload = bool(metadata.get("strip_payload", False))
+        actual_signature = _normalize_match_signature(match_lines, strip_payload=strip_payload)
+        if not actual_signature:
+            continue
+        metadata_signature = _normalize_match_signature(
+            metadata_lines,
+            strip_payload=strip_payload,
+        )
+        if metadata_signature != actual_signature:
+            continue
+
+        normalized_key = str(canonical_key or "").strip().lower()
+        if normalized_key and normalized_key not in matches:
+            matches.append(normalized_key)
+
+    return tuple(matches)
+
+
 def selector_family_for_line(line: str) -> str:
     lowered = line.strip().lower()
     if lowered.startswith("--hostlist="):
@@ -211,6 +291,9 @@ def parse_filter_profile(lines: list[str]) -> FilterProfile:
 
         action_lines.append(stripped)
         segments.append(ProfileSegment(kind="action", text=stripped))
+
+    if not target_keys:
+        target_keys.extend(infer_broad_target_keys(match_lines, protocol_kind))
 
     return FilterProfile(
         match_lines=match_lines,

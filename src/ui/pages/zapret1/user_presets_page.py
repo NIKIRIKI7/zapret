@@ -2084,6 +2084,8 @@ class Zapret1UserPresetsPage(BasePage):
             )
         finally:
             self._bulk_reset_running = False
+            if self._ui_dirty and self.isVisible():
+                self.refresh_presets_view_if_possible()
 
     def _show_reset_all_result(self, success_count: int, total_count: int) -> None:
         total = int(total_count or 0)

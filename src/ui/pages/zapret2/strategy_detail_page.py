@@ -69,6 +69,11 @@ from strategy_menu.marks_store_bridge import DirectZapret2MarksStore, DirectZapr
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 from log import log
+from ui.pages.zapret2.strategy_detail_mode_policy import (
+    StrategyDetailModePolicy,
+    build_strategy_detail_mode_policy,
+    is_udp_like_protocol,
+)
 
 
 def _tr_text(language: str, key: str, default: str, **kwargs) -> str:
@@ -634,6 +639,7 @@ class StrategyDetailPage(BasePage):
         self._loaded_strategy_type = None
         self._loaded_strategy_set = None
         self._loaded_tcp_phase_mode = False
+        self._detail_mode_policy: StrategyDetailModePolicy | None = None
         self._default_strategy_order = []
         self._strategies_loaded_fully = False
         self._page_scroll_by_target: dict[str, int] = {}
@@ -955,8 +961,10 @@ class StrategyDetailPage(BasePage):
 
     def _build_content(self):
         """Строит содержимое страницы"""
+        _t_total = _time.perf_counter()
         tokens = get_theme_tokens()
         detail_text_color = tokens.fg_muted if tokens.is_light else tokens.fg
+        _t_header = _time.perf_counter()
 
         # Скрываем стандартный заголовок BasePage
         if self.title_label is not None:
@@ -1040,11 +1048,14 @@ class StrategyDetailPage(BasePage):
         header_layout.addLayout(subtitle_row)
 
         self.layout.addWidget(header)
+        _log_z2_detail_metric("_build_content.header", (_time.perf_counter() - _t_header) * 1000)
 
         # ═══════════════════════════════════════════════════════════════
         # ВКЛЮЧЕНИЕ КАТЕГОРИИ + НАСТРОЙКИ
         # ═══════════════════════════════════════════════════════════════
+        _t_settings = _time.perf_counter()
         self._settings_host = QWidget()
+        self._settings_host.setVisible(False)
         settings_host_layout = QVBoxLayout(self._settings_host)
         settings_host_layout.setContentsMargins(0, 0, 0, 0)
         settings_host_layout.setSpacing(6)
@@ -1053,6 +1064,7 @@ class StrategyDetailPage(BasePage):
         # ТУЛБАР НАСТРОЕК КАТЕГОРИИ (фоновой блок)
         # ═══════════════════════════════════════════════════════════════
         self._toolbar_frame = QFrame()
+        self._toolbar_frame.setVisible(False)
         # Убираем background: transparent; border: none; чтобы фон был как у карточек,
         # или оставляем его контейнером, а внутри будут SettingsCard
         toolbar_layout = QVBoxLayout(self._toolbar_frame)
@@ -1078,6 +1090,7 @@ class StrategyDetailPage(BasePage):
         )
         self._filter_mode_frame.set_control(self._filter_mode_selector)
         self._general_card.add_widget(self._filter_mode_frame)
+        self._filter_mode_frame.setVisible(False)
 
         # OUT RANGE
         self._out_range_frame = SettingsRow(
@@ -1126,6 +1139,7 @@ class StrategyDetailPage(BasePage):
         # SEND SETTINGS (collapsible)
         # ═══════════════════════════════════════════════════════════════
         self._send_frame = SettingsCard()
+        self._send_frame.setVisible(False)
 
         self._send_toggle_row = Win11ToggleRow(
             "fa5s.paper-plane",
@@ -1216,6 +1230,7 @@ class StrategyDetailPage(BasePage):
         # SYNDATA SETTINGS (collapsible)
         # ═══════════════════════════════════════════════════════════════
         self._syndata_frame = SettingsCard()
+        self._syndata_frame.setVisible(False)
 
         self._syndata_toggle_row = Win11ToggleRow(
             "fa5s.cog",
@@ -1372,13 +1387,16 @@ class StrategyDetailPage(BasePage):
         )
         self._reset_settings_btn.reset_confirmed.connect(self._on_reset_settings_confirmed)
         reset_row.addWidget(self._reset_settings_btn)
+        self._reset_row_widget.setVisible(False)
 
         toolbar_layout.addWidget(self._reset_row_widget)
 
         settings_host_layout.addWidget(self._toolbar_frame)
         self.layout.addWidget(self._settings_host)
+        _log_z2_detail_metric("_build_content.settings_block", (_time.perf_counter() - _t_settings) * 1000)
 
         # Strategy controls stay visible even for disabled targets.
+        _t_strategies = _time.perf_counter()
         self._strategies_block = QWidget()
         self._strategies_block.setObjectName("targetStrategiesBlock")
         self._strategies_block.setProperty("targetDisabled", False)
@@ -1532,6 +1550,8 @@ class StrategyDetailPage(BasePage):
         self._update_strategies_summary()
 
         self.layout.addWidget(self._strategies_block, 1)
+        _log_z2_detail_metric("_build_content.strategies_block", (_time.perf_counter() - _t_strategies) * 1000)
+        _log_z2_detail_metric("_build_content.total", (_time.perf_counter() - _t_total) * 1000)
 
     def _update_selected_strategy_header(self, strategy_id: str) -> None:
         """Обновляет подзаголовок: показывает выбранную стратегию рядом с портами."""
@@ -1603,6 +1623,68 @@ class StrategyDetailPage(BasePage):
         except Exception:
             pass
 
+    def _apply_phase_mode_policy(self, policy: StrategyDetailModePolicy) -> None:
+        self._tcp_phase_mode = bool(policy.tcp_phase_mode)
+        self._detail_mode_policy = policy
+        try:
+            if hasattr(self, "_filter_btn") and self._filter_btn is not None:
+                self._filter_btn.setVisible(policy.show_filter_button)
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "_phases_bar_widget") and self._phases_bar_widget is not None:
+                self._phases_bar_widget.setVisible(policy.show_phases_bar)
+        except Exception:
+            pass
+
+    def _force_toggle_off(self, toggle, details_widget) -> None:
+        try:
+            toggle.blockSignals(True)
+            toggle.setChecked(False)
+        except Exception:
+            pass
+        finally:
+            try:
+                toggle.blockSignals(False)
+            except Exception:
+                pass
+
+        try:
+            if details_widget is not None:
+                details_widget.setVisible(False)
+        except Exception:
+            pass
+
+    def _apply_target_mode_visibility(self, policy: StrategyDetailModePolicy) -> None:
+        try:
+            if getattr(self, "_filter_mode_frame", None) is not None:
+                self._filter_mode_frame.setVisible(policy.show_filter_mode_frame)
+        except Exception:
+            pass
+
+        try:
+            if getattr(self, "_send_frame", None) is not None:
+                self._send_frame.setVisible(policy.show_send_frame)
+        except Exception:
+            pass
+
+        try:
+            if getattr(self, "_syndata_frame", None) is not None:
+                self._syndata_frame.setVisible(policy.show_syndata_frame)
+        except Exception:
+            pass
+
+        try:
+            if getattr(self, "_reset_row_widget", None) is not None:
+                self._reset_row_widget.setVisible(policy.show_reset_row)
+        except Exception:
+            pass
+
+        if policy.force_disable_send:
+            self._force_toggle_off(getattr(self, "_send_toggle", None), getattr(self, "_send_settings", None))
+        if policy.force_disable_syndata:
+            self._force_toggle_off(getattr(self, "_syndata_toggle", None), getattr(self, "_syndata_settings", None))
+
     def show_target(self, target_key: str):
         """Открывает detail page для target из текущего source preset."""
         _t_total = _time.perf_counter()
@@ -1634,6 +1716,14 @@ class StrategyDetailPage(BasePage):
         self._selected_strategy_id = self._current_strategy_id
         self._close_preview_dialog(force=True)
         try:
+            self._settings_host.setVisible(True)
+        except Exception:
+            pass
+        try:
+            self._toolbar_frame.setVisible(True)
+        except Exception:
+            pass
+        try:
             self._favorite_strategy_ids = self._favorites_store.get_favorites(normalized_key)
         except Exception:
             self._favorite_strategy_ids = set()
@@ -1657,48 +1747,23 @@ class StrategyDetailPage(BasePage):
             finally:
                 self._breadcrumb.blockSignals(False)
 
-        # Determine whether to use the TCP multi-phase UI:
-        # - only for TCP strategies (tcp.txt)
-        # - only for direct_zapret2 advanced mode
-        new_strategy_type = str(getattr(target_info, "strategy_type", "") or "tcp").strip().lower()
-        is_udp_like_now = self._is_udp_like_target()
-        try:
-            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
-            strategy_set = get_direct_zapret2_ui_mode()
-        except Exception:
-            strategy_set = "basic"
-        want_tcp_phase_mode = (
-            (new_strategy_type == "tcp")
-            and (not is_udp_like_now)
-            and (strategy_set == "advanced")
-        )
-
-        self._tcp_phase_mode = bool(want_tcp_phase_mode)
-        try:
-            if hasattr(self, "_filter_btn") and self._filter_btn is not None:
-                self._filter_btn.setVisible(not self._tcp_phase_mode)
-        except Exception:
-            pass
-        try:
-            if hasattr(self, "_phases_bar_widget") and self._phases_bar_widget is not None:
-                self._phases_bar_widget.setVisible(self._tcp_phase_mode)
-        except Exception:
-            pass
+        policy = build_strategy_detail_mode_policy(target_info)
+        self._apply_phase_mode_policy(policy)
 
         # Для target'ов одного strategy_type (особенно tcp) список стратегий одинаковый,
         # поэтому не пересобираем виджеты каждый раз: это ускоряет повторные переходы.
         reuse_list = (
             bool(self._strategies_tree and self._strategies_tree.has_rows())
-            and self._loaded_strategy_type == new_strategy_type
-            and self._loaded_strategy_set == strategy_set
-            and bool(self._loaded_tcp_phase_mode) == bool(want_tcp_phase_mode)
+            and self._loaded_strategy_type == policy.strategy_type
+            and self._loaded_strategy_set == policy.strategy_set
+            and bool(self._loaded_tcp_phase_mode) == bool(policy.tcp_phase_mode)
         )
 
         if not reuse_list:
             # Очищаем старые стратегии
             self._clear_strategies()
             # Загружаем новые
-            self._load_strategies()
+            self._load_strategies(policy)
         else:
             # Обновляем избранное для нового target'а
             for sid in (self._strategies_tree.get_strategy_ids() if self._strategies_tree else []):
@@ -1724,16 +1789,12 @@ class StrategyDetailPage(BasePage):
         self._update_status_icon(is_enabled)
 
         # Показываем режим фильтрации только если target поддерживает оба варианта
-        has_ipset = hasattr(target_info, 'base_filter_ipset') and target_info.base_filter_ipset
-        has_hostlist = hasattr(target_info, 'base_filter_hostlist') and target_info.base_filter_hostlist
-        if has_ipset and has_hostlist:
-            self._filter_mode_frame.setVisible(True)
+        if policy.show_filter_mode_frame:
             saved_filter_mode = self._load_target_filter_mode(normalized_key)
             self._filter_mode_selector.blockSignals(True)
             self._filter_mode_selector.setChecked(saved_filter_mode == "ipset")
             self._filter_mode_selector.blockSignals(False)
-        else:
-            self._filter_mode_frame.setVisible(False)
+        self._apply_target_mode_visibility(policy)
 
         # Очищаем поиск и загружаем сохранённую сортировку
         self._search_input.clear()
@@ -1771,40 +1832,7 @@ class StrategyDetailPage(BasePage):
         # Загружаем syndata настройки для target'а
         syndata_settings = self._load_syndata_settings(normalized_key)
         self._apply_syndata_settings(syndata_settings)
-
-        # direct_zapret2 Basic: hide advanced Send/Syndata UI without mutating stored settings.
-        is_basic_direct = (strategy_set == "basic")
-
-        # syndata/send are supported only for TCP SYN; for UDP/QUIC always hide.
-        protocol_raw = str(getattr(target_info, "protocol", "") or "").upper()
-        is_udp_like = ("UDP" in protocol_raw) or ("QUIC" in protocol_raw) or ("L7" in protocol_raw)
-
-        if is_basic_direct:
-            self._send_frame.setVisible(False)
-            self._syndata_frame.setVisible(False)
-            try:
-                if hasattr(self, "_reset_row_widget") and self._reset_row_widget is not None:
-                    self._reset_row_widget.setVisible(False)
-            except Exception:
-                pass
-        elif is_udp_like:
-            # Force-off without saving (only affects visual state and subsequent saves)
-            # UDP/QUIC: remove send (same limitation as syndata)
-            self._send_toggle.blockSignals(True)
-            self._send_toggle.setChecked(False)
-            self._send_toggle.blockSignals(False)
-            self._send_frame.setVisible(False)
-
-            self._syndata_toggle.blockSignals(True)
-            self._syndata_toggle.setChecked(False)
-            self._syndata_toggle.blockSignals(False)
-            self._syndata_frame.setVisible(False)
-
-            try:
-                if hasattr(self, "_reset_row_widget") and self._reset_row_widget is not None:
-                    self._reset_row_widget.setVisible(True)
-            except Exception:
-                pass
+        self._apply_target_mode_visibility(policy)
 
         try:
             _log_z2_detail_metric(
@@ -1817,14 +1845,6 @@ class StrategyDetailPage(BasePage):
             )
         except Exception:
             pass
-        else:
-            self._send_frame.setVisible(True)
-            self._syndata_frame.setVisible(True)
-            try:
-                if hasattr(self, "_reset_row_widget") and self._reset_row_widget is not None:
-                    self._reset_row_widget.setVisible(True)
-            except Exception:
-                pass
 
         # Args editor availability depends on whether the target is enabled (strategy != none)
         self._refresh_args_editor_state()
@@ -1863,11 +1883,14 @@ class StrategyDetailPage(BasePage):
         self._ui_state_store = store
         self._ui_state_unsubscribe = store.subscribe(
             self._on_ui_state_changed,
-            fields={"active_preset_revision", "preset_content_revision", "preset_structure_revision"},
+            fields={"active_preset_revision", "preset_content_revision", "preset_structure_revision", "mode_revision"},
             emit_initial=False,
         )
 
     def _on_ui_state_changed(self, _state: AppUiState, changed_fields: frozenset[str]) -> None:
+        if "mode_revision" in changed_fields:
+            self.reload_for_mode_change()
+            return
         if "preset_structure_revision" in changed_fields:
             self.refresh_from_preset_switch()
             return
@@ -1891,6 +1914,12 @@ class StrategyDetailPage(BasePage):
             self.show_target(self._target_key)
         except Exception:
             return
+
+    def reload_for_mode_change(self) -> None:
+        if not self.isVisible():
+            self._preset_refresh_pending = True
+            return
+        self.refresh_from_preset_switch()
 
     def _scroll_to_current_strategy(self) -> None:
         """Прокручивает страницу к текущей стратегии (не меняя порядок списка)."""
@@ -1961,7 +1990,7 @@ class StrategyDetailPage(BasePage):
         except Exception:
             return False
 
-    def _load_strategies(self):
+    def _load_strategies(self, policy: StrategyDetailModePolicy | None = None):
         """Загружает стратегии для текущего target'а."""
         _t_total = _time.perf_counter()
         try:
@@ -1977,20 +2006,17 @@ class StrategyDetailPage(BasePage):
                 log(f"StrategyDetailPage: target {self._target_key} не найден в target metadata service!", "ERROR")
                 return
 
+            resolved_policy = policy or build_strategy_detail_mode_policy(target_info)
+            self._detail_mode_policy = resolved_policy
+
             strategies = dict(getattr(payload, "strategy_entries", {}) or {}) if payload is not None else self._direct_facade.get_target_strategies(self._target_key)
             log(f"StrategyDetailPage: загружено {len(strategies)} стратегий для {self._target_key}", "DEBUG")
 
             self._strategies_data_by_id = dict(strategies or {})
             self._default_strategy_order = list(self._strategies_data_by_id.keys())
-            self._loaded_strategy_type = target_info.strategy_type
-            
-            try:
-                from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
-                self._loaded_strategy_set = get_direct_zapret2_ui_mode()
-            except Exception:
-                self._loaded_strategy_set = "basic"
-                
-            self._loaded_tcp_phase_mode = self._tcp_phase_mode
+            self._loaded_strategy_type = resolved_policy.strategy_type
+            self._loaded_strategy_set = resolved_policy.strategy_set
+            self._loaded_tcp_phase_mode = resolved_policy.tcp_phase_mode
 
             if not strategies:
                 try:
@@ -2215,10 +2241,10 @@ class StrategyDetailPage(BasePage):
 
         self._pending_strategies_index = end
         try:
-            log(
-                f"StrategyDetailPage batch load: target={self._target_key}, rows={end - start}, "
-                f"progress={end}/{total}, elapsed={(_time.perf_counter() - _t_batch) * 1000:.0f}ms",
-                "DEBUG",
+            _log_z2_detail_metric(
+                "_load_next_strategies_batch",
+                (_time.perf_counter() - _t_batch) * 1000,
+                extra=f"target={self._target_key}, rows={end - start}, progress={end}/{total}",
             )
         except Exception:
             pass
@@ -2836,10 +2862,6 @@ class StrategyDetailPage(BasePage):
         if payload is not None:
             self._target_payload = payload
         return payload
-
-    def _is_udp_like_target(self) -> bool:
-        protocol_raw = str(getattr(self._target_info, "protocol", "") or "").upper()
-        return ("UDP" in protocol_raw) or ("QUIC" in protocol_raw) or ("L7" in protocol_raw)
 
     # ======================================================================
     # TCP MULTI-PHASE (direct_zapret2)
@@ -3542,8 +3564,7 @@ class StrategyDetailPage(BasePage):
         details = self._get_target_details(target_key)
         if details is not None:
             return _target_details_to_settings_payload(details)
-        protocol_raw = str(getattr(self._target_info, "protocol", "") or "").upper()
-        is_udp_like = ("UDP" in protocol_raw) or ("QUIC" in protocol_raw) or ("L7" in protocol_raw)
+        is_udp_like = is_udp_like_protocol(getattr(self._target_info, "protocol", ""))
         fallback = _target_details_to_settings_payload(None)
         if is_udp_like:
             fallback["enabled"] = False

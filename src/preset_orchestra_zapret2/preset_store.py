@@ -116,6 +116,13 @@ class PresetStore(QObject):
         self._do_full_load()
         self.presets_changed.emit()
 
+    def invalidate_cache(self) -> None:
+        """Marks cached preset metadata as stale without emitting UI signals."""
+        self._presets.clear()
+        self._preset_mtimes.clear()
+        self._active_name = None
+        self._loaded = False
+
     def notify_preset_saved(self, name: str) -> None:
         """
         Called after a preset file is saved/modified on disk.
@@ -124,15 +131,6 @@ class PresetStore(QObject):
         self._ensure_loaded()
         self._reload_single_preset(name)
         self.preset_updated.emit(name)
-
-    def notify_presets_changed(self) -> None:
-        """
-        Called after an operation that changes the preset list
-        (create, delete, rename, duplicate, import).
-        Performs a full reload and emits presets_changed.
-        """
-        self._do_full_load()
-        self.presets_changed.emit()
 
     def notify_preset_switched(self, name: str) -> None:
         """

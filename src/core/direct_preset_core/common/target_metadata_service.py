@@ -20,8 +20,11 @@ class TargetPresentationMetadata:
     description: str = ""
     tooltip: str = ""
     strategy_type: str = "tcp"
+    base_filter: str = ""
     base_filter_hostlist: str = ""
     base_filter_ipset: str = ""
+    requires_all_ports: bool = False
+    strip_payload: bool = False
 
 
 def _humanize_base_key(base_key: str) -> str:
@@ -85,8 +88,11 @@ class TargetMetadataService:
             description=str(raw.get("description") or "").strip(),
             tooltip=str(raw.get("tooltip") or "").replace("\\n", "\n"),
             strategy_type=strategy_type,
+            base_filter=str(raw.get("base_filter") or "").strip(),
             base_filter_hostlist=str(raw.get("base_filter_hostlist") or "").strip(),
             base_filter_ipset=str(raw.get("base_filter_ipset") or "").strip(),
+            requires_all_ports=bool(raw.get("requires_all_ports", False)),
+            strip_payload=bool(raw.get("strip_payload", False)),
         )
 
     def build_ui_item(self, target_key: str):
@@ -103,10 +109,12 @@ class TargetMetadataService:
             command_group=metadata.command_group,
             icon_name=metadata.icon_name,
             icon_color=metadata.icon_color,
-            base_filter="",
+            base_filter=metadata.base_filter,
             base_filter_hostlist=metadata.base_filter_hostlist,
             base_filter_ipset=metadata.base_filter_ipset,
             strategy_type=metadata.strategy_type,
+            requires_all_ports=metadata.requires_all_ports,
+            strip_payload=metadata.strip_payload,
         )
 
     @staticmethod

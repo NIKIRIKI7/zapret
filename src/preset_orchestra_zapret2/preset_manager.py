@@ -531,13 +531,9 @@ class PresetManager:
         """
         store = self._get_store()
         if name is None:
-            store.refresh()
+            store.invalidate_cache()
         else:
             store.notify_preset_saved(name)
-
-    def _notify_list_changed(self) -> None:
-        """Notifies the central store that the preset list changed (add/remove/rename)."""
-        self._get_store().notify_presets_changed()
 
     # ========================================================================
     # SWITCH OPERATIONS
@@ -715,7 +711,6 @@ class PresetManager:
                     current.created = datetime.now().isoformat()
                     current.modified = datetime.now().isoformat()
                     if save_preset(current):
-                        self._notify_list_changed()
                         log(f"Created preset '{name}' from current", "INFO")
                         return current
                     return None
@@ -773,7 +768,6 @@ class PresetManager:
             if not generate_preset_file(data, dest_path, atomic=True):
                 return None
 
-            self._notify_list_changed()
             log(f"Created preset '{name}' from default template", "INFO")
 
             # Load and return the created preset (from store)
@@ -824,8 +818,6 @@ class PresetManager:
             return False
 
         result = delete_preset(name)
-        if result:
-            self._notify_list_changed()
         return result
 
     def delete_preset_by_file_name(self, file_name: str) -> bool:
@@ -852,7 +844,6 @@ class PresetManager:
             # Update active preset name if this was active
             if get_active_preset_name() == old_name:
                 set_active_preset_name(new_name)
-            self._notify_list_changed()
             return True
         return False
 
@@ -875,8 +866,6 @@ class PresetManager:
             return False
 
         result = duplicate_preset(name, new_name)
-        if result:
-            self._notify_list_changed()
         return result
 
     def duplicate_preset_by_file_name(self, file_name: str, new_name: str) -> bool:
@@ -941,8 +930,6 @@ class PresetManager:
             pass
 
         result = import_preset(src_path, name)
-        if result:
-            self._notify_list_changed()
         return result
 
     # ========================================================================

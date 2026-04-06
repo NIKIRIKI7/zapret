@@ -549,10 +549,15 @@ class MainWindowUI:
     # ------------------------------------------------------------------
 
     def _on_direct_mode_changed(self, mode: str):
-        """Force rebuild of Прямой запуск page on next show."""
+        """Сигнализирует всем direct Z2 страницам, что basic/advanced режим изменился."""
         page = self.get_loaded_page(PageName.ZAPRET2_DIRECT)
         if page and hasattr(page, "_strategy_set_snapshot"):
             page._strategy_set_snapshot = None
+        try:
+            if getattr(self, "ui_state_store", None) is not None:
+                self.ui_state_store.bump_mode_revision()
+        except Exception:
+            pass
 
     def _on_background_refresh_needed(self):
         """Re-applies window background (called when tinted_bg or accent changes)."""

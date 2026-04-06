@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from log import log
+from core.presets.cache_signatures import path_cache_signature
 from core.presets.models import PresetManifest
 from core.presets.v1_builtin_templates import is_builtin_preset_file_name_v1
 from core.presets.z2_builtin_templates import is_builtin_preset_file_name_v2
@@ -202,17 +203,6 @@ class DirectFlowCoordinator:
         except Exception as exc:
             log(f"Failed to prepare direct support files for {method}: {exc}", "DEBUG")
 
-    @staticmethod
-    def _path_signature(path: Path) -> tuple[int, int]:
-        try:
-            stat = path.stat()
-            return (
-                int(getattr(stat, "st_mtime_ns", 0) or 0),
-                int(getattr(stat, "st_size", 0) or 0),
-            )
-        except Exception:
-            return (0, 0)
-
     def _selected_manifest_cache_key(
         self,
         launch_method: str,
@@ -234,9 +224,9 @@ class DirectFlowCoordinator:
             self._normalize_method(launch_method),
             engine,
             candidate.lower(),
-            *self._path_signature(engine_paths.selected_state_path),
-            *self._path_signature(engine_paths.index_path),
-            *self._path_signature(preset_path),
+            *path_cache_signature(engine_paths.selected_state_path),
+            *path_cache_signature(engine_paths.index_path),
+            *path_cache_signature(preset_path),
         )
 
     def _selected_manifest_from_cache(

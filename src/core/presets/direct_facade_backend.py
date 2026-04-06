@@ -18,9 +18,6 @@ from .models import PresetManifest
 from log import log
 
 
-_BASIC_UI_PAYLOAD_CACHE: dict[tuple[str, str, str, str, int, int], BasicUiPayload] = {}
-
-
 def _normalize_strategy_selection_value(value: object) -> str:
     return str(value or "").strip() or "none"
 
@@ -382,40 +379,6 @@ class DirectPresetFacadeBackend:
             pass
         return "basic"
 
-    def _invalidate_basic_ui_payload_cache(self) -> None:
-        global _BASIC_UI_PAYLOAD_CACHE
-        prefix = (self.engine, self.launch_method)
-        _BASIC_UI_PAYLOAD_CACHE = {
-            key: value
-            for key, value in _BASIC_UI_PAYLOAD_CACHE.items()
-            if key[:2] != prefix
-        }
-
-    def _basic_ui_payload_cache_key(
-        self,
-        selected_manifest: PresetManifest | None = None,
-    ) -> tuple[str, str, str, str, int, int] | None:
-        if selected_manifest is None:
-            selected_manifest = self.get_selected_manifest()
-        if selected_manifest is None:
-            return None
-        selected_file_name = str(selected_manifest.file_name or "").strip()
-        if not selected_file_name:
-            return None
-        try:
-            path = self._selected_source_path_from_manifest(selected_manifest)
-            stat = path.stat()
-        except Exception:
-            return None
-        return (
-            self.engine,
-            self.launch_method,
-            self._current_direct_strategy_set(),
-            selected_file_name,
-            int(getattr(stat, "st_mtime_ns", 0) or 0),
-            int(getattr(stat, "st_size", 0) or 0),
-        )
-
     def _selected_source_path_from_manifest(self, selected_manifest: PresetManifest) -> Path:
         selected_file_name = str(getattr(selected_manifest, "file_name", "") or "").strip()
         if not selected_file_name:
@@ -435,33 +398,20 @@ class DirectPresetFacadeBackend:
     def list_manifests(self) -> list[PresetManifest]:
         return get_preset_repository().list_manifests(self.engine)
 
-    def get_basic_ui_payload(self, *, startup_scope: str | None = None) -> BasicUiPayload:
+    def get_basic_ui_payload(
+        self,
+        *,
+        startup_scope: str | None = None,
+    ) -> BasicUiPayload:
         _t_total = _time.perf_counter()
         _t_load = _time.perf_counter()
         selected_manifest = self.get_selected_manifest()
-        cache_key = self._basic_ui_payload_cache_key(selected_manifest)
-        if cache_key is not None:
-            cached_payload = _BASIC_UI_PAYLOAD_CACHE.get(cache_key)
-            if cached_payload is not None:
-                _log_startup_payload_metric(
-                    startup_scope,
-                    "_build_content.payload.backend.load_selected_preset",
-                    (_time.perf_counter() - _t_load) * 1000,
-                    extra=f"has_preset=yes, cache=hit",
-                )
-                _log_startup_payload_metric(
-                    startup_scope,
-                    "_build_content.payload.backend.total",
-                    (_time.perf_counter() - _t_total) * 1000,
-                    extra=f"targets={len(cached_payload.target_items or {})}, cache=hit",
-                )
-                return cached_payload
         preset = self._load_selected_preset_model(selected_manifest)
         _log_startup_payload_metric(
             startup_scope,
             "_build_content.payload.backend.load_selected_preset",
             (_time.perf_counter() - _t_load) * 1000,
-            extra=f"has_preset={'yes' if preset else 'no'}, cache=miss",
+            extra=f"has_preset={'yes' if preset else 'no'}",
         )
         if not preset:
             _log_startup_payload_metric(
@@ -490,8 +440,6 @@ class DirectPresetFacadeBackend:
             selected_preset_file_name=str(getattr(selected_manifest, "file_name", "") or ""),
             selected_preset_name=str(getattr(selected_manifest, "name", "") or ""),
         )
-        if cache_key is not None:
-            _BASIC_UI_PAYLOAD_CACHE[cache_key] = payload
         _log_startup_payload_metric(
             startup_scope,
             "_build_content.payload.backend.service",
@@ -1088,7 +1036,6 @@ class DirectPresetFacadeBackend:
             return False
         source_text = _normalize_direct_preset_source_text(self._service()._serializer().serialize(preset))
         get_preset_repository().update_preset(self.engine, selected_manifest.file_name, source_text, selected_manifest.name)
-        self._invalidate_basic_ui_payload_cache()
         self._refresh_selected_launch_profile_from_source()
         if self.on_dpi_reload_needed:
             self.on_dpi_reload_needed()

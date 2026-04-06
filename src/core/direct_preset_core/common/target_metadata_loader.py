@@ -6,7 +6,6 @@ from typing import Dict, Optional
 
 
 _CACHED_TARGET_METADATA: Optional[Dict[str, Dict]] = None
-_CACHED_BROAD_TARGET_METADATA: Optional[Dict[str, Dict]] = None
 
 
 def load_target_metadata() -> Dict[str, Dict]:
@@ -14,40 +13,26 @@ def load_target_metadata() -> Dict[str, Dict]:
     if _CACHED_TARGET_METADATA is not None:
         return _CACHED_TARGET_METADATA
 
-    builtin = _load_one(_target_metadata_file_path())
-    merged = dict(builtin)
-
-    for key, data in _load_one(_user_target_metadata_file_path()).items():
-        if key in merged:
-            continue
+    merged: Dict[str, Dict] = {}
+    for key, data in _load_one(_target_metadata_file_path()).items():
         merged[key] = data
+    for key, data in _load_one(_broad_target_metadata_file_path()).items():
+        if key not in merged:
+            merged[key] = data
+    for key, data in _load_one(_user_target_metadata_file_path()).items():
+        if key not in merged:
+            merged[key] = data
+    for key, data in _load_one(_user_broad_target_metadata_file_path()).items():
+        if key not in merged:
+            merged[key] = data
 
     _CACHED_TARGET_METADATA = merged
     return _CACHED_TARGET_METADATA
 
 
-def load_broad_target_metadata() -> Dict[str, Dict]:
-    global _CACHED_BROAD_TARGET_METADATA
-    if _CACHED_BROAD_TARGET_METADATA is not None:
-        return _CACHED_BROAD_TARGET_METADATA
-
-    builtin = _load_one(_broad_target_metadata_file_path())
-    merged = dict(builtin)
-
-    for key, data in _load_one(_user_broad_target_metadata_file_path()).items():
-        if key in merged:
-            continue
-        merged[key] = data
-
-    _CACHED_BROAD_TARGET_METADATA = merged
-    return _CACHED_BROAD_TARGET_METADATA
-
-
 def invalidate_target_metadata_cache() -> None:
     global _CACHED_TARGET_METADATA
-    global _CACHED_BROAD_TARGET_METADATA
     _CACHED_TARGET_METADATA = None
-    _CACHED_BROAD_TARGET_METADATA = None
 
 
 def _target_metadata_file_path() -> Path:

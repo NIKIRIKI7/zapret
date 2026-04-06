@@ -603,7 +603,9 @@ class Zapret2StrategiesPageNew(BasePage):
 
     def _get_basic_payload(self, *, refresh: bool = False, startup_scope: str | None = None):
         if refresh or self._basic_payload_cache is None:
-            self._basic_payload_cache = self._get_direct_facade().get_basic_ui_payload(startup_scope=startup_scope)
+            self._basic_payload_cache = self._get_direct_facade().get_basic_ui_payload(
+                startup_scope=startup_scope,
+            )
         return self._basic_payload_cache
 
     def _build_empty_state_text(self) -> str:

@@ -52,10 +52,6 @@ class DirectRuntimePresetStore(QObject):
         self._invalidate_metadata_cache()
         self.preset_updated.emit(str(file_name or "").strip())
 
-    def notify_presets_changed(self) -> None:
-        self._invalidate_metadata_cache()
-        self.presets_changed.emit()
-
     def notify_preset_switched(self, file_name: str) -> None:
         self._selected_source_file_name = str(file_name or "").strip() or None
         self.preset_switched.emit(self._selected_source_file_name or "")

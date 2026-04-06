@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QCompleter, QWidget
 from log import log
 from ui.page_names import PageName
 from ui.mode_page_scope import get_sidebar_search_pages_for_method, should_add_nav_page_on_init
+from ui.nav_mode_config import get_nav_visibility
 from ui.text_catalog import (
     find_search_entries,
     format_search_result,
@@ -17,7 +18,7 @@ from ui.text_catalog import (
 from ui.main_window_pages import get_eager_page_names, get_page_route_key
 
 
-def add_nav_item(window, page_name: PageName, position) -> None:
+def add_nav_item(window, page_name: PageName, position, *, initial_visible: bool | None = None) -> None:
     if not getattr(window, "_has_fluent_nav", False):
         return
 
@@ -59,6 +60,11 @@ def add_nav_item(window, page_name: PageName, position) -> None:
 
     if item is not None:
         window._nav_items[page_name] = item
+        if initial_visible is not None:
+            try:
+                item.setVisible(bool(initial_visible))
+            except Exception:
+                pass
     else:
         log(f"[NAV] addSubInterface returned None for {page_name.name} - not in _nav_items!", "WARNING")
 
@@ -80,11 +86,17 @@ def init_navigation(window) -> None:
     window._sidebar_search_model = None
     window._sidebar_search_completer = None
     window._sidebar_search_titlebar_attached = False
+    initial_visibility = get_nav_visibility(current_method)
 
     def _add(page_name, position=pos_scroll):
         if not should_add_nav_page_on_init(page_name, current_method):
             return
-        add_nav_item(window, page_name, position)
+        add_nav_item(
+            window,
+            page_name,
+            position,
+            initial_visible=bool(initial_visibility.get(page_name, True)),
+        )
 
     nav = window.navigationInterface
 
@@ -222,7 +234,6 @@ def sync_nav_visibility(window, method: str | None = None) -> None:
     if not method:
         method = "direct_zapret2"
 
-    from ui.nav_mode_config import get_nav_visibility
     targets = get_nav_visibility(method)
 
     log(f"[NAV] _sync_nav_visibility method={method!r}, _nav_items keys={[p.name for p in window._nav_items]}", "DEBUG")

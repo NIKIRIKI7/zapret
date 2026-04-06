@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from log import log
+from ui.pages import user_presets_runtime as shared_runtime
 from ui.pages.zapret2.user_presets_page import (
     BaseZapret2UserPresetsPage,
     InfoBar,
@@ -126,6 +127,7 @@ class OrchestraZapret2UserPresetsPage(BaseZapret2UserPresetsPage):
                     parent=self.window(),
                 )
                 return
+            shared_runtime.mark_presets_structure_changed(self)
             log(f"Создан пресет '{name}'", "INFO")
         except Exception as e:
             log(f"Ошибка создания пресета: {e}", "ERROR")
@@ -160,6 +162,7 @@ class OrchestraZapret2UserPresetsPage(BaseZapret2UserPresetsPage):
                 old_display_name=display_name,
                 new_display_name=new_name,
             )
+            shared_runtime.mark_presets_structure_changed(self)
             log(f"Пресет '{display_name}' переименован в '{new_name}'", "INFO")
         except Exception as e:
             log(f"Ошибка переименования пресета: {e}", "ERROR")
@@ -181,6 +184,7 @@ class OrchestraZapret2UserPresetsPage(BaseZapret2UserPresetsPage):
                     self._get_hierarchy_store().delete_preset_meta(name, display_name=name)
                 except Exception:
                     pass
+                shared_runtime.mark_presets_structure_changed(self)
                 log(f"Импортирован пресет '{name}'", "INFO")
                 self._show_import_result_infobar(name, name, f"{name}.txt")
             else:
@@ -216,7 +220,7 @@ class OrchestraZapret2UserPresetsPage(BaseZapret2UserPresetsPage):
         try:
             manager = self._get_orchestra_manager()
             success_count, total, failed = manager.reset_all_presets_to_default_templates()
-            self._load_presets()
+            shared_runtime.mark_presets_structure_changed(self)
             if failed:
                 log(
                     f"Восстановление заводских пресетов завершено частично: "
@@ -239,6 +243,8 @@ class OrchestraZapret2UserPresetsPage(BaseZapret2UserPresetsPage):
             )
         finally:
             self._bulk_reset_running = False
+            if self._ui_dirty and self.isVisible():
+                self.refresh_presets_view_if_possible()
 
     def _on_activate_preset(self, name: str):
         try:
@@ -281,6 +287,7 @@ class OrchestraZapret2UserPresetsPage(BaseZapret2UserPresetsPage):
                     )
                 except Exception:
                     pass
+                shared_runtime.mark_presets_structure_changed(self)
                 log(f"Пресет '{name}' дублирован как '{new_name}'", "INFO")
             else:
                 InfoBar.warning(
@@ -371,6 +378,7 @@ class OrchestraZapret2UserPresetsPage(BaseZapret2UserPresetsPage):
                     self._get_hierarchy_store().delete_preset_meta(name, display_name=display_name)
                 except Exception:
                     pass
+                shared_runtime.mark_presets_structure_changed(self)
                 deleted = True
 
             if deleted:
@@ -458,6 +466,7 @@ class OrchestraZapret2UserPresetsPage(BaseZapret2UserPresetsPage):
 
             clear_all_deleted_presets()
             ensure_templates_copied_to_presets()
+            shared_runtime.mark_presets_structure_changed(self)
             log("Восстановлены удалённые пресеты", "INFO")
         except Exception as e:
             log(f"Ошибка восстановления удалённых пресетов: {e}", "ERROR")
