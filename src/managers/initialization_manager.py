@@ -1,6 +1,7 @@
 # managers/initialization_manager.py
 
 import threading
+import time as _time
 
 from app_notifications import advisory_notification
 from PyQt6.QtCore import QObject, pyqtSignal, Qt
@@ -13,6 +14,14 @@ class _StrategyCacheBridge(QObject):
 
 class _StartupPhaseBridge(QObject):
     continue_phase_two = pyqtSignal()
+
+
+class _DirectAutostartPrepareBridge(QObject):
+    finished = pyqtSignal(dict)
+
+
+class _PostInitLaunchBridge(QObject):
+    launch_requested = pyqtSignal(str)
 
 
 class InitializationManager:
@@ -48,6 +57,18 @@ class InitializationManager:
             Qt.ConnectionType.QueuedConnection,
         )
         self._phase_two_started = False
+        self._post_init_dispatch_started = False
+        self._direct_autostart_prepare_started = False
+        self._direct_autostart_prepare_bridge = _DirectAutostartPrepareBridge()
+        self._direct_autostart_prepare_bridge.finished.connect(
+            self._on_direct_autostart_profile_prepared,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._post_init_launch_bridge = _PostInitLaunchBridge()
+        self._post_init_launch_bridge.launch_requested.connect(
+            self._run_deferred_post_init_launch,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
     def _log_startup_step(self, marker: str, details: str = "") -> None:
         try:
@@ -781,28 +802,37 @@ class InitializationManager:
         if self._post_init_scheduled:
             return
         self._post_init_scheduled = True
-        post_init_metric_source = "post_init_ok"
+        post_init_metric_source = "post_init_scheduled"
+        t_total = _time.perf_counter()
 
         try:
             # Проверка winws.exe
+            t_winws = _time.perf_counter()
             if not self._check_winws_exists():
                 log("winws.exe не найден", "❌ ERROR")
                 self.app.set_status("❌ winws.exe не найден")
                 post_init_metric_source = "post_init_winws_missing"
                 return
+            self._log_startup_step("PostInitCheckWinws", f"{(_time.perf_counter() - t_winws)*1000:.0f}ms")
 
             log("✅ winws.exe найден", "DEBUG")
 
-            # Проверяем режим запуска ПЕРЕД делегированием
+            # Быструю часть post-init оставляем в критическом пути,
+            # а реальный автозапуск переносим на следующий idle-тик.
+            t_method = _time.perf_counter()
             from strategy_menu import get_strategy_launch_method
             launch_method = get_strategy_launch_method()
-            if launch_method == "direct_zapret2":
-                # Отдельный путь для direct_zapret2 (использует preset файл)
-                self._start_direct_zapret2_autostart()
-            else:
-                # Все остальные режимы через dpi_manager
-                if hasattr(self.app, 'dpi_manager'):
-                    self.app.dpi_manager.delayed_dpi_start()
+            self._log_startup_step(
+                "PostInitResolveMethod",
+                f"{launch_method} {(_time.perf_counter() - t_method)*1000:.0f}ms",
+            )
+
+            self._post_init_launch_bridge.launch_requested.emit(str(launch_method or ""))
+            self._log_startup_step(
+                "PostInitDeferredScheduled",
+                f"{launch_method}, queued_connection",
+            )
+            post_init_metric_source = f"post_init_scheduled:{launch_method}"
 
             # Обновления проверяются вручную на вкладке "Серверы"
 
@@ -812,11 +842,38 @@ class InitializationManager:
             import traceback
             log(traceback.format_exc(), "DEBUG")
         finally:
+            self._log_startup_step("PostInitQuickPhase", f"{(_time.perf_counter() - t_total)*1000:.0f}ms")
             try:
                 if hasattr(self.app, '_mark_startup_post_init_done'):
                     self.app._mark_startup_post_init_done(post_init_metric_source)
             except Exception:
                 pass
+
+    def _run_deferred_post_init_launch(self, launch_method: str) -> None:
+        """Запускает тяжёлую post-init часть позже, когда окно уже стабилизировалось."""
+        if self._post_init_dispatch_started:
+            return
+        self._post_init_dispatch_started = True
+
+        started_at = _time.perf_counter()
+        method = str(launch_method or "").strip().lower()
+        self._log_startup_step("PostInitDeferredStart", method or "unknown")
+
+        try:
+            if method == "direct_zapret2":
+                self._start_direct_zapret2_autostart()
+            else:
+                if hasattr(self.app, 'dpi_manager'):
+                    self.app.dpi_manager.delayed_dpi_start()
+        except Exception as e:
+            log(f"Ошибка deferred post-init запуска ({method}): {e}", "ERROR")
+            import traceback
+            log(traceback.format_exc(), "DEBUG")
+        finally:
+            self._log_startup_step(
+                "PostInitDeferredDispatch",
+                f"{method or 'unknown'} {(_time.perf_counter() - started_at)*1000:.0f}ms",
+            )
 
     def _check_winws_exists(self) -> bool:
         """Проверка наличия winws.exe"""
@@ -841,7 +898,7 @@ class InitializationManager:
                 return False
 
     def _start_direct_zapret2_autostart(self):
-        """Автозапуск для режима direct_zapret2 (использует preset файл)"""
+        """Автозапуск direct_zapret2: тяжёлая подготовка профиля уходит в фон."""
         # 1. Проверяем включен ли автозапуск
         from config import get_dpi_autostart
         if not get_dpi_autostart():
@@ -849,36 +906,98 @@ class InitializationManager:
             self.app.set_status("Готово")
             return
 
-        # 2. Проверяем наличие preset файла
+        if self._direct_autostart_prepare_started:
+            log("Подготовка direct_zapret2 автозапуска уже выполняется", "DEBUG")
+            return
+
+        self._direct_autostart_prepare_started = True
+        self._log_startup_step("PostInitDirectPrepareQueued", "direct_zapret2")
+
+        def _worker() -> None:
+            started_at = _time.perf_counter()
+            payload: dict[str, object] = {
+                "success": False,
+                "duration_ms": 0,
+            }
+
+            try:
+                from core.direct_flow import DirectFlowCoordinator
+
+                coordinator = DirectFlowCoordinator()
+
+                def _timing_callback(section: str, elapsed_ms: float) -> None:
+                    rounded = max(0, int(round(float(elapsed_ms))))
+                    log(f"⏱ Startup DirectFlow: {section} {rounded}ms", "⏱ STARTUP")
+
+                profile = coordinator.ensure_launch_profile(
+                    "direct_zapret2",
+                    require_filters=False,
+                    timing_callback=_timing_callback,
+                    timing_label="startup.direct_autostart.direct_zapret2",
+                )
+
+                payload = {
+                    "success": True,
+                    "selected_mode": profile.to_selected_mode(),
+                    "display_name": profile.display_name,
+                    "preset_path": str(profile.launch_config_path),
+                    "preset_name": profile.preset_name,
+                    "duration_ms": int((_time.perf_counter() - started_at) * 1000),
+                }
+            except Exception as e:
+                payload = {
+                    "success": False,
+                    "error": str(e),
+                    "duration_ms": int((_time.perf_counter() - started_at) * 1000),
+                }
+
+            self._direct_autostart_prepare_bridge.finished.emit(payload)
+
+        threading.Thread(
+            target=_worker,
+            daemon=True,
+            name="DirectZ2AutostartPrepareWorker",
+        ).start()
+
+    def _on_direct_autostart_profile_prepared(self, payload: dict) -> None:
+        """Получает готовый launch profile уже в GUI-потоке и запускает DPI."""
+        self._direct_autostart_prepare_started = False
+
+        duration_ms = int(payload.get("duration_ms") or 0)
+        if duration_ms > 0:
+            self._log_startup_step("PostInitDirectPrepareReady", f"{duration_ms}ms")
+
         try:
-            from core.services import get_direct_flow_coordinator
-
-            profile = get_direct_flow_coordinator().ensure_launch_profile(
-                "direct_zapret2",
-                require_filters=False,
-            )
-            preset_path = profile.launch_config_path
-            preset_name = profile.preset_name
-
-            if not preset_path.exists():
-                log(f"Preset файл не найден: {preset_path}", "ERROR")
-                self.app.set_status("Ошибка: preset файл не найден")
+            if not bool(payload.get("success")):
+                error_text = str(payload.get("error") or "Не удалось подготовить пресет для запуска")
+                log(f"Ошибка автозапуска direct_zapret2: {error_text}", "ERROR")
+                self.app.set_status(f"Ошибка автозапуска: {error_text}")
                 return
 
-            # 3. Формируем selected_mode для запуска из preset файла
-            selected_mode = profile.to_selected_mode()
+            preset_path = str(payload.get("preset_path") or "").strip()
+            display_name = str(payload.get("display_name") or "Пресет").strip() or "Пресет"
+            selected_mode = payload.get("selected_mode")
+
+            if not preset_path:
+                log("Автозапуск direct_zapret2: preset_path пустой", "ERROR")
+                self.app.set_status("Ошибка автозапуска: preset файл не найден")
+                return
 
             log(f"Автозапуск direct_zapret2 из выбранного source-пресета: {preset_path}", "INFO")
 
-            # 4. Запускаем через dpi_controller
+            t_dispatch = _time.perf_counter()
             if hasattr(self.app, "update_current_strategy_display"):
-                self.app.update_current_strategy_display(profile.display_name)
+                self.app.update_current_strategy_display(display_name)
             self.app.dpi_controller.start_dpi_async(
-                selected_mode=selected_mode, launch_method="direct_zapret2"
+                selected_mode=selected_mode,
+                launch_method="direct_zapret2",
             )
-
+            self._log_startup_step(
+                "PostInitDirectDispatchToController",
+                f"{(_time.perf_counter() - t_dispatch)*1000:.0f}ms",
+            )
         except Exception as e:
-            log(f"Ошибка автозапуска direct_zapret2: {e}", "ERROR")
+            log(f"Ошибка завершения автозапуска direct_zapret2: {e}", "ERROR")
             import traceback
             log(traceback.format_exc(), "DEBUG")
             self.app.set_status(f"Ошибка автозапуска: {e}")

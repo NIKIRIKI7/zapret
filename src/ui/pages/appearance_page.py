@@ -626,35 +626,6 @@ class AppearancePage(BasePage):
             accent_card.add_layout(accent_layout)
             self.add_widget(accent_card)
 
-    def _show_accent_color_dialog(self) -> None:
-        """Открывает fluent-диалог выбора цвета с нормальным русским заголовком."""
-        if self._color_picker_btn is None or ColorDialog is None:
-            return
-        try:
-            title = tr_catalog(
-                "page.appearance.accent.color.pick",
-                language=self._ui_language,
-                default="Выбрать цвет",
-            )
-            dialog = ColorDialog(
-                QColor(self._color_picker_btn.color),
-                title,
-                self.window(),
-                False,
-            )
-
-            def _apply_color(color: QColor) -> None:
-                try:
-                    self._color_picker_btn.setColor(color)
-                    self._color_picker_btn.colorChanged.emit(color)
-                except Exception:
-                    pass
-
-            dialog.colorChanged.connect(_apply_color)
-            dialog.exec()
-        except Exception:
-            pass
-
             self.add_spacing(16)
             self._load_accent_color()
             self._load_extra_accent_settings()
@@ -710,6 +681,35 @@ class AppearancePage(BasePage):
         self._load_display_mode()
         self._load_bg_preset()
         self._load_ui_language()
+
+    def _show_accent_color_dialog(self) -> None:
+        """Открывает fluent-диалог выбора цвета с нормальным русским заголовком."""
+        if self._color_picker_btn is None or ColorDialog is None:
+            return
+        try:
+            title = tr_catalog(
+                "page.appearance.accent.color.pick",
+                language=self._ui_language,
+                default="Выбрать цвет",
+            )
+            dialog = ColorDialog(
+                QColor(self._color_picker_btn.color),
+                title,
+                self.window(),
+                False,
+            )
+
+            def _apply_color(color: QColor) -> None:
+                try:
+                    self._color_picker_btn.setColor(color)
+                    self._color_picker_btn.colorChanged.emit(color)
+                except Exception:
+                    pass
+
+            dialog.colorChanged.connect(_apply_color)
+            dialog.exec()
+        except Exception:
+            pass
 
     def _load_display_mode(self):
         """Load saved display mode from registry."""

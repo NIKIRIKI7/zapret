@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 import re
+import time
+from typing import Callable
 
 from log import log
 from core.presets.cache_signatures import path_cache_signature
@@ -52,22 +54,41 @@ class DirectFlowCoordinator:
         launch_method: str,
         *,
         require_filters: bool = False,
+        timing_callback: Callable[[str, float], None] | None = None,
+        timing_label: str | None = None,
     ) -> DirectLaunchProfile:
+        started_at = time.perf_counter()
         method = self._normalize_method(launch_method)
-        selected = self._ensure_selected_source_manifest(method)
+        label = str(timing_label or f"direct_flow.{method}.ensure_launch_profile")
 
+        t_selected = time.perf_counter()
+        selected = self._ensure_selected_source_manifest(
+            method,
+            timing_callback=timing_callback,
+            timing_label=label,
+        )
+        self._emit_timing(timing_callback, f"{label}.selected_manifest", t_selected)
+
+        t_path = time.perf_counter()
         launch_config_path = self.get_selected_source_path(method)
+        self._emit_timing(timing_callback, f"{label}.selected_source_path", t_path)
         if not launch_config_path.exists():
             raise DirectFlowError(f"Selected source preset not found: {launch_config_path}")
 
         text = ""
+        t_read = time.perf_counter()
         try:
             text = launch_config_path.read_text(encoding="utf-8").strip()
         except Exception as exc:
             raise DirectFlowError(f"Failed to read selected source preset: {exc}") from exc
+        self._emit_timing(timing_callback, f"{label}.read_preset_text", t_read)
 
+        t_filters = time.perf_counter()
         if require_filters and not self._has_required_filters(method, text):
             raise DirectFlowError("Выберите хотя бы одну категорию для запуска")
+        self._emit_timing(timing_callback, f"{label}.filter_validation", t_filters)
+
+        self._emit_timing(timing_callback, f"{label}.total", started_at)
 
         return DirectLaunchProfile(
             launch_method=method,
@@ -142,43 +163,82 @@ class DirectFlowCoordinator:
             raise DirectFlowError(f"Unsupported direct launch method: {launch_method}")
         return method
 
-    def _ensure_selected_source_manifest(self, launch_method: str) -> PresetManifest:
+    def _ensure_selected_source_manifest(
+        self,
+        launch_method: str,
+        *,
+        timing_callback: Callable[[str, float], None] | None = None,
+        timing_label: str | None = None,
+    ) -> PresetManifest:
+        started_at = time.perf_counter()
         method = self._normalize_method(launch_method)
         engine = self._METHOD_TO_ENGINE[method]
+        label = str(timing_label or f"direct_flow.{method}.ensure_selected_source_manifest")
 
-        self._ensure_support_files(method)
+        t_support = time.perf_counter()
+        self._ensure_support_files(
+            method,
+            timing_callback=timing_callback,
+            timing_label=label,
+        )
+        self._emit_timing(timing_callback, f"{label}.support_files", t_support)
 
         from core.services import get_selection_service
 
+        t_selection_service = time.perf_counter()
         selection = get_selection_service()
+        self._emit_timing(timing_callback, f"{label}.selection_service", t_selection_service)
+        t_list = time.perf_counter()
         preset_paths = self._list_source_preset_paths(engine)
+        self._emit_timing(timing_callback, f"{label}.list_source_presets", t_list)
         if not preset_paths:
             raise DirectFlowError(
                 "Пресеты не найдены. Скачайте файлы пресетов вручную: "
                 f"{self.PRESETS_DOWNLOAD_URL}"
             )
 
+        t_selected_name = time.perf_counter()
         selected_file_name = str(selection.get_selected_file_name(engine) or "").strip()
+        self._emit_timing(timing_callback, f"{label}.selected_file_name", t_selected_name)
         if selected_file_name:
+            t_cache_key = time.perf_counter()
             cache_key = self._selected_manifest_cache_key(method, engine, selected_file_name)
+            self._emit_timing(timing_callback, f"{label}.cache_key", t_cache_key)
+            t_cache_lookup = time.perf_counter()
             cached_manifest = self._selected_manifest_from_cache(method, cache_key)
+            self._emit_timing(timing_callback, f"{label}.cache_lookup", t_cache_lookup)
             if cached_manifest is not None:
+                self._emit_timing(timing_callback, f"{label}.total", started_at)
                 return cached_manifest
 
+            t_selected_path = time.perf_counter()
             selected_path = self._get_source_preset_path(engine, selected_file_name)
+            self._emit_timing(timing_callback, f"{label}.selected_path", t_selected_path)
             if selected_path.exists():
-                return self._remember_manifest_from_path(method, engine, selected_path, cache_key=cache_key)
+                t_manifest = time.perf_counter()
+                manifest = self._remember_manifest_from_path(method, engine, selected_path, cache_key=cache_key)
+                self._emit_timing(timing_callback, f"{label}.remember_selected_manifest", t_manifest)
+                self._emit_timing(timing_callback, f"{label}.total", started_at)
+                return manifest
 
+        t_default = time.perf_counter()
         default_path = self._get_source_preset_path(engine, "Default.txt")
         if default_path.exists():
             selected_file_name = selection.select_preset_file_name_fast(engine, default_path.name)
-            return self._remember_manifest_from_file_name(method, engine, selected_file_name)
+            manifest = self._remember_manifest_from_file_name(method, engine, selected_file_name)
+            self._emit_timing(timing_callback, f"{label}.default_manifest", t_default)
+            self._emit_timing(timing_callback, f"{label}.total", started_at)
+            return manifest
 
+        t_first = time.perf_counter()
         first_path = preset_paths[0]
         selected_file_name = selection.select_preset_file_name_fast(engine, first_path.name)
         selected_path = self._get_source_preset_path(engine, selected_file_name)
         if selected_path.exists():
-            return self._remember_manifest_from_path(method, engine, selected_path)
+            manifest = self._remember_manifest_from_path(method, engine, selected_path)
+            self._emit_timing(timing_callback, f"{label}.first_available_manifest", t_first)
+            self._emit_timing(timing_callback, f"{label}.total", started_at)
+            return manifest
 
         if not selected_file_name:
             raise DirectFlowError("Не удалось определить выбранный пресет")
@@ -191,17 +251,39 @@ class DirectFlowCoordinator:
             return any(flag in content for flag in ("--wf-tcp=", "--wf-udp="))
         return any(flag in content for flag in ("--wf-tcp-out", "--wf-udp-out", "--wf-raw-part"))
 
-    def _ensure_support_files(self, launch_method: str) -> None:
+    def _ensure_support_files(
+        self,
+        launch_method: str,
+        *,
+        timing_callback: Callable[[str, float], None] | None = None,
+        timing_label: str | None = None,
+    ) -> None:
         method = self._normalize_method(launch_method)
         if method in self._prepared_support_methods:
             return
+        label = str(timing_label or f"direct_flow.{method}.support_files")
+        started_at = time.perf_counter()
         try:
             from core.presets.support_files import prepare_direct_support_files
 
             prepare_direct_support_files(method)
             self._prepared_support_methods.add(method)
+            self._emit_timing(timing_callback, f"{label}.prepare_direct_support_files", started_at)
         except Exception as exc:
             log(f"Failed to prepare direct support files for {method}: {exc}", "DEBUG")
+
+    @staticmethod
+    def _emit_timing(
+        timing_callback: Callable[[str, float], None] | None,
+        section: str,
+        started_at: float,
+    ) -> None:
+        if timing_callback is None:
+            return
+        try:
+            timing_callback(str(section or ""), max(0.0, (time.perf_counter() - started_at) * 1000.0))
+        except Exception:
+            pass
 
     def _selected_manifest_cache_key(
         self,
