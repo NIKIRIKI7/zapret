@@ -42,6 +42,10 @@ class DirectFlowCoordinator:
     _PRESET_HEADER_RE = re.compile(r"^\s*#\s*Preset:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
     _TEMPLATE_ORIGIN_RE = re.compile(r"^\s*#\s*TemplateOrigin:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
+    def __init__(self) -> None:
+        self._prepared_support_methods: set[str] = set()
+        self._selected_manifest_cache: dict[str, tuple[tuple[object, ...], PresetManifest]] = {}
+
     def ensure_launch_profile(
         self,
         launch_method: str,
@@ -116,8 +120,9 @@ class DirectFlowCoordinator:
         from core.services import get_selection_service
 
         selected_file_name = get_selection_service().select_preset_file_name_fast(engine, file_name)
-        selected_path = self.get_selected_source_path(method)
-        display_name = self._read_display_name_from_source(selected_path, fallback=Path(selected_file_name).stem)
+        selected_manifest = self._remember_manifest_from_file_name(method, engine, selected_file_name)
+        selected_path = self._get_source_preset_path(engine, selected_file_name)
+        display_name = str(getattr(selected_manifest, "name", "") or "").strip() or Path(selected_file_name).stem
         return DirectLaunchProfile(
             launch_method=method,
             engine=engine,
@@ -154,20 +159,25 @@ class DirectFlowCoordinator:
 
         selected_file_name = str(selection.get_selected_file_name(engine) or "").strip()
         if selected_file_name:
+            cache_key = self._selected_manifest_cache_key(method, engine, selected_file_name)
+            cached_manifest = self._selected_manifest_from_cache(method, cache_key)
+            if cached_manifest is not None:
+                return cached_manifest
+
             selected_path = self._get_source_preset_path(engine, selected_file_name)
             if selected_path.exists():
-                return self._manifest_from_source_path(engine, selected_path)
+                return self._remember_manifest_from_path(method, engine, selected_path, cache_key=cache_key)
 
         default_path = self._get_source_preset_path(engine, "Default.txt")
         if default_path.exists():
             selected_file_name = selection.select_preset_file_name_fast(engine, default_path.name)
-            return self._manifest_from_source_path(engine, self._get_source_preset_path(engine, selected_file_name))
+            return self._remember_manifest_from_file_name(method, engine, selected_file_name)
 
         first_path = preset_paths[0]
         selected_file_name = selection.select_preset_file_name_fast(engine, first_path.name)
         selected_path = self._get_source_preset_path(engine, selected_file_name)
         if selected_path.exists():
-            return self._manifest_from_source_path(engine, selected_path)
+            return self._remember_manifest_from_path(method, engine, selected_path)
 
         if not selected_file_name:
             raise DirectFlowError("Не удалось определить выбранный пресет")
@@ -180,14 +190,99 @@ class DirectFlowCoordinator:
             return any(flag in content for flag in ("--wf-tcp=", "--wf-udp="))
         return any(flag in content for flag in ("--wf-tcp-out", "--wf-udp-out", "--wf-raw-part"))
 
-    @staticmethod
-    def _ensure_support_files(launch_method: str) -> None:
+    def _ensure_support_files(self, launch_method: str) -> None:
+        method = self._normalize_method(launch_method)
+        if method in self._prepared_support_methods:
+            return
         try:
             from core.presets.support_files import prepare_direct_support_files
 
-            prepare_direct_support_files(launch_method)
+            prepare_direct_support_files(method)
+            self._prepared_support_methods.add(method)
         except Exception as exc:
-            log(f"Failed to prepare direct support files for {launch_method}: {exc}", "DEBUG")
+            log(f"Failed to prepare direct support files for {method}: {exc}", "DEBUG")
+
+    @staticmethod
+    def _path_signature(path: Path) -> tuple[int, int]:
+        try:
+            stat = path.stat()
+            return (
+                int(getattr(stat, "st_mtime_ns", 0) or 0),
+                int(getattr(stat, "st_size", 0) or 0),
+            )
+        except Exception:
+            return (0, 0)
+
+    def _selected_manifest_cache_key(
+        self,
+        launch_method: str,
+        engine: str,
+        selected_file_name: str,
+    ) -> tuple[object, ...] | None:
+        candidate = str(selected_file_name or "").strip()
+        if not candidate:
+            return None
+
+        from core.services import get_app_paths
+
+        engine_paths = get_app_paths().engine_paths(engine).ensure_directories()
+        preset_path = engine_paths.presets_dir / candidate
+        if not preset_path.exists():
+            return None
+
+        return (
+            self._normalize_method(launch_method),
+            engine,
+            candidate.lower(),
+            *self._path_signature(engine_paths.selected_state_path),
+            *self._path_signature(engine_paths.index_path),
+            *self._path_signature(preset_path),
+        )
+
+    def _selected_manifest_from_cache(
+        self,
+        launch_method: str,
+        cache_key: tuple[object, ...] | None,
+    ) -> PresetManifest | None:
+        if cache_key is None:
+            return None
+        cached = self._selected_manifest_cache.get(self._normalize_method(launch_method))
+        if cached is None:
+            return None
+        cached_key, manifest = cached
+        if cached_key == cache_key:
+            return manifest
+        return None
+
+    def _remember_manifest_from_path(
+        self,
+        launch_method: str,
+        engine: str,
+        path: Path,
+        *,
+        cache_key: tuple[object, ...] | None = None,
+    ) -> PresetManifest:
+        manifest = self._manifest_from_source_path(engine, path)
+        resolved_key = cache_key
+        if resolved_key is None:
+            resolved_key = self._selected_manifest_cache_key(launch_method, engine, path.name)
+        if resolved_key is not None:
+            self._selected_manifest_cache[self._normalize_method(launch_method)] = (resolved_key, manifest)
+        return manifest
+
+    def _remember_manifest_from_file_name(
+        self,
+        launch_method: str,
+        engine: str,
+        selected_file_name: str,
+    ) -> PresetManifest:
+        selected_path = self._get_source_preset_path(engine, selected_file_name)
+        return self._remember_manifest_from_path(
+            launch_method,
+            engine,
+            selected_path,
+            cache_key=self._selected_manifest_cache_key(launch_method, engine, selected_file_name),
+        )
 
     @classmethod
     def _read_display_name_from_source(cls, path: Path, *, fallback: str) -> str:

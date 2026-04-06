@@ -391,15 +391,19 @@ class DirectPresetFacadeBackend:
             if key[:2] != prefix
         }
 
-    def _basic_ui_payload_cache_key(self) -> tuple[str, str, str, str, int, int] | None:
-        selected_manifest = self.get_selected_manifest()
+    def _basic_ui_payload_cache_key(
+        self,
+        selected_manifest: PresetManifest | None = None,
+    ) -> tuple[str, str, str, str, int, int] | None:
+        if selected_manifest is None:
+            selected_manifest = self.get_selected_manifest()
         if selected_manifest is None:
             return None
         selected_file_name = str(selected_manifest.file_name or "").strip()
         if not selected_file_name:
             return None
         try:
-            path = self.get_source_path_by_file_name(selected_file_name)
+            path = self._selected_source_path_from_manifest(selected_manifest)
             stat = path.stat()
         except Exception:
             return None
@@ -412,14 +416,21 @@ class DirectPresetFacadeBackend:
             int(getattr(stat, "st_size", 0) or 0),
         )
 
-    def _load_selected_preset_model(self):
-        selected_manifest = self.get_selected_manifest()
+    def _selected_source_path_from_manifest(self, selected_manifest: PresetManifest) -> Path:
+        selected_file_name = str(getattr(selected_manifest, "file_name", "") or "").strip()
+        if not selected_file_name:
+            raise ValueError("Selected source preset file name is required")
+        return get_app_paths().engine_paths(self.engine).ensure_directories().presets_dir / selected_file_name
+
+    def _load_selected_preset_model(self, selected_manifest: PresetManifest | None = None):
+        if selected_manifest is None:
+            selected_manifest = self.get_selected_manifest()
         if selected_manifest is None:
             return None
         selected_file_name = str(selected_manifest.file_name or "").strip()
         if not selected_file_name:
             return None
-        return self._service().read_source_preset(self.get_source_path_by_file_name(selected_file_name))
+        return self._service().read_source_preset(self._selected_source_path_from_manifest(selected_manifest))
 
     def list_manifests(self) -> list[PresetManifest]:
         return get_preset_repository().list_manifests(self.engine)
@@ -427,7 +438,8 @@ class DirectPresetFacadeBackend:
     def get_basic_ui_payload(self, *, startup_scope: str | None = None) -> BasicUiPayload:
         _t_total = _time.perf_counter()
         _t_load = _time.perf_counter()
-        cache_key = self._basic_ui_payload_cache_key()
+        selected_manifest = self.get_selected_manifest()
+        cache_key = self._basic_ui_payload_cache_key(selected_manifest)
         if cache_key is not None:
             cached_payload = _BASIC_UI_PAYLOAD_CACHE.get(cache_key)
             if cached_payload is not None:
@@ -444,7 +456,7 @@ class DirectPresetFacadeBackend:
                     extra=f"targets={len(cached_payload.target_items or {})}, cache=hit",
                 )
                 return cached_payload
-        preset = self.get_selected_source_preset_model()
+        preset = self._load_selected_preset_model(selected_manifest)
         _log_startup_payload_metric(
             startup_scope,
             "_build_content.payload.backend.load_selected_preset",
@@ -473,7 +485,6 @@ class DirectPresetFacadeBackend:
             startup_scope=startup_scope,
             strategy_set=self._current_direct_strategy_set(),
         )
-        selected_manifest = self.get_selected_manifest()
         payload = replace(
             payload,
             selected_preset_file_name=str(getattr(selected_manifest, "file_name", "") or ""),
