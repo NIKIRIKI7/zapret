@@ -51,6 +51,7 @@ def _read_header_text(path: Path) -> str:
 class PresetRepository:
     def __init__(self, paths: AppPaths):
         self._paths = paths
+        self._index_cache: dict[str, tuple[tuple[object, ...], list[PresetManifest]]] = {}
 
     def list_manifests(self, engine: str) -> list[PresetManifest]:
         manifests = self._load_index(engine)
@@ -197,12 +198,19 @@ class PresetRepository:
         return self._engine_paths(engine).index_path
 
     def _load_index(self, engine: str) -> list[PresetManifest]:
+        normalized_engine = str(engine or "").strip().lower()
+        cache_key = self._current_index_cache_key(normalized_engine)
+        cached_entry = self._index_cache.get(normalized_engine)
+        if cache_key is not None and cached_entry is not None and cached_entry[0] == cache_key:
+            return list(cached_entry[1])
+
         self._bootstrap_index(engine)
         path = self._index_path(engine)
         if not path.exists():
             return []
         data = json.loads(_read_text(path) or "[]")
         manifests = [self._manifest_from_raw(item) for item in data if isinstance(item, dict)]
+        self._cache_index(normalized_engine, manifests)
         return manifests
 
     def _bootstrap_index(self, engine: str) -> None:
@@ -290,10 +298,44 @@ class PresetRepository:
         return "user"
 
     def _save_index(self, engine: str, manifests: Iterable[PresetManifest]) -> None:
+        normalized_engine = str(engine or "").strip().lower()
         path = self._index_path(engine)
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = [asdict(item) for item in manifests]
+        manifest_list = list(manifests)
+        payload = [asdict(item) for item in manifest_list]
         self._atomic_write_json(path, payload)
+        self._cache_index(normalized_engine, manifest_list)
+
+    def _cache_index(self, engine: str, manifests: Iterable[PresetManifest]) -> None:
+        cache_key = self._current_index_cache_key(engine)
+        if cache_key is None:
+            return
+        self._index_cache[str(engine or "").strip().lower()] = (
+            cache_key,
+            list(manifests),
+        )
+
+    def _current_index_cache_key(self, engine: str) -> tuple[object, ...] | None:
+        try:
+            engine_paths = self._engine_paths(engine)
+        except Exception:
+            return None
+        return (
+            *self._path_signature(engine_paths.index_path),
+            *self._path_signature(engine_paths.presets_dir),
+        )
+
+    @staticmethod
+    def _path_signature(path: Path) -> tuple[object, ...]:
+        try:
+            stat = path.stat()
+            return (
+                True,
+                int(getattr(stat, "st_mtime_ns", 0) or 0),
+                int(getattr(stat, "st_size", 0) or 0),
+            )
+        except Exception:
+            return (False, 0, 0)
 
     def _find_index(self, manifests: list[PresetManifest], file_name: str) -> int:
         target = str(file_name or "").strip().lower()

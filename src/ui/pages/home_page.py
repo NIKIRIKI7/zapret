@@ -316,9 +316,8 @@ class HomePage(BasePage):
         """При показе страницы обновляем статус автозапуска"""
         _t_show = _time.perf_counter()
         super().showEvent(event)
-        # Не нагружаем самый первый кадр второстепенными действиями.
-        QTimer.singleShot(280, self._check_autostart_status)
-        QTimer.singleShot(360, self._refresh_strategy_card)
+        self._check_autostart_status()
+        self._refresh_strategy_card()
         if not self._startup_showevent_profile_logged:
             self._startup_showevent_profile_logged = True
             _log_startup_home_metric("showEvent.schedule_deferred", (_time.perf_counter() - _t_show) * 1000)

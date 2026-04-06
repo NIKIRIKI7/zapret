@@ -242,6 +242,7 @@ class Zapret2DirectControlPage(BasePage):
     navigate_to_direct_launch = pyqtSignal()  # → PageName.ZAPRET2_DIRECT
     navigate_to_blobs = pyqtSignal()          # → PageName.BLOBS
     direct_mode_changed = pyqtSignal(str)     # "basic" | "advanced"
+    deferred_show_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         _t_init = _time.perf_counter()
@@ -265,6 +266,7 @@ class Zapret2DirectControlPage(BasePage):
         self._preset_summary_worker = None
         self._preset_summary_request_id = 0
         self._preset_summary_dirty = True
+        self.deferred_show_requested.connect(self._run_deferred_show_work)
         _t_build = _time.perf_counter()
         self._build_ui()
         _log_startup_z2_control_metric("__init__.build_ui", (_time.perf_counter() - _t_build) * 1000)
@@ -297,9 +299,16 @@ class Zapret2DirectControlPage(BasePage):
         except Exception:
             pass
         _log_startup_z2_control_metric("showEvent.sync_program_settings", (_time.perf_counter() - _t_sync) * 1000)
+        self.deferred_show_requested.emit()
+        if not self._startup_showevent_profile_logged:
+            self._startup_showevent_profile_logged = True
+            _log_startup_z2_control_metric("showEvent.total", (_time.perf_counter() - _t_show) * 1000)
+
+    def _run_deferred_show_work(self) -> None:
+        if not self.isVisible():
+            return
 
         _t_adv = _time.perf_counter()
-        self._refresh_selected_preset_name_fast()
         self._schedule_advanced_settings_reload()
         self._schedule_preset_summary_reload()
         _log_startup_z2_control_metric("showEvent.load_advanced_settings", (_time.perf_counter() - _t_adv) * 1000)
@@ -310,9 +319,6 @@ class Zapret2DirectControlPage(BasePage):
         except Exception:
             pass
         _log_startup_z2_control_metric("showEvent.refresh_mode_label", (_time.perf_counter() - _t_mode) * 1000)
-        if not self._startup_showevent_profile_logged:
-            self._startup_showevent_profile_logged = True
-            _log_startup_z2_control_metric("showEvent.total", (_time.perf_counter() - _t_show) * 1000)
 
     def _prewarm_direct_payload(self) -> None:
         try:
@@ -1255,7 +1261,6 @@ class Zapret2DirectControlPage(BasePage):
         if "preset_revision" in changed_fields or not changed_fields:
             self._advanced_settings_dirty = True
             self._preset_summary_dirty = True
-            self._refresh_selected_preset_name_fast()
             if self.isVisible():
                 self._schedule_advanced_settings_reload(force=True)
                 self._schedule_preset_summary_reload(force=True)
@@ -1322,7 +1327,6 @@ class Zapret2DirectControlPage(BasePage):
 
     def update_strategy(self, name: str):
         self._update_stop_winws_button_text()
-        self._refresh_selected_preset_name_fast()
         self._schedule_preset_summary_reload()
 
     def set_ui_language(self, language: str) -> None:

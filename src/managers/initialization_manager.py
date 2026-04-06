@@ -3,7 +3,7 @@
 import threading
 
 from app_notifications import advisory_notification
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal
 from log import log
 
 
@@ -22,12 +22,9 @@ class InitializationManager:
         self.app = app_instance
         self.init_tasks_completed = set()
 
-        # Служебные флаги/счетчики для мягкой верификации
+        # Финализация старта теперь идёт по прямому жизненному циклу, а не через
+        # таймерную "проверку готовности".
         self._verify_done = False
-        self._verify_attempts = 0
-        self._verify_max_attempts = 8       # Максимум 8 попыток
-        self._verify_interval_ms = 1000     # Интервал 1 сек
-        self._verify_timer_started = False
         self._post_init_scheduled = False
 
         # Для фоновой проверки ipsets, чтобы можно было корректно завершить поток
@@ -82,55 +79,39 @@ class InitializationManager:
         
         self.app.set_status("Инициализация компонентов...")
 
-        # ═══════════════════════════════════════════════════════════════
-        # ФАЗА 1: Критичные компоненты UI (быстрые, нужны для отображения)
-        # ═══════════════════════════════════════════════════════════════
-        init_tasks = [
-            (0,   self._init_dpi_starter),        # Быстро, нужен для кнопок
-            (10,  self._init_dpi_controller),     # Зависит от dpi_starter
-            (20,  self._init_menu),               # UI элементы
-            (30,  self._connect_signals),         # Связываем UI
+        # Критичный контур старта выполняем прямо и последовательно.
+        # Это убирает искусственные ожидания 10/300/1400/2200/4200ms и делает
+        # startup определённым: готовые компоненты доступны сразу.
+        startup_steps = [
+            self._init_dpi_starter,
+            self._init_dpi_controller,
+            self._init_menu,
+            self._connect_signals,
+            self._init_core_managers,
+            self._init_strategy_manager,
+            self._init_theme_manager,
+            self._finalize_managers_init,
+            self._init_service_managers,
+            self._init_process_monitor,
+            self._init_network_managers,
         ]
-        
-        # ═══════════════════════════════════════════════════════════════
-        # ФАЗА 2: Менеджеры (основная логика приложения)
-        # ═══════════════════════════════════════════════════════════════
-        init_tasks.extend([
-            (50,  self._init_core_managers),      # DPI Manager + обязательные файлы
-            (70,  self._init_strategy_manager),   # Стратегии (локально)
-            (90,  self._init_theme_manager),      # Тема (асинхронно)
-            (1400, self._init_service_managers),  # Service, Update
-        ])
-        
-        # ═══════════════════════════════════════════════════════════════
-        # ФАЗА 3: Фоновые сервисы (не критичны для UI)
-        # ═══════════════════════════════════════════════════════════════
-        init_tasks.extend([
-            (300, self._finalize_managers_init),  # Финализация
-            (2200, self._init_process_monitor),   # Process Monitor (idle)
-            (3200, self._init_network_managers),  # Discord, Hosts, DNS (idle)
-            (450 if getattr(self.app, "start_in_tray", False) else 4200, self._init_tray),
-            (1500, self._init_logger),            # Логирование (idle)
-            (5200, self._init_strategy_cache),    # Отложенный прогрев кэша
-        ])
-        
-        # ═══════════════════════════════════════════════════════════════
-        # ФАЗА 4: Отложенные проверки (могут быть медленными)
-        # ═══════════════════════════════════════════════════════════════
-        init_tasks.extend([
-            (1800, self._init_hostlists_check),   # Проверка hostlists (в фоне)
-            (2000, self._init_ipsets_check),      # Проверка ipsets (в фоне)
-            (12000, self._init_subscription_check),# Проверка подписки (сеть, отложено)
-        ])
 
-        for delay, task in init_tasks:
-            log(f"🟡 Планируем {task.__name__} через {delay}ms", "DEBUG")
-            QTimer.singleShot(delay, task)
+        if bool(getattr(self.app, "start_in_tray", False)):
+            startup_steps.append(self._init_tray)
 
-        # Мягкая верификация с повторами
-        if not self._verify_timer_started:
-            self._verify_timer_started = True
-            QTimer.singleShot(1500, self._verify_initialization)
+        startup_steps.append(self._init_logger)
+
+        for task in startup_steps:
+            log(f"🟡 Выполняем {task.__name__} сразу", "DEBUG")
+            task()
+
+        # Некритичные тяжёлые операции уже сами уходят в фоновые потоки.
+        self._init_strategy_cache()
+        self._init_hostlists_check()
+        self._init_ipsets_check()
+        self._init_subscription_check()
+
+        self._check_and_complete_initialization()
 
     # ───────────────────────── инициализация подсистем ───────────────────────
 
@@ -253,44 +234,8 @@ class InitializationManager:
             winws_exe = get_winws_exe_for_method(launch_method)
             if is_zapret2_mode(launch_method):
                 log(f"Используется winws2.exe для режима {launch_method} (Zapret 2)", "INFO")
-                # Ensure default preset exists for direct_zapret2 mode
-                if launch_method == "direct_zapret2":
-                    from core.services import get_direct_flow_coordinator
-                    try:
-                        get_direct_flow_coordinator().ensure_selected_source_path("direct_zapret2")
-                    except Exception as e:
-                        log(
-                            f"direct_zapret2: не удалось подготовить выбранный source-пресет: {e}",
-                            "ERROR",
-                        )
-                        try:
-                            self.app.set_status(f"Ошибка: не удалось подготовить выбранный пресет: {e}")
-                        except Exception:
-                            pass
-                elif launch_method == "direct_zapret2_orchestra":
-                    from preset_orchestra_zapret2 import ensure_default_preset_exists
-                    if not ensure_default_preset_exists():
-                        log(
-                            "direct_zapret2_orchestra: не удалось подготовить preset-zapret2-orchestra.txt (нет шаблона Default)",
-                            "ERROR",
-                        )
-                        try:
-                            self.app.set_status("Ошибка: отсутствует Default шаблон оркестра")
-                        except Exception:
-                            pass
             else:
                 log(f"Используется winws.exe для режима {launch_method}", "INFO")
-                # Ensure default preset exists for direct_zapret1 mode
-                if launch_method == "direct_zapret1":
-                    from core.services import get_direct_flow_coordinator
-                    try:
-                        get_direct_flow_coordinator().ensure_selected_source_path("direct_zapret1")
-                    except Exception:
-                        log("direct_zapret1: не удалось подготовить выбранный source-пресет", "ERROR")
-                        try:
-                            self.app.set_status("Ошибка: не удалось подготовить выбранный пресет")
-                        except Exception:
-                            pass
 
             self.app.dpi_starter = BatDPIStart(
                 winws_exe=winws_exe,
@@ -733,10 +678,7 @@ class InitializationManager:
                 else:
                     log("Фоновая проверка подписки отложена: donate_checker еще не готов", "DEBUG")
             else:
-                log("subscription_manager не инициализирован, повторная попытка через 1с", "WARNING")
-                # Повторная попытка через 1 секунду
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(1000, self._init_subscription_check)
+                log("subscription_manager не инициализирован, фоновая проверка подписки пропущена", "WARNING")
         except Exception as e:
             log(f"Ошибка проверки подписки: {e}", "ERROR")
 
@@ -745,27 +687,6 @@ class InitializationManager:
     def _required_components(self):
         """Список требуемых компонентов для успешного старта"""
         return ['dpi_starter', 'dpi_controller', 'strategy_manager', 'managers']
-
-    def _get_post_init_delay_ms(self) -> int:
-        """Возвращает задержку перед post-init задачами."""
-        try:
-            from strategy_menu import get_strategy_launch_method
-
-            # Для direct-режимов запускаем post-init почти сразу:
-            # искусственная пауза в 500ms только раздувает Startup PostInitDone
-            # и делает старт окна визуально более "вязким", хотя компоненты уже готовы.
-            if get_strategy_launch_method() in ("direct_zapret2", "direct_zapret1"):
-                return 75
-        except Exception:
-            pass
-
-        return 500
-
-    def _get_dpi_autostart_delay_ms(self, launch_method: str) -> int:
-        """Возвращает задержку перед автозапуском DPI по режиму."""
-        if launch_method == "direct_zapret2":
-            return 75
-        return 1000
 
     def _check_and_complete_initialization(self) -> bool:
         """
@@ -790,56 +711,11 @@ class InitializationManager:
                 pass
             log("Все компоненты успешно инициализированы", "✅ SUCCESS")
 
-            # Финальные задачи
-            QTimer.singleShot(self._get_post_init_delay_ms(), self._post_init_tasks)
-            QTimer.singleShot(3000, self._sync_autostart_status)
+            # Финальные задачи запускаем сразу по факту готовности, без таймерной оркестрации.
+            self._post_init_tasks()
+            self._sync_autostart_status()
 
         return True
-
-    def _verify_initialization(self):
-        """
-        «Мягкая» верификация: делаем несколько попыток с интервалом.
-        Предупреждение показываем только после истечения дедлайна.
-        """
-        if self._verify_done:
-            return
-
-        if self._check_and_complete_initialization():
-            return  # все ок
-
-        # Если не готовы — подождём ещё несколько раз
-        self._verify_attempts += 1
-        required_components = self._required_components()
-        missing = [c for c in required_components if c not in self.init_tasks_completed]
-        log(
-            f"Ожидание инициализации (попытка {self._verify_attempts}/{self._verify_max_attempts}), "
-            f"не готовы: {', '.join(missing)}",
-            "DEBUG"
-        )
-
-        if self._verify_attempts < self._verify_max_attempts:
-            QTimer.singleShot(self._verify_interval_ms, self._verify_initialization)
-            return
-
-        # Дедлайн истёк — показываем предупреждение
-        self._verify_done = True
-        error_msg = f"Не инициализированы: {', '.join(missing)}"
-        try:
-            self.app.set_status(f"⚠️ {error_msg}")
-        except Exception:
-            pass
-        log(error_msg, "❌ ERROR")
-
-        try:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(
-                self.app,
-                "Неполная инициализация",
-                f"Некоторые компоненты не были инициализированы:\n{', '.join(missing)}\n\n"
-                "Приложение может работать нестабильно."
-            )
-        except Exception as e:
-            log(f"Не удалось показать предупреждение: {e}", "ERROR")
 
     def _sync_autostart_status(self):
         """Синхронизирует статус автозапуска с реальным состоянием"""
@@ -897,15 +773,13 @@ class InitializationManager:
             # Проверяем режим запуска ПЕРЕД делегированием
             from strategy_menu import get_strategy_launch_method
             launch_method = get_strategy_launch_method()
-            autostart_delay_ms = self._get_dpi_autostart_delay_ms(launch_method)
-
             if launch_method == "direct_zapret2":
                 # Отдельный путь для direct_zapret2 (использует preset файл)
-                QTimer.singleShot(autostart_delay_ms, self._start_direct_zapret2_autostart)
+                self._start_direct_zapret2_autostart()
             else:
                 # Все остальные режимы через dpi_manager
                 if hasattr(self.app, 'dpi_manager'):
-                    QTimer.singleShot(autostart_delay_ms, self.app.dpi_manager.delayed_dpi_start)
+                    self.app.dpi_manager.delayed_dpi_start()
 
             # Обновления проверяются вручную на вкладке "Серверы"
 

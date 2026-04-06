@@ -1476,6 +1476,9 @@ class Zapret1UserPresetsPage(BasePage):
         candidate = str(name or "").strip()
         if not candidate or not candidate.lower().endswith(".txt"):
             return False
+        cached_meta = self._cached_presets_metadata.get(candidate)
+        if isinstance(cached_meta, dict):
+            return bool(cached_meta.get("is_builtin", False))
         try:
             manifest = self._get_direct_facade().get_manifest_by_file_name(candidate)
             return bool(manifest is not None and str(manifest.kind or "").strip().lower() == "builtin")

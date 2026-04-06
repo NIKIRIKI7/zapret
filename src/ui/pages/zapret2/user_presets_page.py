@@ -1646,6 +1646,10 @@ class Zapret2UserPresetsPage(BasePage):
         if not candidate or not candidate.lower().endswith(".txt"):
             return False
 
+        cached_meta = self._cached_presets_metadata.get(candidate)
+        if isinstance(cached_meta, dict):
+            return bool(cached_meta.get("is_builtin", False))
+
         facade = self._get_direct_facade()
         if facade is not None:
             try:

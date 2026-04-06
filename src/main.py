@@ -142,7 +142,7 @@ _preload_slow_modules()
 # ──────────────────────────────────────────────────────────────
 import subprocess, time
 
-from PyQt6.QtCore    import QTimer, QEvent, Qt, QCoreApplication
+from PyQt6.QtCore    import QTimer, QEvent, Qt, QCoreApplication, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox, QWidget, QApplication
 
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
@@ -353,6 +353,8 @@ if TYPE_CHECKING:
 
 class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
     """Главное окно приложения — FluentWindow + навигация + подписки."""
+
+    deferred_init_requested = pyqtSignal()
 
     from ui.theme import ThemeHandler
     # ✅ ДОБАВЛЯЕМ TYPE HINTS для менеджеров
@@ -830,14 +832,14 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         self._startup_managers_ready_ms = None
         self._startup_post_init_done_logged = False
         self._startup_post_init_done_ms = None
+        self.deferred_init_requested.connect(self._deferred_init, Qt.ConnectionType.QueuedConnection)
 
         # Show window right away (FluentWindow handles rendering)
         if not self.start_in_tray and not self.isVisible():
             self.show()
             log("Основное окно показано (FluentWindow, init в фоне)", "DEBUG")
 
-        deferred_init_delay_ms = 0 if self.start_in_tray else 60
-        QTimer.singleShot(deferred_init_delay_ms, self._deferred_init)
+        self.deferred_init_requested.emit()
 
     def _mark_startup_subscription_ready(self, source: str = "subscription_ready") -> None:
         self._startup_subscription_ready = True
@@ -850,7 +852,7 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         try:
             subscription_manager = getattr(self, "subscription_manager", None)
             if subscription_manager is not None:
-                QTimer.singleShot(0, subscription_manager.initialize_async)
+                subscription_manager.initialize_async()
         except Exception:
             pass
 
@@ -906,8 +908,8 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         self._init_real_donate_checker()  # Упрощенная версия
         self.update_title_with_subscription_status(False, None, 0, source="init")
 
-        # Запускаем асинхронную инициализацию через менеджер
-        QTimer.singleShot(50, self.initialization_manager.run_async_init)
+        # Стартовый порядок теперь управляется самим initialization_manager без таймерной задержки.
+        self.initialization_manager.run_async_init()
         # Гирлянда инициализируется автоматически в subscription_manager после проверки подписки
         log(f"⏱ Startup: deferred init total {( _time.perf_counter() - _t_total ) * 1000:.0f}ms", "DEBUG")
 

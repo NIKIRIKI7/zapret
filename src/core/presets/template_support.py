@@ -24,21 +24,18 @@ from .v1_template_runtime import (
 from .v1_builtin_templates import sync_repo_builtins_to_runtime_templates_v1
 
 
-def resolve_reset_template(launch_method: str, preset_name: str) -> str:
-    method = str(launch_method or "").strip().lower()
-    if method == "direct_zapret2":
-        sync_repo_builtins_to_runtime_templates_v2()
-        invalidate_templates_cache()
-        content = get_template_content(preset_name)
-        if not content:
-            base = get_builtin_base_from_copy_name(preset_name)
-            if base:
-                content = get_template_content(base)
-        if not content:
-            content = get_default_template_content()
-        return str(content or "")
+def _resolve_reset_template_v2_from_runtime(preset_name: str) -> str:
+    content = get_template_content(preset_name)
+    if not content:
+        base = get_builtin_base_from_copy_name(preset_name)
+        if base:
+            content = get_template_content(base)
+    if not content:
+        content = get_default_template_content()
+    return str(content or "")
 
-    sync_repo_builtins_to_runtime_templates_v1()
+
+def _resolve_reset_template_v1_from_runtime(preset_name: str) -> str:
     content = get_template_content_v1(preset_name)
     if not content:
         base = get_builtin_base_from_copy_name_v1(preset_name)
@@ -49,6 +46,25 @@ def resolve_reset_template(launch_method: str, preset_name: str) -> str:
     if not content:
         content = get_builtin_preset_content_v1("Default")
     return str(content or "")
+
+
+def resolve_reset_template(launch_method: str, preset_name: str) -> str:
+    method = str(launch_method or "").strip().lower()
+    if method == "direct_zapret2":
+        content = _resolve_reset_template_v2_from_runtime(preset_name)
+        if content:
+            return content
+
+        sync_repo_builtins_to_runtime_templates_v2()
+        invalidate_templates_cache()
+        return _resolve_reset_template_v2_from_runtime(preset_name)
+
+    content = _resolve_reset_template_v1_from_runtime(preset_name)
+    if content:
+        return content
+
+    sync_repo_builtins_to_runtime_templates_v1()
+    return _resolve_reset_template_v1_from_runtime(preset_name)
 
 
 def reset_all_templates(launch_method: str) -> tuple[int, int, list[str]]:
