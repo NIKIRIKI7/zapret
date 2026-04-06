@@ -661,6 +661,30 @@ class DPIController:
         if runtime_service is not None:
             runtime_service.mark_stopped(clear_error=True)
 
+    def _maybe_restart_discord_after_runtime_apply(self, *, skip_first_start: bool) -> bool:
+        """Перезапускает Discord после применения пресета, если это разрешено настройкой."""
+        try:
+            is_first_start = bool(getattr(self.app, "_first_dpi_start", True))
+            if skip_first_start and is_first_start:
+                return False
+
+            from discord.discord_restart import get_discord_restart_setting
+
+            if not bool(get_discord_restart_setting(default=True)):
+                return False
+
+            discord_manager = getattr(self.app, "discord_manager", None)
+            if discord_manager is None:
+                return False
+
+            return bool(discord_manager.restart_discord_if_running())
+        except Exception as e:
+            log(f"Discord restart check error: {e}", "DEBUG")
+            return False
+        finally:
+            if skip_first_start:
+                self.app._first_dpi_start = False
+
     def _process_pending_direct_preset_switch(self) -> None:
         target_generation = int(self._direct_preset_switch_requested_generation or 0)
         if target_generation <= int(self._direct_preset_switch_completed_generation or 0):
@@ -1410,17 +1434,9 @@ class DPIController:
             # Устанавливаем флаг намеренного запуска
             self.app.intentional_start = True
 
-            # Перезапускаем Discord если нужно
-            try:
-                from discord.discord_restart import get_discord_restart_setting
-                is_first = getattr(self.app, '_first_dpi_start', True)
-                if not is_first and get_discord_restart_setting():
-                    if hasattr(self.app, 'discord_manager'):
-                        self.app.discord_manager.restart_discord_if_running()
-                else:
-                    self.app._first_dpi_start = False
-            except Exception as e:
-                log(f"Discord restart check error: {e}", "DEBUG")
+            # Discord трогаем только после успешного применения runtime,
+            # а пропуск первого запуска держим в одном общем месте.
+            self._maybe_restart_discord_after_runtime_apply(skip_first_start=True)
 
             pending_warnings = list(getattr(self, "_pending_launch_warnings", []) or [])
             self._pending_launch_warnings = []
@@ -1524,6 +1540,7 @@ class DPIController:
                     f"Direct preset switch успешно завершён, поколение {generation} ({launch_method})",
                     "INFO",
                 )
+                self._maybe_restart_discord_after_runtime_apply(skip_first_start=False)
                 if int(self._direct_preset_switch_requested_generation or 0) <= int(self._direct_preset_switch_completed_generation or 0):
                     self.app.set_status("✅ Пресет успешно применён")
             else:
