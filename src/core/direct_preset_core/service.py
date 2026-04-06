@@ -322,16 +322,21 @@ class DirectPresetService:
         normalized_key = str(target_key or "").strip().lower()
         if not normalized_key:
             return None
-        details = self.get_target_details(source, normalized_key, strategy_set=strategy_set)
-        if details is None:
+        contexts = self.collect_target_contexts(source)
+        ctx = contexts.get(normalized_key)
+        if ctx is None:
             return None
+        state = self._resolve_target_state_from_context(source, ctx, strategy_set=strategy_set)
+        if state is None:
+            return None
+        catalogs = self._strategy_catalogs()
         return TargetDetailPayload(
             target_key=normalized_key,
-            target_item=self.target_info(source, normalized_key),
-            details=details,
-            strategy_entries=self.get_strategy_entries(source, normalized_key),
-            raw_args_text=self._get_raw_args(source, normalized_key),
-            filter_mode=self._get_filter_mode(source, normalized_key),
+            target_item=self._target_metadata.build_ui_item(normalized_key),
+            details=state.details,
+            strategy_entries=self._strategy_entries_from_candidates(ctx.strategy_candidates, catalogs=catalogs),
+            raw_args_text="\n".join(self._rules().strip_helper_lines(list(state.raw_action_lines))).strip(),
+            filter_mode=ctx.filter_mode,
         )
 
     def get_target_details(

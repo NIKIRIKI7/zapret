@@ -222,9 +222,9 @@ def _get_y_lparam(value: int) -> int:
 
 
 def _resolve_tg_proxy_manager():
-    from ui.pages.telegram_proxy_page import _get_proxy_manager
+    from telegram_proxy.manager import get_proxy_manager
 
-    return _get_proxy_manager()
+    return get_proxy_manager()
 
 
 def _get_loaded_page(window, page_name):
@@ -495,7 +495,6 @@ class SystemTrayManager:
         self._taskbar_created_message = self._message_window.taskbar_created_message
         self._add_icon()
         self._connect_proxy_status_signal()
-        QTimer.singleShot(1000, self._check_tg_proxy_autostart)
 
     def _load_icon_handle(self, icon_path: str):
         if sys.platform != "win32":
@@ -1001,63 +1000,6 @@ class SystemTrayManager:
             set_tg_proxy_enabled(bool(running))
         except Exception:
             pass
-
-    def _check_tg_proxy_autostart(self):
-        try:
-            from config.reg import get_tg_proxy_autostart
-            if not get_tg_proxy_autostart():
-                return
-
-            mgr = _resolve_tg_proxy_manager()
-            if mgr.is_running:
-                return
-
-            from config.reg import (
-                get_tg_proxy_host,
-                get_tg_proxy_port,
-                get_tg_proxy_upstream_enabled,
-                get_tg_proxy_upstream_host,
-                get_tg_proxy_upstream_mode,
-                get_tg_proxy_upstream_pass,
-                get_tg_proxy_upstream_port,
-                get_tg_proxy_upstream_user,
-            )
-
-            port = get_tg_proxy_port()
-            host = get_tg_proxy_host()
-            upstream_config = None
-            try:
-                if get_tg_proxy_upstream_enabled():
-                    up_host = get_tg_proxy_upstream_host()
-                    up_port = get_tg_proxy_upstream_port()
-                    if up_host and up_port > 0:
-                        from telegram_proxy.wss_proxy import UpstreamProxyConfig
-
-                        upstream_config = UpstreamProxyConfig(
-                            enabled=True,
-                            host=up_host,
-                            port=up_port,
-                            mode=get_tg_proxy_upstream_mode(),
-                            username=get_tg_proxy_upstream_user(),
-                            password=get_tg_proxy_upstream_pass(),
-                        )
-            except Exception:
-                pass
-
-            import threading
-
-            threading.Thread(
-                target=lambda: mgr.start_proxy(
-                    port=port,
-                    mode="socks5",
-                    host=host,
-                    upstream_config=upstream_config,
-                ),
-                daemon=True,
-                name="TrayTelegramProxyAutostart",
-            ).start()
-        except Exception as e:
-            log(f"Tray TG proxy autostart error: {e}", "WARNING")
 
     def _save_window_geometry(self):
         try:

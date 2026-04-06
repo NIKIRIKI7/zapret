@@ -121,6 +121,7 @@ class Zapret2StrategiesPageNew(BasePage):
         self._render_probe_build_finished_at = None
         self._render_probe_first_paint_logged = False
         self._render_probe_idle_logged = False
+        self._suppress_next_preset_refresh = False
 
         # Совместимость со старым кодом
         self.content_layout = self.layout
@@ -480,6 +481,7 @@ class Zapret2StrategiesPageNew(BasePage):
                     reason="strategy_changed"
                 )
             )
+            self._suppress_next_preset_refresh = True
             direct_facade.set_strategy_selection(target_key, strategy_id, save_and_sync=True)
 
             self.target_selections[target_key] = strategy_id
@@ -500,6 +502,7 @@ class Zapret2StrategiesPageNew(BasePage):
     def apply_filter_mode_change(self, target_key: str, filter_mode: str):
         """Обновляет badge Hostlist/IPset на главной странице без перестроения списка."""
         try:
+            self._suppress_next_preset_refresh = True
             if self._targets_list:
                 self._targets_list.update_filter_mode(target_key, filter_mode)
         except Exception as e:
@@ -579,7 +582,7 @@ class Zapret2StrategiesPageNew(BasePage):
 
             # Важный случай: страница могла открыться слишком рано и построиться
             # пустой, когда source preset ещё не был готов. Раньше после этого
-            # последующие preset_revision только обновляли уже существующий список,
+            # последующие content-revision только обновляли уже существующий список,
             # а если списка не было вовсе, UI так и оставался пустым до ручного
             # нажатия «Обновить». Здесь мы явно пересобираем страницу, если данные
             # уже появились или на экране сейчас показан empty state.
@@ -689,7 +692,7 @@ class Zapret2StrategiesPageNew(BasePage):
         self._ui_state_store = store
         self._ui_state_unsubscribe = store.subscribe(
             self._on_ui_state_changed,
-            fields={"current_strategy_summary", "preset_revision", "mode_revision"},
+            fields={"current_strategy_summary", "active_preset_revision", "preset_content_revision", "mode_revision"},
             emit_initial=True,
         )
 
@@ -697,7 +700,16 @@ class Zapret2StrategiesPageNew(BasePage):
         if "mode_revision" in changed_fields:
             self.reload_for_mode_change()
             return
-        if "preset_revision" in changed_fields:
+        if "active_preset_revision" in changed_fields:
+            if not self.isVisible():
+                self._basic_payload_cache = None
+                self._preset_refresh_pending = True
+                return
+            self.refresh_from_preset_switch()
+        if "preset_content_revision" in changed_fields:
+            if self._suppress_next_preset_refresh:
+                self._suppress_next_preset_refresh = False
+                return
             if not self.isVisible():
                 self._basic_payload_cache = None
                 self._preset_refresh_pending = True
@@ -717,9 +729,7 @@ class Zapret2StrategiesPageNew(BasePage):
     def _update_current_strategies_display(self):
         """Совместимость: обновляет отображение текущих стратегий"""
         try:
-            from core.presets.direct_facade import DirectPresetFacade
-
-            selections = DirectPresetFacade.from_launch_method("direct_zapret2").get_strategy_selections() or {}
+            selections = dict(self.target_selections or {})
             active_count = sum(1 for s in selections.values() if s and s != 'none')
 
             if active_count > 0:

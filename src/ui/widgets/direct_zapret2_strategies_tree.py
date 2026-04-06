@@ -119,6 +119,9 @@ class DirectZapret2StrategiesTree(QTreeWidget):
         self._insert_counter = 0
         self._active_strategy_id: str = "none"
         self._tech_icon_cache: Dict[tuple, QIcon] = {}
+        self._bulk_update_depth = 0
+        self._bulk_sections_dirty = False
+        self._bulk_geometry_dirty = False
 
         self._hover_timer = QTimer(self)
         self._hover_timer.setSingleShot(True)
@@ -862,8 +865,7 @@ class DirectZapret2StrategiesTree(QTreeWidget):
         item.setSizeHint(1, QSize(0, self._row_height))
 
         self._rows[row.strategy_id] = item
-        self._refresh_sections_visibility()
-        self._update_height_to_contents()
+        self._request_structure_refresh()
 
     def set_selected_strategy(self, strategy_id: str) -> None:
         self._active_strategy_id = strategy_id or "none"
@@ -924,8 +926,7 @@ class DirectZapret2StrategiesTree(QTreeWidget):
             moved = src_parent.takeChild(idx)
             self._insert_sorted(dst_parent, moved)
 
-        self._refresh_sections_visibility()
-        self._update_height_to_contents()
+        self._request_structure_refresh()
         if was_selected:
             self.set_selected_strategy(strategy_id)
 
@@ -947,8 +948,7 @@ class DirectZapret2StrategiesTree(QTreeWidget):
                     visible = any(t in args_text for t in tech)
             item.setHidden(not visible)
 
-        self._refresh_sections_visibility()
-        self._update_height_to_contents()
+        self._request_structure_refresh()
         if selected_id and self.has_strategy(selected_id) and not self._rows[selected_id].isHidden():
             self.set_selected_strategy(selected_id)
 
@@ -979,8 +979,7 @@ class DirectZapret2StrategiesTree(QTreeWidget):
 
             item.setHidden(not visible)
 
-        self._refresh_sections_visibility()
-        self._update_height_to_contents()
+        self._request_structure_refresh()
         if selected_id and self.has_strategy(selected_id) and not self._rows[selected_id].isHidden():
             self.set_selected_strategy(selected_id)
 
@@ -988,9 +987,29 @@ class DirectZapret2StrategiesTree(QTreeWidget):
         selected_id = self._active_strategy_id or self._get_selected_strategy_id()
         self._sort_section(self._fav_root)
         self._sort_section(self._all_root)
-        self._update_height_to_contents()
+        self._request_structure_refresh()
         if selected_id:
             self.set_selected_strategy(selected_id)
+
+    def begin_bulk_update(self) -> None:
+        self._bulk_update_depth += 1
+        if self._bulk_update_depth == 1:
+            try:
+                self.setUpdatesEnabled(False)
+            except Exception:
+                pass
+
+    def end_bulk_update(self) -> None:
+        if self._bulk_update_depth <= 0:
+            return
+        self._bulk_update_depth -= 1
+        if self._bulk_update_depth > 0:
+            return
+        try:
+            self.setUpdatesEnabled(True)
+        except Exception:
+            pass
+        self._flush_structure_refresh()
 
     def _sort_section(self, root: QTreeWidgetItem) -> None:
         children = [root.child(i) for i in range(root.childCount())]
@@ -1049,6 +1068,21 @@ class DirectZapret2StrategiesTree(QTreeWidget):
             self.viewport().update()
         except Exception:
             pass
+
+    def _request_structure_refresh(self) -> None:
+        self._bulk_sections_dirty = True
+        self._bulk_geometry_dirty = True
+        if self._bulk_update_depth > 0:
+            return
+        self._flush_structure_refresh()
+
+    def _flush_structure_refresh(self) -> None:
+        if self._bulk_sections_dirty:
+            self._bulk_sections_dirty = False
+            self._refresh_sections_visibility()
+        if self._bulk_geometry_dirty:
+            self._bulk_geometry_dirty = False
+            self._update_height_to_contents()
 
     def _schedule_geometry_update(self) -> None:
         # Coalesce multiple updates during batch loads (e.g. lazy strategy load).

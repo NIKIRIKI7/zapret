@@ -32,11 +32,26 @@ from utils.circular_strategy_numbering import (
     strip_strategy_tags,
 )
 from config import MAIN_DIRECTORY, EXE_FOLDER, LUA_FOLDER, LOGS_FOLDER, BIN_FOLDER, REGISTRY_PATH, LISTS_FOLDER
-from config.reg import reg
+from config.reg import reg, reg_delete_value
+from orchestra.ignored_targets import (
+    get_orchestra_ignored_exact_domains,
+    is_orchestra_ignored_target,
+)
 from orchestra.log_parser import LogParser, EventType, ParsedEvent, nld_cut, ip_to_subnet16, is_local_ip
-from orchestra.blocked_strategies_manager import BlockedStrategiesManager
+from orchestra.blocked_strategies_manager import (
+    BlockedStrategiesManager,
+    get_blocked_registry_path,
+    get_user_blocked_registry_path,
+)
 from orchestra.locked_strategies_manager import (
-    LockedStrategiesManager, ASKEY_ALL, TCP_ASKEYS, UDP_ASKEYS, PROTO_TO_ASKEY
+    LockedStrategiesManager,
+    ASKEY_ALL,
+    TCP_ASKEYS,
+    UDP_ASKEYS,
+    PROTO_TO_ASKEY,
+    REGISTRY_ORCHESTRA_HISTORY,
+    get_registry_path,
+    get_user_registry_path,
 )
 
 # Путь в реестре (основные константы теперь в менеджерах)
@@ -111,7 +126,9 @@ DEFAULT_WHITELIST_DOMAINS = {
     # wb
     "wildberries.ru",
     "wb.ru",
-    "wbbasket.ru"
+    "wbbasket.ru",
+    # Telegram Proxy работает как отдельный модуль, оркестратор не должен его обучать.
+    *get_orchestra_ignored_exact_domains(),
 }
 
 def _is_default_whitelist_domain(hostname: str) -> bool:
@@ -235,6 +252,7 @@ class OrchestraRunner:
         self.last_launch_config_path: str = ""
         self.last_launch_command: List[str] = []
         self._startup_forwarded_signatures = deque(maxlen=80)
+        self._ignored_runtime_targets_logged: set[str] = set()
 
     def _remember_output_line(self, line: str):
         """Запоминает последние строки stdout для диагностики падений."""
@@ -364,6 +382,92 @@ class OrchestraRunner:
             log(f"[startup-diagnostics] {line}", "INFO")
             if self.output_callback:
                 self.output_callback(f"[INFO] {line}")
+
+    def _should_ignore_orchestra_host(self, hostname: Optional[str]) -> bool:
+        """Возвращает True для целей, которые оркестратор обязан полностью игнорировать."""
+        return is_orchestra_ignored_target(hostname or "")
+
+    def _should_ignore_orchestra_event(self, event: ParsedEvent) -> bool:
+        """Отбрасывает события для отдельного Telegram Proxy модуля до любой обработки."""
+        host = (getattr(event, "hostname", None) or "").strip()
+        if not self._should_ignore_orchestra_host(host):
+            return False
+
+        signature = f"{getattr(event.event_type, 'value', 'event')}:{host.lower()}"
+        if signature not in self._ignored_runtime_targets_logged:
+            self._ignored_runtime_targets_logged.add(signature)
+            log(f"Оркестратор игнорирует Telegram Proxy цель: {host}", "DEBUG")
+
+        return True
+
+    def _purge_ignored_training_state(self) -> None:
+        """
+        Удаляет старые lock/history/blocked записи для Telegram Proxy.
+
+        Это нужно, чтобы отдельный модуль Telegram не возвращался в обучение
+        из старого реестра после того, как мы объявили его системно игнорируемым.
+        """
+        removed_locked = 0
+        removed_user_locks = 0
+        removed_history = 0
+        removed_blocked = 0
+        removed_user_blocked = 0
+
+        for askey in ASKEY_ALL:
+            locked_dict = self.locked_manager.locked_by_askey[askey]
+            user_locked = self.locked_manager.user_locked_by_askey[askey]
+            reg_path = get_registry_path(askey)
+            user_reg_path = get_user_registry_path(askey)
+
+            for hostname in list(locked_dict.keys()):
+                if not self._should_ignore_orchestra_host(hostname):
+                    continue
+                del locked_dict[hostname]
+                reg_delete_value(reg_path, hostname)
+                removed_locked += 1
+
+            for hostname in list(user_locked):
+                if not self._should_ignore_orchestra_host(hostname):
+                    continue
+                user_locked.discard(hostname)
+                reg_delete_value(user_reg_path, hostname)
+                removed_user_locks += 1
+
+            blocked_dict = self.blocked_manager.blocked_by_askey[askey]
+            user_blocked = self.blocked_manager.user_blocked_by_askey[askey]
+            blocked_reg_path = get_blocked_registry_path(askey)
+            user_blocked_reg_path = get_user_blocked_registry_path(askey)
+
+            for hostname in list(blocked_dict.keys()):
+                if not self._should_ignore_orchestra_host(hostname):
+                    continue
+                del blocked_dict[hostname]
+                reg_delete_value(blocked_reg_path, hostname)
+                removed_blocked += 1
+
+            for hostname in list(user_blocked.keys()):
+                if not self._should_ignore_orchestra_host(hostname):
+                    continue
+                del user_blocked[hostname]
+                reg_delete_value(user_blocked_reg_path, hostname)
+                removed_user_blocked += 1
+
+        for hostname in list(self.locked_manager.strategy_history.keys()):
+            if not self._should_ignore_orchestra_host(hostname):
+                continue
+            del self.locked_manager.strategy_history[hostname]
+            reg_delete_value(REGISTRY_ORCHESTRA_HISTORY, hostname)
+            removed_history += 1
+
+        total_removed = removed_locked + removed_user_locks + removed_history + removed_blocked + removed_user_blocked
+        if total_removed:
+            log(
+                "Очищены legacy-данные Telegram Proxy из оркестратора: "
+                f"locked={removed_locked}, user_locked={removed_user_locks}, "
+                f"history={removed_history}, blocked={removed_blocked}, "
+                f"user_blocked={removed_user_blocked}",
+                "INFO",
+            )
 
     def _forward_startup_raw_output(self, timestamp: str, line: str):
         """Прокидывает важные сырые строки winws2 в UI во время старта."""
@@ -620,6 +724,7 @@ class OrchestraRunner:
 
         # Загружаем locked стратегии (включая историю)
         self.locked_manager.load()
+        self._purge_ignored_training_state()
 
         # Возвращаем TLS стратегии для backward compatibility
         return self.locked_manager.locked_by_askey["tls"]
@@ -856,6 +961,9 @@ class OrchestraRunner:
                     if not event:
                         if self._is_startup_phase() and self._looks_like_error_output_line(line):
                             self._forward_startup_raw_output(timestamp, line)
+                        continue
+
+                    if self._should_ignore_orchestra_event(event):
                         continue
 
                     is_udp = event.l7proto in ("udp", "quic", "stun", "discord", "wireguard", "dht", "unknown")

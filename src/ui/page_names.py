@@ -32,6 +32,7 @@ class PageName(Enum):
     ZAPRET2_ORCHESTRA_CONTROL = auto()  # Zapret 2 Orchestra: управление
     ZAPRET2_ORCHESTRA_USER_PRESETS = auto()  # Zapret 2 Orchestra: пользовательские пресеты
     ZAPRET2_ORCHESTRA_STRATEGY_DETAIL = auto()  # Zapret 2 Orchestra: детали стратегии
+    ZAPRET2_ORCHESTRA_PRESET_DETAIL = auto()  # Zapret 2 Orchestra: подстраница пресета
     ZAPRET1_DIRECT_CONTROL = auto()  # Zapret 1 Direct: управление (главная вкладка)
     ZAPRET1_DIRECT = auto()          # Zapret 1 Direct стратегии
     ZAPRET1_USER_PRESETS = auto()    # Zapret 1 Direct: пользовательские пресеты
@@ -203,6 +204,7 @@ STRATEGY_PAGES: set[PageName] = {
     PageName.ZAPRET2_ORCHESTRA,
     PageName.ZAPRET2_ORCHESTRA_USER_PRESETS,
     PageName.ZAPRET2_ORCHESTRA_STRATEGY_DETAIL,
+    PageName.ZAPRET2_ORCHESTRA_PRESET_DETAIL,
     PageName.ZAPRET2_PRESET_DETAIL,
 
     PageName.ZAPRET1_DIRECT_CONTROL,

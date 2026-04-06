@@ -28,6 +28,7 @@ from typing import Dict, List, Callable, Optional, Set
 from log import log
 from config import REGISTRY_PATH
 from config.reg import reg, reg_enumerate_values, reg_delete_all_values, reg_delete_value
+from orchestra.ignored_targets import is_orchestra_ignored_target
 
 
 # Все 9 askey профилей (синхронизировано с locked_strategies_manager)
@@ -96,8 +97,6 @@ DEFAULT_BLOCKED_PASS_DOMAINS = {
     "whatsapp.com", "whatsapp.net",
     # TikTok
     "tiktok.com", "tiktokcdn.com", "musical.ly",
-    # Telegram
-    "telegram.org", "t.me",
     # Spotify
     "spotify.com", "spotifycdn.com",
     # Netflix
@@ -191,6 +190,10 @@ class BlockedStrategiesManager:
             return ""
         return hostname.lower().strip().rstrip('.')
 
+    def _is_ignored_hostname(self, hostname: str) -> bool:
+        """Проверяет, запрещён ли этот хост для blocked-контура оркестратора."""
+        return is_orchestra_ignored_target(hostname)
+
     # ==================== МИГРАЦИЯ ====================
 
     def _migrate_old_registry_format(self):
@@ -268,6 +271,9 @@ class BlockedStrategiesManager:
                     data = reg_enumerate_values(reg_path)
                     for hostname, json_str in data.items():
                         hostname = self._normalize_hostname(hostname)
+                        if self._is_ignored_hostname(hostname):
+                            reg_delete_value(reg_path, hostname)
+                            continue
                         try:
                             strategies = json.loads(json_str)
                             if isinstance(strategies, list) and strategies:
@@ -293,6 +299,9 @@ class BlockedStrategiesManager:
                     user_data = reg_enumerate_values(user_reg_path)
                     for hostname, json_str in user_data.items():
                         hostname = self._normalize_hostname(hostname)
+                        if self._is_ignored_hostname(hostname):
+                            reg_delete_value(user_reg_path, hostname)
+                            continue
                         try:
                             strategies = json.loads(json_str)
                             if isinstance(strategies, list):
@@ -494,6 +503,12 @@ class BlockedStrategiesManager:
         hostname = self._normalize_hostname(hostname)
         askey = self._normalize_askey(askey)
 
+        if self._is_ignored_hostname(hostname):
+            log(f"[IGNORE] Оркестратор не блокирует proxy-цель: {hostname} [{askey.upper()}]", "INFO")
+            if self.output_callback:
+                self.output_callback(f"[INFO] Пропущена blocked-запись для proxy-цели {hostname}")
+            return
+
         target_dict = self.blocked_by_askey[askey]
         user_dict = self.user_blocked_by_askey[askey]
 
@@ -679,4 +694,3 @@ class BlockedStrategiesManager:
         # Для backward compatibility добавляем 'udp' как alias для 'quic'
         result['udp'] = result['quic']
         return result
-

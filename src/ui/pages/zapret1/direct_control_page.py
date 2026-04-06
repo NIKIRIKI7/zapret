@@ -403,12 +403,12 @@ class Zapret1DirectControlPage(BasePage):
         self._ui_state_store = store
         self._ui_state_unsubscribe = store.subscribe(
             self._on_ui_state_changed,
-            fields={"dpi_phase", "dpi_running", "dpi_busy", "dpi_busy_text", "dpi_last_error", "current_strategy_summary", "preset_revision"},
+            fields={"dpi_phase", "dpi_running", "dpi_busy", "dpi_busy_text", "dpi_last_error", "current_strategy_summary", "active_preset_revision"},
             emit_initial=True,
         )
 
     def _on_ui_state_changed(self, state: AppUiState, changed_fields: frozenset[str]) -> None:
-        if "preset_revision" in changed_fields:
+        if "active_preset_revision" in changed_fields:
             if self.isVisible():
                 self._refresh_preset_name()
         self.set_loading(state.dpi_busy, state.dpi_busy_text)

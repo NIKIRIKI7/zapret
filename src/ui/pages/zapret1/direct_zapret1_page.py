@@ -454,12 +454,16 @@ class Zapret1StrategiesPage(BasePage):
         self._ui_state_store = store
         self._ui_state_unsubscribe = store.subscribe(
             self._on_ui_state_changed,
-            fields={"preset_revision", "mode_revision"},
+            fields={"active_preset_revision", "preset_content_revision", "mode_revision"},
             emit_initial=True,
         )
 
     def _on_ui_state_changed(self, _state: AppUiState, changed_fields: frozenset[str]) -> None:
-        if "preset_revision" in changed_fields or "mode_revision" in changed_fields:
+        if (
+            "active_preset_revision" in changed_fields
+            or "preset_content_revision" in changed_fields
+            or "mode_revision" in changed_fields
+        ):
             if not self.isVisible():
                 self._preset_refresh_pending = True
                 self._basic_payload_cache = None

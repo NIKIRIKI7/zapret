@@ -1023,7 +1023,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
         self._ui_state_store = store
         self._ui_state_unsubscribe = store.subscribe(
             self._on_ui_state_changed,
-            fields={"current_strategy_summary", "preset_revision", "mode_revision"},
+            fields={"current_strategy_summary", "active_preset_revision", "preset_content_revision", "mode_revision"},
             emit_initial=True,
         )
 
@@ -1037,7 +1037,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
                 return
             self.reload_for_mode_change()
             return
-        if "preset_revision" in changed_fields:
+        if "active_preset_revision" in changed_fields or "preset_content_revision" in changed_fields:
             if not self.isVisible():
                 self._preset_refresh_pending = True
                 return

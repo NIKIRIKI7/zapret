@@ -47,6 +47,7 @@ import qtawesome as qta
 from ui.pages.base_page import BasePage
 from ui.pages.preset_actions_menu import show_preset_actions_menu
 from ui.pages.preset_rating_menu import show_preset_rating_menu
+from ui.pages import user_presets_runtime as shared_runtime
 from ui.pages.user_presets_toolbar import UserPresetsToolbarLayout
 from ui.compat_widgets import ActionButton, SettingsCard, LineEdit, set_tooltip
 from ui.main_window_state import MainWindowStateStore
@@ -305,6 +306,50 @@ class _PresetListModel(QAbstractListModel):
         self.beginResetModel()
         self._rows = rows
         self.endResetModel()
+
+    def find_preset_row(self, file_name: str) -> int:
+        target = str(file_name or "").strip()
+        if not target:
+            return -1
+        for row_index, row in enumerate(self._rows):
+            if str(row.get("kind") or "") != "preset":
+                continue
+            if str(row.get("file_name") or "") == target:
+                return row_index
+        return -1
+
+    def update_preset_row(self, file_name: str, **changes) -> bool:
+        row_index = self.find_preset_row(file_name)
+        if row_index < 0:
+            return False
+
+        row = self._rows[row_index]
+        role_map = {
+            "name": [int(Qt.ItemDataRole.DisplayRole), self.NameRole],
+            "description": [self.DescriptionRole],
+            "date": [self.DateRole],
+            "is_active": [self.ActiveRole],
+            "icon_color": [self.IconColorRole],
+            "is_builtin": [self.BuiltinRole],
+            "is_pinned": [self.PinnedRole],
+            "rating": [self.RatingRole],
+        }
+
+        changed_roles: set[int] = set()
+        for key, value in changes.items():
+            if key not in role_map:
+                continue
+            if row.get(key) == value:
+                continue
+            row[key] = value
+            changed_roles.update(role_map[key])
+
+        if not changed_roles:
+            return False
+
+        model_index = self.index(row_index, 0)
+        self.dataChanged.emit(model_index, model_index, sorted(changed_roles))
+        return True
 
     def set_active_preset(self, file_name: str) -> bool:
         target_file_name = str(file_name or "").strip()
@@ -1275,48 +1320,45 @@ class Zapret1UserPresetsPage(BasePage):
         self._ui_initialized = False
         self._lazy_show_scheduled = False
         self._ui_state_store: Optional[MainWindowStateStore] = None
+        self._ui_state_unsubscribe = None
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         return _tr_text(key, self._ui_language, default, **kwargs)
 
     def _on_store_changed(self):
-        """Central store says the preset list changed."""
-        self._ui_dirty = True
-        if self._bulk_reset_running:
-            return
-        if self.isVisible():
-            self._load_presets()
+        shared_runtime.on_store_changed(self)
 
     def _on_store_updated(self, file_name_or_name: str):
-        if self._bulk_reset_running:
-            return
+        shared_runtime.on_store_updated(self, file_name_or_name)
 
-        refreshed = self._read_single_preset_list_metadata_light(file_name_or_name)
-        if refreshed is None:
-            self._ui_dirty = True
-            if self.isVisible():
-                self._load_presets()
-            return
+    def _current_search_query(self) -> str:
+        return shared_runtime.current_search_query(self)
 
-        normalized_file_name, metadata = refreshed
-        self._cached_presets_metadata[normalized_file_name] = metadata
-        if self.isVisible():
-            self._refresh_presets_view_from_cache()
-        else:
-            self._ui_dirty = True
+    def _capture_presets_view_state(self) -> dict[str, object]:
+        return shared_runtime.capture_presets_view_state(self)
+
+    def _restore_presets_view_state(self, state: dict[str, object]) -> None:
+        shared_runtime.restore_presets_view_state(self, state)
+
+    def _try_apply_single_preset_metadata_update(
+        self,
+        normalized_file_name: str,
+        *,
+        previous_metadata: dict[str, object],
+        next_metadata: dict[str, object],
+    ) -> bool:
+        return shared_runtime.try_apply_single_preset_metadata_update(
+            self,
+            normalized_file_name,
+            previous_metadata=previous_metadata,
+            next_metadata=next_metadata,
+        )
 
     def _on_store_switched(self, _name: str):
-        """Central store says the selected source preset switched."""
-        if self._bulk_reset_running:
-            return
-        marker_changed = self._apply_active_preset_marker()
-        if marker_changed and not self._ui_dirty:
-            return
-        if not self._ui_dirty and self._cached_presets_metadata and not marker_changed:
-            return
-        self._ui_dirty = True
-        if self.isVisible():
-            self.refresh_presets_view_if_possible()
+        shared_runtime.on_store_switched(self, _name)
+
+    def _on_ui_state_changed(self, state: AppUiState, changed_fields: frozenset[str]) -> None:
+        shared_runtime.on_ui_state_changed(self, state, changed_fields)
 
     def _apply_active_preset_marker(self) -> bool:
         active_file_name = self._get_selected_source_preset_file_name_light()
@@ -1574,7 +1616,22 @@ class Zapret1UserPresetsPage(BasePage):
         self._schedule_layout_resync(include_delayed=True)
 
     def bind_ui_state_store(self, store: MainWindowStateStore) -> None:
+        if self._ui_state_store is store:
+            return
+
+        unsubscribe = getattr(self, "_ui_state_unsubscribe", None)
+        if callable(unsubscribe):
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+
         self._ui_state_store = store
+        self._ui_state_unsubscribe = store.subscribe(
+            self._on_ui_state_changed,
+            fields={"preset_structure_revision"},
+            emit_initial=False,
+        )
 
     def _schedule_layout_resync(self, include_delayed: bool = False):
         self._layout_resync_timer.start(0)
@@ -1619,61 +1676,25 @@ class Zapret1UserPresetsPage(BasePage):
             pass
 
     def _start_watching_presets(self):
-        try:
-            if self._watcher_active:
-                return
-
-            from core.services import get_app_paths
-
-            presets_dir = get_app_paths().engine_paths("winws1").ensure_directories().presets_dir
-            presets_dir.mkdir(parents=True, exist_ok=True)
-
-            if not self._file_watcher:
-                self._file_watcher = QFileSystemWatcher(self)
-                self._file_watcher.directoryChanged.connect(self._on_presets_dir_changed)
-
-            dir_path = str(presets_dir)
-            if dir_path not in self._file_watcher.directories():
-                self._file_watcher.addPath(dir_path)
-
-            self._watcher_active = True
-
-        except Exception as e:
-            log(f"Ошибка запуска мониторинга пресетов: {e}", "DEBUG")
+        shared_runtime.start_watching_presets(self)
 
     def _stop_watching_presets(self):
-        try:
-            if not self._watcher_active:
-                return
-            if self._file_watcher:
-                directories = self._file_watcher.directories()
-                files = self._file_watcher.files()
-                if directories:
-                    self._file_watcher.removePaths(directories)
-                if files:
-                    self._file_watcher.removePaths(files)
-            self._watcher_active = False
-        except Exception as e:
-            log(f"Ошибка остановки мониторинга пресетов: {e}", "DEBUG")
+        shared_runtime.stop_watching_presets(self)
 
     def _on_presets_dir_changed(self, path: str):
-        try:
-            log(f"Обнаружены изменения в папке пресетов: {path}", "DEBUG")
-            self._schedule_presets_reload()
-        except Exception as e:
-            log(f"Ошибка обработки изменений папки пресетов: {e}", "DEBUG")
+        shared_runtime.on_presets_dir_changed(self, path)
+
+    def _on_preset_file_changed(self, path: str):
+        shared_runtime.on_preset_file_changed(self, path)
 
     def _schedule_presets_reload(self, delay_ms: int = 500):
-        try:
-            self._watcher_reload_timer.stop()
-            self._watcher_reload_timer.start(delay_ms)
-        except Exception as e:
-            log(f"Ошибка планирования обновления пресетов: {e}", "DEBUG")
+        shared_runtime.schedule_presets_reload(self, delay_ms)
 
     def _reload_presets_from_watcher(self):
-        if not self.isVisible():
-            return
-        self._load_presets()
+        shared_runtime.reload_presets_from_watcher(self)
+
+    def _sync_watched_preset_files(self, file_names: set[str] | None = None) -> None:
+        shared_runtime.sync_watched_preset_files(self, file_names)
 
     def _build_ui(self):
         tokens = get_theme_tokens()
@@ -1928,7 +1949,7 @@ class Zapret1UserPresetsPage(BasePage):
 
         try:
             self._get_direct_facade().create(name, from_current=from_current)
-            self._get_preset_store().notify_presets_changed()
+            shared_runtime.mark_presets_structure_changed(self)
             log(f"Создан пресет '{name}'", "INFO")
         except Exception as e:
             log(f"Ошибка создания пресета: {e}", "ERROR")
@@ -1958,7 +1979,7 @@ class Zapret1UserPresetsPage(BasePage):
         try:
             facade = self._get_direct_facade()
             updated = facade.rename_by_file_name(current_name, new_name)
-            self._get_preset_store().notify_presets_changed()
+            shared_runtime.mark_presets_structure_changed(self)
             if facade.is_selected_file_name(updated.file_name):
                 self._get_preset_store().notify_preset_switched(updated.file_name)
             log(f"Пресет '{display_name}' переименован в '{new_name}'", "INFO")
@@ -2013,7 +2034,7 @@ class Zapret1UserPresetsPage(BasePage):
             facade = self._get_direct_facade()
 
             imported = facade.import_from_file(Path(file_path), name)
-            self._get_preset_store().notify_presets_changed()
+            shared_runtime.mark_presets_structure_changed(self)
             log(f"Импортирован пресет '{imported.name}'", "INFO")
             self._show_import_result_infobar(name, imported.name, imported.file_name)
 
@@ -2034,7 +2055,7 @@ class Zapret1UserPresetsPage(BasePage):
         try:
             facade = self._get_direct_facade()
             success_count, total, failed = facade.reset_all_to_templates()
-            self._get_preset_store().notify_presets_changed()
+            shared_runtime.mark_presets_structure_changed(self)
             selected_file_name = facade.get_selected_file_name()
             if selected_file_name:
                 self._get_preset_store().notify_preset_switched(selected_file_name)
@@ -2085,33 +2106,17 @@ class Zapret1UserPresetsPage(BasePage):
             pass
 
     def _load_presets(self):
-        self._ui_dirty = False
-        try:
-            started_at = time.perf_counter()
-            all_presets = self._load_preset_list_metadata_light()
-            self._cached_presets_metadata = dict(all_presets)
-            self._rebuild_presets_rows(all_presets, started_at=started_at)
-        except Exception as e:
-            log(f"Ошибка загрузки пресетов: {e}", "ERROR")
+        shared_runtime.load_presets(self)
 
     def refresh_presets_view_if_possible(self) -> None:
-        if not self._ui_initialized:
-            self._ui_dirty = True
-            return
-        if self._cached_presets_metadata:
-            self._ui_dirty = False
-            self._refresh_presets_view_from_cache()
-            return
-        self._load_presets()
+        shared_runtime.refresh_presets_view_if_possible(self)
 
     def _refresh_presets_view_from_cache(self) -> None:
-        if not self._cached_presets_metadata:
-            self._load_presets()
-            return
-        self._rebuild_presets_rows(self._cached_presets_metadata)
+        shared_runtime.refresh_presets_view_from_cache(self)
 
     def _rebuild_presets_rows(self, all_presets: dict[str, dict[str, object]], *, started_at: float | None = None) -> None:
         try:
+            view_state = self._capture_presets_view_state() if hasattr(self, "presets_list") else {}
             active_file_name = self._get_selected_source_preset_file_name_light()
             hierarchy = self._get_hierarchy_store()
             builtin_by_file = {
@@ -2192,6 +2197,8 @@ class Zapret1UserPresetsPage(BasePage):
             if self._presets_model:
                 self._presets_model.set_rows(rows)
             self._ensure_preset_list_current_index()
+            if view_state:
+                self._restore_presets_view_state(view_state)
 
             # Update restore-deleted button visibility
             try:
@@ -2379,7 +2386,7 @@ class Zapret1UserPresetsPage(BasePage):
                 self._get_hierarchy_store().copy_preset_meta_to_new(name, new_name, source_display_name=display_name)
             except Exception:
                 pass
-            self._get_preset_store().notify_presets_changed()
+            shared_runtime.mark_presets_structure_changed(self)
             log(f"Пресет '{display_name}' дублирован как '{new_name}'", "INFO")
 
         except Exception as e:
@@ -2463,7 +2470,7 @@ class Zapret1UserPresetsPage(BasePage):
 
             facade = self._get_direct_facade()
             facade.delete_by_file_name(name)
-            self._get_preset_store().notify_presets_changed()
+            shared_runtime.mark_presets_structure_changed(self)
             log(f"Удалён пресет '{display_name}'", "INFO")
 
         except Exception as e:
@@ -2512,7 +2519,7 @@ class Zapret1UserPresetsPage(BasePage):
         try:
             facade = self._get_direct_facade()
             facade.restore_deleted()
-            self._get_preset_store().notify_presets_changed()
+            shared_runtime.mark_presets_structure_changed(self)
             selected_file_name = facade.get_selected_file_name()
             if selected_file_name:
                 self._get_preset_store().notify_preset_switched(selected_file_name)

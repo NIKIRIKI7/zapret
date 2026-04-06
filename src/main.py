@@ -278,7 +278,7 @@ from ui.window_close_controller import WindowCloseController
 from ui.holiday_effects import HolidayEffectsManager
 from ui.window_geometry_controller import WindowGeometryController
 from ui.window_notification_controller import WindowNotificationController
-from ui.main_window_state import MainWindowStateStore
+from ui.main_window_state import AppUiState, MainWindowStateStore
 from managers.app_runtime_state import AppRuntimeState
 from managers.dpi_runtime_service import DpiRuntimeService
 
@@ -355,6 +355,8 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
     """Главное окно приложения — FluentWindow + навигация + подписки."""
 
     deferred_init_requested = pyqtSignal()
+    continue_startup_requested = pyqtSignal()
+    finalize_ui_bootstrap_requested = pyqtSignal()
 
     from ui.theme import ThemeHandler
     # ✅ ДОБАВЛЯЕМ TYPE HINTS для менеджеров
@@ -367,6 +369,43 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
 
     def log_startup_metric(self, marker: str, details: str = "") -> None:
         _log_startup_metric(marker, details)
+
+    @staticmethod
+    def _build_initial_ui_state() -> AppUiState:
+        """Стартовое optimistic-состояние UI до фоновой проверки процессов."""
+        try:
+            from config import get_dpi_autostart, get_winws_exe_for_method
+            from strategy_menu import get_strategy_launch_method
+
+            autostart_enabled = bool(get_dpi_autostart())
+            launch_method = str(get_strategy_launch_method() or "").strip().lower()
+            expected_process = ""
+            if launch_method and launch_method != "orchestra":
+                expected_process = os.path.basename(get_winws_exe_for_method(launch_method)).strip().lower()
+
+            optimistic_running_methods = {
+                "direct_zapret2",
+                "direct_zapret1",
+                "direct_zapret2_orchestra",
+                "orchestra",
+            }
+
+            if launch_method in optimistic_running_methods:
+                return AppUiState(
+                    dpi_phase="running",
+                    dpi_running=True,
+                    dpi_expected_process=expected_process,
+                    autostart_enabled=autostart_enabled,
+                )
+
+            return AppUiState(
+                dpi_phase="stopped",
+                dpi_running=False,
+                dpi_expected_process=expected_process,
+                autostart_enabled=False,
+            )
+        except Exception:
+            return AppUiState()
 
     def closeEvent(self, event):
         """Обрабатывает событие закрытия окна"""
@@ -833,6 +872,8 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         self._startup_post_init_done_logged = False
         self._startup_post_init_done_ms = None
         self.deferred_init_requested.connect(self._deferred_init, Qt.ConnectionType.QueuedConnection)
+        self.continue_startup_requested.connect(self._continue_deferred_init, Qt.ConnectionType.QueuedConnection)
+        self.finalize_ui_bootstrap_requested.connect(self._finalize_ui_bootstrap, Qt.ConnectionType.QueuedConnection)
 
         # Show window right away (FluentWindow handles rendering)
         if not self.start_in_tray and not self.isVisible():
@@ -870,14 +911,15 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         _t_total = _time.perf_counter()
         log("⏱ Startup: deferred init started", "DEBUG")
 
-        self.ui_state_store = MainWindowStateStore()
+        self.ui_state_store = MainWindowStateStore(self._build_initial_ui_state())
         try:
             self.app_runtime_state = AppRuntimeState(self)
             self.dpi_runtime_service = DpiRuntimeService(self)
         except Exception:
             pass
 
-        # Build UI: create pages & register with FluentWindow navigation
+        # Build UI: create the first visible pages and minimum navigation shell.
+        # Всё, что не нужно для первого кадра и первого клика, переносим дальше.
         _t_build = _time.perf_counter()
         try:
             self.build_ui(WIDTH, HEIGHT)
@@ -890,8 +932,19 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
                 pass
             return
         log(f"⏱ Startup: build_ui {(_time.perf_counter() - _t_build) * 1000:.0f}ms", "DEBUG")
+        log(f"⏱ Startup: deferred init total {( _time.perf_counter() - _t_total ) * 1000:.0f}ms", "DEBUG")
+        self.continue_startup_requested.emit()
 
-        # Create managers
+    def _continue_deferred_init(self) -> None:
+        """Продолжает старт уже после показа базового UI.
+
+        Этот этап не должен мешать первому визуальному отклику окна: сначала
+        пользователь видит страницу и может начать взаимодействовать, а потом
+        приложение спокойно поднимает менеджеры и фоновую инфраструктуру.
+        """
+        import time as _time
+        _t_total = _time.perf_counter()
+
         _t_mgr = _time.perf_counter()
         from managers.initialization_manager import InitializationManager
         from managers.subscription_manager import SubscriptionManager
@@ -904,14 +957,25 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         self.ui_manager = UIManager(self)
         log(f"⏱ Startup: managers init {( _time.perf_counter() - _t_mgr ) * 1000:.0f}ms", "DEBUG")
 
-        # Инициализируем donate checker
-        self._init_real_donate_checker()  # Упрощенная версия
+        # Базовый donate checker нужен только как лёгкая оболочка до фоновой
+        # полной инициализации подписки.
+        self._init_real_donate_checker()
         self.update_title_with_subscription_status(False, None, 0, source="init")
 
-        # Стартовый порядок теперь управляется самим initialization_manager без таймерной задержки.
+        # Стартовый порядок теперь управляется самим initialization_manager.
         self.initialization_manager.run_async_init()
-        # Гирлянда инициализируется автоматически в subscription_manager после проверки подписки
-        log(f"⏱ Startup: deferred init total {( _time.perf_counter() - _t_total ) * 1000:.0f}ms", "DEBUG")
+        log(f"⏱ Startup: continue init total {( _time.perf_counter() - _t_total ) * 1000:.0f}ms", "DEBUG")
+
+        # Тяжёлые глобальные связи окна дозаводим ещё одним отдельным проходом,
+        # чтобы не склеивать их с первым построением интерфейса.
+        self.finalize_ui_bootstrap_requested.emit()
+
+    def _finalize_ui_bootstrap(self) -> None:
+        """Завершает не критичную для первого кадра сборку главного окна."""
+        try:
+            self.finish_ui_bootstrap()
+        except Exception as e:
+            log(f"Startup: finish_ui_bootstrap failed: {e}", "DEBUG")
 
     def _mark_startup_interactive(self, source: str = "ui_signals_connected") -> None:
         if self._startup_interactive_logged:

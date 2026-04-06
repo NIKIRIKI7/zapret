@@ -12,6 +12,8 @@ from telegram_proxy import ProxyController
 from telegram_proxy.wss_proxy import ProxyStats, UpstreamProxyConfig
 from telegram_proxy.proxy_logger import get_proxy_logger
 
+_shared_proxy_manager: Optional["TelegramProxyManager"] = None
+
 
 class TelegramProxyManager(QThread):
     """Manages proxy lifecycle from GUI thread.
@@ -142,3 +144,82 @@ class TelegramProxyManager(QThread):
         c = self._controller
         if c and c.is_running:
             self.stats_updated.emit(c.stats)
+
+
+def get_proxy_manager() -> TelegramProxyManager:
+    global _shared_proxy_manager
+    if _shared_proxy_manager is None:
+        _shared_proxy_manager = TelegramProxyManager()
+    return _shared_proxy_manager
+
+
+def build_upstream_proxy_config_from_settings() -> Optional[UpstreamProxyConfig]:
+    try:
+        from config.reg import (
+            get_tg_proxy_upstream_enabled,
+            get_tg_proxy_upstream_host,
+            get_tg_proxy_upstream_mode,
+            get_tg_proxy_upstream_pass,
+            get_tg_proxy_upstream_port,
+            get_tg_proxy_upstream_user,
+        )
+
+        if not get_tg_proxy_upstream_enabled():
+            return None
+
+        up_host = get_tg_proxy_upstream_host()
+        up_port = get_tg_proxy_upstream_port()
+        if not up_host or up_port <= 0:
+            return None
+
+        return UpstreamProxyConfig(
+            enabled=True,
+            host=up_host,
+            port=up_port,
+            mode=get_tg_proxy_upstream_mode(),
+            username=get_tg_proxy_upstream_user(),
+            password=get_tg_proxy_upstream_pass(),
+        )
+    except Exception:
+        return None
+
+
+def autostart_proxy_if_enabled_async() -> bool:
+    try:
+        from config.reg import get_tg_proxy_autostart, get_tg_proxy_host, get_tg_proxy_port
+    except Exception:
+        return False
+
+    try:
+        if not get_tg_proxy_autostart():
+            return False
+
+        manager = get_proxy_manager()
+        if manager.is_running:
+            return False
+
+        port = get_tg_proxy_port()
+        host = get_tg_proxy_host()
+        upstream_config = build_upstream_proxy_config_from_settings()
+
+        def _start() -> None:
+            try:
+                manager.start_proxy(
+                    port=port,
+                    mode="socks5",
+                    host=host,
+                    upstream_config=upstream_config,
+                )
+            except Exception:
+                pass
+
+        import threading
+
+        threading.Thread(
+            target=_start,
+            daemon=True,
+            name="TelegramProxyAutostart",
+        ).start()
+        return True
+    except Exception:
+        return False

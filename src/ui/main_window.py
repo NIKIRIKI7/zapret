@@ -314,15 +314,28 @@ class MainWindowUI:
             connect_lazy_page_signals(self, page_name, page)
             ensure_page_in_stacked_widget(self, page)
 
-        # Wire up signals
-        connect_main_window_page_signals(self)
-        self._log_startup_page_init_summary()
-
         # Session memory
         if not hasattr(self, "_direct_zapret2_last_opened_target_key"):
             self._direct_zapret2_last_opened_target_key = None
         if not hasattr(self, "_direct_zapret2_restore_detail_on_open"):
             self._direct_zapret2_restore_detail_on_open = False
+        if not hasattr(self, "_main_window_page_signals_connected"):
+            self._main_window_page_signals_connected = False
+
+    def finish_ui_bootstrap(self) -> None:
+        """Дозавершает тяжёлые связи главного окна после первого показа UI.
+
+        На старте нам важно как можно быстрее показать рабочее окно и первую
+        страницу. Общие подписки окна на preset-store, file watcher активного
+        пресета и часть сервисных связей можно подключить позже, отдельным
+        шагом, не блокируя первый визуальный отклик.
+        """
+        if bool(getattr(self, "_main_window_page_signals_connected", False)):
+            return
+
+        connect_main_window_page_signals(self)
+        self._main_window_page_signals_connected = True
+        self._log_startup_page_init_summary()
 
     @staticmethod
     def _get_current_launch_method_for_preset_runtime() -> str:

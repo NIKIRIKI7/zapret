@@ -25,6 +25,7 @@ from typing import Dict, Optional, Callable, Set, List
 from log import log
 from config import REGISTRY_PATH
 from config.reg import reg, reg_enumerate_values, reg_delete_all_values, reg_delete_value
+from orchestra.ignored_targets import is_orchestra_ignored_target
 
 
 # Все 9 askey профилей
@@ -128,6 +129,10 @@ class LockedStrategiesManager:
         """Нормализует proto/askey к стандартному askey"""
         proto = proto.lower().strip()
         return PROTO_TO_ASKEY.get(proto, proto if proto in ASKEY_ALL else "tls")
+
+    def _is_ignored_hostname(self, hostname: str) -> bool:
+        """Проверяет, запрещён ли этот хост для lock/history контура оркестратора."""
+        return is_orchestra_ignored_target(hostname)
 
     def _migrate_old_registry_format(self):
         """Мигрирует старый формат (JSON в одном ключе) в новый (subkeys)"""
@@ -238,7 +243,11 @@ class LockedStrategiesManager:
                 try:
                     data = reg_enumerate_values(reg_path)
                     for hostname, strategy in data.items():
-                        self.locked_by_askey[askey][hostname.lower()] = int(strategy)
+                        hostname_norm = hostname.lower()
+                        if self._is_ignored_hostname(hostname_norm):
+                            reg_delete_value(reg_path, hostname)
+                            continue
+                        self.locked_by_askey[askey][hostname_norm] = int(strategy)
                     total_loaded += len(data)
                 except Exception:
                     pass
@@ -247,7 +256,11 @@ class LockedStrategiesManager:
                 try:
                     user_data = reg_enumerate_values(user_reg_path)
                     for hostname in user_data.keys():
-                        self.user_locked_by_askey[askey].add(hostname.lower())
+                        hostname_norm = hostname.lower()
+                        if self._is_ignored_hostname(hostname_norm):
+                            reg_delete_value(user_reg_path, hostname)
+                            continue
+                        self.user_locked_by_askey[askey].add(hostname_norm)
                     total_user_locks += len(user_data)
                 except Exception:
                     pass
@@ -364,6 +377,12 @@ class LockedStrategiesManager:
         """
         hostname = hostname.lower()
         askey = self._normalize_askey(proto)
+
+        if self._is_ignored_hostname(hostname):
+            log(f"[IGNORE] Оркестратор не лочит proxy-цель: {hostname} [{askey.upper()}]", "INFO")
+            if self.output_callback:
+                self.output_callback(f"[INFO] Пропущен lock для proxy-цели {hostname}")
+            return
 
         # Получаем словари и пути реестра для данного askey
         target_dict = self.locked_by_askey[askey]
@@ -557,6 +576,9 @@ class LockedStrategiesManager:
         try:
             history_data = reg_enumerate_values(REGISTRY_ORCHESTRA_HISTORY)
             for domain, json_str in history_data.items():
+                if self._is_ignored_hostname(domain):
+                    reg_delete_value(REGISTRY_ORCHESTRA_HISTORY, domain)
+                    continue
                 try:
                     self.strategy_history[domain] = json.loads(json_str)
                 except json.JSONDecodeError:
@@ -572,6 +594,9 @@ class LockedStrategiesManager:
         """Сохраняет историю стратегий в реестр"""
         try:
             for domain, strategies in self.strategy_history.items():
+                if self._is_ignored_hostname(domain):
+                    reg_delete_value(REGISTRY_ORCHESTRA_HISTORY, domain)
+                    continue
                 json_str = json.dumps(strategies, ensure_ascii=False)
                 reg(REGISTRY_ORCHESTRA_HISTORY, domain, json_str)
             log(f"Сохранена история для {len(self.strategy_history)} доменов", "DEBUG")
@@ -580,6 +605,8 @@ class LockedStrategiesManager:
 
     def update_history(self, hostname: str, strategy: int, successes: int, failures: int):
         """Обновляет историю для домена/стратегии (полная замена значений)"""
+        if self._is_ignored_hostname(hostname):
+            return
         if hostname not in self.strategy_history:
             self.strategy_history[hostname] = {}
 
@@ -591,6 +618,8 @@ class LockedStrategiesManager:
 
     def increment_history(self, hostname: str, strategy: int, is_success: bool):
         """Инкрементирует счётчик успехов или неудач для домена/стратегии"""
+        if self._is_ignored_hostname(hostname):
+            return
         if hostname not in self.strategy_history:
             self.strategy_history[hostname] = {}
 

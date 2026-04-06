@@ -48,6 +48,7 @@ from ui.widgets import NotificationBanner
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 from log import log
+from orchestra.ignored_targets import is_orchestra_ignored_target
 from orchestra.locked_strategies_manager import ASKEY_ALL
 
 
@@ -442,6 +443,14 @@ class OrchestraLockedPage(BasePage):
         )
         self.notification_banner.show_warning(message, auto_hide_ms=7000)
 
+    def _show_ignored_target_warning(self, domain: str) -> None:
+        message = self._tr(
+            "page.orchestra.locked.warning.ignored_proxy_target",
+            "Домен {domain} относится к отдельному Telegram Proxy модулю. Оркестратор не управляет такими целями.",
+            domain=domain,
+        )
+        self.notification_banner.show_warning(message, auto_hide_ms=7000)
+
     def _refresh_data(self):
         """Обновляет все данные на странице (из памяти)"""
         self._refresh_locked_list()
@@ -535,6 +544,11 @@ class OrchestraLockedPage(BasePage):
 
     def _on_row_strategy_changed(self, domain: str, new_strategy: int, askey: str):
         """Автосохранение при изменении стратегии в SpinBox"""
+        if is_orchestra_ignored_target(domain):
+            self._show_ignored_target_warning(domain)
+            self._refresh_data()
+            return
+
         # Проверяем, не заблокирована ли эта стратегия для домена
         blocked_manager = self._get_blocked_manager()
         if blocked_manager.is_blocked(domain, new_strategy):
@@ -648,6 +662,10 @@ class OrchestraLockedPage(BasePage):
         """Залочивает стратегию"""
         domain = self.domain_input.text().strip().lower()
         if not domain:
+            return
+
+        if is_orchestra_ignored_target(domain):
+            self._show_ignored_target_warning(domain)
             return
 
         strategy = self.strat_spin.value()

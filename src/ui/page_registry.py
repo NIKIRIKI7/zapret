@@ -48,6 +48,11 @@ PAGE_CLASS_SPECS: dict[PageName, tuple[str, str, str]] = {
         "ui.pages.orchestra_zapret2.strategy_detail_page",
         "OrchestraZapret2StrategyDetailPage",
     ),
+    PageName.ZAPRET2_ORCHESTRA_PRESET_DETAIL: (
+        "orchestra_zapret2_preset_detail_page",
+        "ui.pages.orchestra_zapret2.preset_detail_page",
+        "OrchestraZapret2PresetDetailPage",
+    ),
     PageName.ZAPRET1_DIRECT_CONTROL: (
         "zapret1_direct_control_page",
         "ui.pages.zapret1.direct_control_page",

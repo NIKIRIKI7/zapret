@@ -60,12 +60,25 @@ def refresh_zapret1_user_presets_page(window) -> None:
 
 
 def open_zapret2_preset_detail(window, preset_name: str) -> None:
-    page = window._ensure_page(PageName.ZAPRET2_PRESET_DETAIL)
+    try:
+        from strategy_menu.launch_method_store import get_strategy_launch_method
+
+        method = str(get_strategy_launch_method() or "").strip().lower()
+    except Exception:
+        method = ""
+
+    target_page = (
+        PageName.ZAPRET2_ORCHESTRA_PRESET_DETAIL
+        if method == "direct_zapret2_orchestra"
+        else PageName.ZAPRET2_PRESET_DETAIL
+    )
+
+    page = window._ensure_page(target_page)
     if page is None:
         return
     if hasattr(page, "set_preset_file_name"):
         page.set_preset_file_name(preset_name)
-    window.show_page(PageName.ZAPRET2_PRESET_DETAIL)
+    window.show_page(target_page)
 
 
 def open_zapret1_preset_detail(window, preset_name: str) -> None:

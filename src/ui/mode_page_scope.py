@@ -23,7 +23,7 @@ MODE_SEARCH_PAGE_SCOPES: dict[str, frozenset[PageName]] = {
         PageName.ZAPRET2_ORCHESTRA,
         PageName.ZAPRET2_ORCHESTRA_USER_PRESETS,
         PageName.ZAPRET2_ORCHESTRA_STRATEGY_DETAIL,
-        PageName.ZAPRET2_PRESET_DETAIL,
+        PageName.ZAPRET2_ORCHESTRA_PRESET_DETAIL,
     }),
     "direct_zapret1": frozenset({
         PageName.ZAPRET1_DIRECT_CONTROL,

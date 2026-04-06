@@ -266,10 +266,17 @@ class Zapret2DirectControlPage(BasePage):
         self._preset_summary_worker = None
         self._preset_summary_request_id = 0
         self._preset_summary_dirty = True
-        self.deferred_show_requested.connect(self._run_deferred_show_work)
+        self.deferred_show_requested.connect(
+            self._run_deferred_show_work,
+            Qt.ConnectionType.QueuedConnection,
+        )
         _t_build = _time.perf_counter()
         self._build_ui()
         _log_startup_z2_control_metric("__init__.build_ui", (_time.perf_counter() - _t_build) * 1000)
+        try:
+            self._apply_optimistic_startup_view()
+        except Exception:
+            pass
         _t_stop_text = _time.perf_counter()
         self._update_stop_winws_button_text()
         _log_startup_z2_control_metric("__init__.stop_button_text", (_time.perf_counter() - _t_stop_text) * 1000)
@@ -781,6 +788,32 @@ class Zapret2DirectControlPage(BasePage):
         )
         set_tooltip(self.preset_name_label, "")
 
+    def _apply_optimistic_startup_view(self) -> None:
+        """Быстрое стартовое состояние без тяжёлого чтения пресета и monitor-проверок."""
+        try:
+            from strategy_menu import get_strategy_launch_method
+
+            method = str(get_strategy_launch_method() or "").strip().lower()
+        except Exception:
+            method = ""
+
+        if method == "direct_zapret2":
+            self.update_status("running")
+
+        try:
+            from core.services import get_selection_service
+
+            file_name = str(get_selection_service().get_selected_file_name("winws2") or "").strip()
+        except Exception:
+            file_name = ""
+
+        if not file_name:
+            return
+
+        display_name = Path(file_name).stem.strip() or file_name
+        self.preset_name_label.setText(display_name)
+        set_tooltip(self.preset_name_label, display_name)
+
     def _schedule_advanced_settings_reload(self, *, force: bool = False) -> None:
         if not force and not self._advanced_settings_dirty:
             return
@@ -1249,7 +1282,7 @@ class Zapret2DirectControlPage(BasePage):
                 "dpi_busy_text",
                 "dpi_last_error",
                 "current_strategy_summary",
-                "preset_revision",
+                "active_preset_revision",
                 "mode_revision",
             },
             emit_initial=True,
@@ -1258,7 +1291,7 @@ class Zapret2DirectControlPage(BasePage):
     def _on_ui_state_changed(self, state: AppUiState, changed_fields: frozenset[str]) -> None:
         if "mode_revision" in changed_fields:
             self._sync_direct_launch_mode_from_settings()
-        if "preset_revision" in changed_fields or not changed_fields:
+        if "active_preset_revision" in changed_fields or not changed_fields:
             self._advanced_settings_dirty = True
             self._preset_summary_dirty = True
             if self.isVisible():

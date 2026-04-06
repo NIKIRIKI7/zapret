@@ -92,6 +92,16 @@ class PresetManager:
         self._active_preset_cache: Optional[Preset] = None
         self._active_preset_mtime: float = 0.0
 
+    @staticmethod
+    def _normalize_preset_reference(value: str) -> str:
+        """Converts UI file-name references like ``Default.txt`` to preset names."""
+        candidate = str(value or "").strip()
+        if not candidate:
+            return ""
+        if candidate.lower().endswith(".txt"):
+            return Path(candidate).stem
+        return candidate
+
     # ========================================================================
     # LIST OPERATIONS
     # ========================================================================
@@ -121,7 +131,10 @@ class PresetManager:
         Returns:
             True if preset file exists
         """
-        return self._get_store().preset_exists(name)
+        preset_name = self._normalize_preset_reference(name)
+        if not preset_name:
+            return False
+        return self._get_store().preset_exists(preset_name)
 
     def get_preset_count(self) -> int:
         """
@@ -146,7 +159,10 @@ class PresetManager:
         Returns:
             Preset object or None if not found
         """
-        return self._get_store().get_preset(name)
+        preset_name = self._normalize_preset_reference(name)
+        if not preset_name:
+            return None
+        return self._get_store().get_preset(preset_name)
 
     def load_all_presets(self) -> List[Preset]:
         """
@@ -540,11 +556,15 @@ class PresetManager:
         Returns:
             True if switched successfully
         """
-        preset_path = get_preset_path(name)
+        preset_name = self._normalize_preset_reference(name)
+        if not preset_name:
+            return False
+
+        preset_path = get_preset_path(preset_name)
         active_path = get_active_preset_path()
 
         if not preset_path.exists():
-            log(f"Cannot switch: preset '{name}' not found", "ERROR")
+            log(f"Cannot switch: preset '{preset_name}' not found", "ERROR")
             return False
 
         try:
@@ -553,7 +573,7 @@ class PresetManager:
             shutil.copy2(preset_path, temp_path)
 
             # Add ActivePreset marker to file
-            self._add_active_preset_marker(temp_path, name)
+            self._add_active_preset_marker(temp_path, preset_name)
 
             # Keep preset file clean: remove legacy :strategy=N tags.
             try:
@@ -598,19 +618,19 @@ class PresetManager:
                     log(f"Atomic replace blocked; wrote active preset file in-place: {active_path}", "DEBUG")
 
             # Persist active preset name
-            set_active_preset_name(name)
+            set_active_preset_name(preset_name)
 
             # Invalidate cache after switch
             self._invalidate_active_preset_cache()
 
             # Notify central store
-            self._get_store().notify_preset_switched(name)
+            self._get_store().notify_preset_switched(preset_name)
 
-            log(f"Switched to preset '{name}'", "INFO")
+            log(f"Switched to preset '{preset_name}'", "INFO")
 
             # Callbacks (legacy, for callers that pass on_preset_switched)
             if self.on_preset_switched:
-                self.on_preset_switched(name)
+                self.on_preset_switched(preset_name)
 
             if reload_dpi and self.on_dpi_reload_needed:
                 self.on_dpi_reload_needed()
@@ -624,6 +644,10 @@ class PresetManager:
             if temp_path.exists():
                 temp_path.unlink()
             return False
+
+    def switch_preset_by_file_name(self, file_name: str, reload_dpi: bool = True) -> bool:
+        """Convenience adapter for UI lists that identify orchestra presets by file name."""
+        return self.switch_preset(file_name, reload_dpi=reload_dpi)
 
     def _add_active_preset_marker(self, file_path: Path, preset_name: str) -> None:
         """
@@ -789,6 +813,10 @@ class PresetManager:
         Returns:
             True if deleted
         """
+        name = self._normalize_preset_reference(name)
+        if not name:
+            return False
+
         # Check if active
         active_name = get_active_preset_name()
         if active_name == name:
@@ -799,6 +827,9 @@ class PresetManager:
         if result:
             self._notify_list_changed()
         return result
+
+    def delete_preset_by_file_name(self, file_name: str) -> bool:
+        return self.delete_preset(file_name)
 
     def rename_preset(self, old_name: str, new_name: str) -> bool:
         """
@@ -813,6 +844,10 @@ class PresetManager:
         Returns:
             True if renamed
         """
+        old_name = self._normalize_preset_reference(old_name)
+        if not old_name:
+            return False
+
         if rename_preset(old_name, new_name):
             # Update active preset name if this was active
             if get_active_preset_name() == old_name:
@@ -820,6 +855,9 @@ class PresetManager:
             self._notify_list_changed()
             return True
         return False
+
+    def rename_preset_by_file_name(self, file_name: str, new_name: str) -> bool:
+        return self.rename_preset(file_name, new_name)
 
     def duplicate_preset(self, name: str, new_name: str) -> bool:
         """
@@ -832,10 +870,17 @@ class PresetManager:
         Returns:
             True if duplicated
         """
+        name = self._normalize_preset_reference(name)
+        if not name:
+            return False
+
         result = duplicate_preset(name, new_name)
         if result:
             self._notify_list_changed()
         return result
+
+    def duplicate_preset_by_file_name(self, file_name: str, new_name: str) -> bool:
+        return self.duplicate_preset(file_name, new_name)
 
     # ========================================================================
     # IMPORT/EXPORT OPERATIONS
@@ -852,7 +897,13 @@ class PresetManager:
         Returns:
             True if exported
         """
-        return export_preset(name, dest_path)
+        preset_name = self._normalize_preset_reference(name)
+        if not preset_name:
+            return False
+        return export_preset(preset_name, dest_path)
+
+    def export_preset_by_file_name(self, file_name: str, dest_path: Path) -> bool:
+        return self.export_preset(file_name, dest_path)
 
     def import_preset(self, src_path: Path, name: Optional[str] = None) -> bool:
         """
@@ -1877,7 +1928,7 @@ class PresetManager:
             invalidate_templates_cache,
         )
 
-        name = (preset_name or "").strip()
+        name = self._normalize_preset_reference(preset_name)
         if not name:
             return False
 
@@ -2014,6 +2065,23 @@ class PresetManager:
         except Exception as e:
             log(f"Error resetting preset '{name}' to Default template: {e}", "ERROR")
             return False
+
+    def reset_preset_to_default_template_by_file_name(
+        self,
+        file_name: str,
+        *,
+        make_active: bool = True,
+        sync_active_file: bool = True,
+        emit_switched: bool = True,
+        invalidate_templates: bool = True,
+    ) -> bool:
+        return self.reset_preset_to_default_template(
+            file_name,
+            make_active=make_active,
+            sync_active_file=sync_active_file,
+            emit_switched=emit_switched,
+            invalidate_templates=invalidate_templates,
+        )
 
     def _save_and_sync_preset(self, preset: Preset) -> bool:
         """

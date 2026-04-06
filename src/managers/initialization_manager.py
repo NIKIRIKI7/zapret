@@ -3,7 +3,7 @@
 import threading
 
 from app_notifications import advisory_notification
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, Qt
 from log import log
 
 
@@ -11,11 +11,22 @@ class _StrategyCacheBridge(QObject):
     summary_ready = pyqtSignal(str, str)
 
 
+class _StartupPhaseBridge(QObject):
+    continue_phase_two = pyqtSignal()
+
+
 class InitializationManager:
     """
-    Менеджер управления асинхронной инициализацией приложения.
-    Делает плановую загрузку компонентов и выполняет «мягкую» верификацию
-    (несколько попыток с дедлайном), чтобы избежать ложных предупреждений.
+    Менеджер запуска приложения.
+
+    Логика разделена на две стадии:
+    1. Минимальный интерактивный контур — только то, без чего окно не может
+       быстро показаться и обработать первый клик.
+    2. Остальная инициализация — служебные менеджеры, мониторинг, сеть,
+       кеши и фоновые проверки.
+
+    Такой разрез нужен, чтобы GUI перестал держать главный поток занятым
+    первые 2-3 секунды после появления окна.
     """
 
     def __init__(self, app_instance):
@@ -31,6 +42,12 @@ class InitializationManager:
         self._ipsets_thread = None
         self._strategy_cache_bridge = _StrategyCacheBridge()
         self._strategy_cache_bridge.summary_ready.connect(self._apply_strategy_cache_summary)
+        self._startup_phase_bridge = _StartupPhaseBridge()
+        self._startup_phase_bridge.continue_phase_two.connect(
+            self._run_phase_two_init,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._phase_two_started = False
 
     def _log_startup_step(self, marker: str, details: str = "") -> None:
         try:
@@ -51,58 +68,51 @@ class InitializationManager:
     # ───────────────────────── запуск и планирование ─────────────────────────
 
     def run_async_init(self):
-        """Полностью асинхронная инициализация с оптимизированным порядком загрузки.
-        
-        Порядок загрузки оптимизирован по зависимостям:
-        
-        ФАЗА 1 (0-50ms): Критичные компоненты UI
-        - DPI Starter → нужен для состояния кнопок
-        - DPI Controller → управление DPI
-        - Меню и сигналы → UI готов к взаимодействию
-        
-        ФАЗА 2 (50-300ms): Менеджеры ядра и быстрые UI-зависимости
-        - Core: DPI Manager и обязательные файлы
-        - Content: Strategy Manager
-        - Theme: ThemeManager (асинхронная генерация CSS)
-        - Service: автозапуск/службы
-
-        ФАЗА 3 (600ms+): Idle-инициализация тяжёлых/необязательных менеджеров
-        - Process Monitor
-        - Network: Discord, Hosts, DNS
-        - Tray, Logger, прогрев кэша
-
-        ФАЗА 4 (1800ms+): Отложенные фоновые проверки
-        - Hostlists, IPsets (не критичны для UI)
-        - Подписка
-        """
+        """Запускает старт в два этапа без блокировки первого показа окна."""
         log("🟡 InitializationManager: начало оптимизированной инициализации", "DEBUG")
         
         self.app.set_status("Инициализация компонентов...")
 
-        # Критичный контур старта выполняем прямо и последовательно.
-        # Это убирает искусственные ожидания 10/300/1400/2200/4200ms и делает
-        # startup определённым: готовые компоненты доступны сразу.
+        # Фаза 1: только минимальный контур, который нужен для немедленного
+        # взаимодействия с окном. Всё остальное — позже отдельным queued-шагом.
         startup_steps = [
             self._init_dpi_starter,
             self._init_dpi_controller,
             self._init_menu,
             self._connect_signals,
+        ]
+
+        for task in startup_steps:
+            log(f"🟡 Выполняем {task.__name__} сразу", "DEBUG")
+            task()
+
+        self._check_and_complete_initialization()
+        self._startup_phase_bridge.continue_phase_two.emit()
+
+    def _run_phase_two_init(self) -> None:
+        """Продолжает старт после первого возврата в цикл интерфейса."""
+        if self._phase_two_started:
+            return
+        self._phase_two_started = True
+
+        phase_two_steps = [
+            self._init_process_monitor,
             self._init_core_managers,
             self._init_strategy_manager,
             self._init_theme_manager,
             self._finalize_managers_init,
+            self._init_telegram_proxy_autostart,
             self._init_service_managers,
-            self._init_process_monitor,
             self._init_network_managers,
         ]
 
         if bool(getattr(self.app, "start_in_tray", False)):
-            startup_steps.append(self._init_tray)
+            phase_two_steps.append(self._init_tray)
 
-        startup_steps.append(self._init_logger)
+        phase_two_steps.append(self._init_logger)
 
-        for task in startup_steps:
-            log(f"🟡 Выполняем {task.__name__} сразу", "DEBUG")
+        for task in phase_two_steps:
+            log(f"🟡 Выполняем {task.__name__} после первого показа окна", "DEBUG")
             task()
 
         # Некритичные тяжёлые операции уже сами уходят в фоновые потоки.
@@ -319,6 +329,19 @@ class InitializationManager:
         except Exception as e:
             log(f"Ошибка инициализации DPI Controller: {e}", "❌ ERROR")
             self.app.set_status(f"Ошибка контроллера: {e}")
+
+    def _init_telegram_proxy_autostart(self):
+        """Фоновый автозапуск Telegram Proxy сразу после общего старта приложения."""
+        try:
+            from telegram_proxy.manager import autostart_proxy_if_enabled_async
+
+            started = bool(autostart_proxy_if_enabled_async())
+            if started:
+                log("Telegram Proxy автозапуск запланирован через общий startup flow", "INFO")
+            else:
+                log("Telegram Proxy автозапуск не требуется или уже выполнен", "DEBUG")
+        except Exception as e:
+            log(f"Ошибка автозапуска Telegram Proxy: {e}", "WARNING")
 
     def _init_menu(self):
         """Инициализация меню"""

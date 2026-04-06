@@ -468,6 +468,21 @@ def connect_lazy_page_signals(window, page_name: PageName, page: QWidget) -> Non
                 window._show_active_zapret2_control_page,
             )
 
+    if page_name == PageName.ZAPRET2_ORCHESTRA_PRESET_DETAIL and hasattr(page, "back_clicked"):
+        connect_signal_once(
+            window,
+            "z2_orchestra_preset_detail.back_clicked",
+            page.back_clicked,
+            window._show_active_zapret2_user_presets_page,
+        )
+        if hasattr(page, "navigate_to_root"):
+            connect_signal_once(
+                window,
+                "z2_orchestra_preset_detail.navigate_to_root",
+                page.navigate_to_root,
+                window._show_active_zapret2_control_page,
+            )
+
     if page_name == PageName.ZAPRET1_PRESET_DETAIL and hasattr(page, "back_clicked"):
         connect_signal_once(
             window,

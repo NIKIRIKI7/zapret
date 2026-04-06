@@ -155,6 +155,7 @@ def init_navigation(window) -> None:
         PageName.ZAPRET2_STRATEGY_DETAIL,
         PageName.ZAPRET2_PRESET_DETAIL,
         PageName.ZAPRET2_ORCHESTRA_STRATEGY_DETAIL,
+        PageName.ZAPRET2_ORCHESTRA_PRESET_DETAIL,
         PageName.BLOBS,
         PageName.ZAPRET1_DIRECT,
         PageName.ZAPRET1_USER_PRESETS,

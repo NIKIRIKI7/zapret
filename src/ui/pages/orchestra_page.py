@@ -39,6 +39,7 @@ except ImportError:
 from ui.compat_widgets import set_tooltip
 from log import log
 from orchestra import MAX_ORCHESTRA_LOGS
+from orchestra.ignored_targets import is_orchestra_ignored_target
 
 
 class OrchestraPage(BasePage):
@@ -1138,6 +1139,16 @@ class OrchestraPage(BasePage):
 
     def _lock_strategy_from_log(self, domain: str, strategy: int, protocol: str):
         """Залочивает стратегию из контекстного меню лога"""
+        if is_orchestra_ignored_target(domain):
+            self.append_log(
+                self._tr(
+                    "page.orchestra.log.ignored_proxy_target",
+                    "[WARNING] {domain} относится к Telegram Proxy модулю и не управляется оркестратором",
+                    domain=domain,
+                )
+            )
+            return
+
         if strategy == 0:
             self.append_log(
                 self._tr(
@@ -1202,6 +1213,16 @@ class OrchestraPage(BasePage):
 
     def _block_strategy_from_log(self, domain: str, strategy: int, protocol: str):
         """Блокирует стратегию из контекстного меню лога"""
+        if is_orchestra_ignored_target(domain):
+            self.append_log(
+                self._tr(
+                    "page.orchestra.log.ignored_proxy_target",
+                    "[WARNING] {domain} относится к Telegram Proxy модулю и не управляется оркестратором",
+                    domain=domain,
+                )
+            )
+            return
+
         if strategy == 0:
             self.append_log(
                 self._tr(

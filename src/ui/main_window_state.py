@@ -24,7 +24,9 @@ class AppUiState:
     garland_enabled: bool = False
     snowflakes_enabled: bool = False
     window_opacity: int = 100
-    preset_revision: int = 0
+    active_preset_revision: int = 0
+    preset_content_revision: int = 0
+    preset_structure_revision: int = 0
     mode_revision: int = 0
     status_text: str = ""
     status_kind: str = "neutral"
@@ -159,9 +161,17 @@ class MainWindowStateStore:
     def set_window_opacity_value(self, value: int) -> bool:
         return self.update(window_opacity=max(0, min(100, int(value))))
 
-    def bump_preset_revision(self) -> bool:
-        current = self.snapshot().preset_revision
-        return self.update(preset_revision=int(current) + 1)
+    def bump_active_preset_revision(self) -> bool:
+        current = self.snapshot().active_preset_revision
+        return self.update(active_preset_revision=int(current) + 1)
+
+    def bump_preset_content_revision(self) -> bool:
+        current = self.snapshot().preset_content_revision
+        return self.update(preset_content_revision=int(current) + 1)
+
+    def bump_preset_structure_revision(self) -> bool:
+        current = self.snapshot().preset_structure_revision
+        return self.update(preset_structure_revision=int(current) + 1)
 
     def bump_mode_revision(self) -> bool:
         current = self.snapshot().mode_revision

@@ -48,16 +48,10 @@ except ImportError:
 if TYPE_CHECKING:
     from main import LupiDPIApp
 
-# Lazy import to avoid circular deps
-_proxy_manager = None
-
-
 def _get_proxy_manager():
-    global _proxy_manager
-    if _proxy_manager is None:
-        from telegram_proxy.manager import TelegramProxyManager
-        _proxy_manager = TelegramProxyManager()
-    return _proxy_manager
+    from telegram_proxy.manager import get_proxy_manager
+
+    return get_proxy_manager()
 
 
 # How often (ms) the GUI reads new log lines from the ring buffer
@@ -106,7 +100,8 @@ class TelegramProxyPage(BasePage):
         self._log_timer = QTimer(self)
         self._log_timer.timeout.connect(self._flush_log_buffer)
         self._log_timer.start(_LOG_REFRESH_MS)
-        # Auto-start moved to tray.py — fires even if this tab is never opened
+        # Auto-start now lives in startup initialization, so it works
+        # even if this page is never opened.
 
     def _setup_ui(self):
         # ── Tabs (SegmentedWidget) ──

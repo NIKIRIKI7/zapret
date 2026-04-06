@@ -48,6 +48,7 @@ from ui.compat_widgets import set_tooltip
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 from log import log
+from orchestra.ignored_targets import is_orchestra_ignored_target
 from orchestra.blocked_strategies_manager import ASKEY_ALL
 
 
@@ -511,6 +512,21 @@ class OrchestraBlockedPage(BasePage):
         """Обновляет все данные на странице"""
         self._refresh_blocked_list()
 
+    def _show_ignored_target_warning(self, domain: str) -> None:
+        if InfoBar is not None:
+            InfoBar.warning(
+                title=self._tr("page.orchestra.blocked.infobar.ignored_proxy.title", "Игнорируется"),
+                content=self._tr(
+                    "page.orchestra.blocked.infobar.ignored_proxy.body",
+                    "Домен {domain} относится к отдельному Telegram Proxy модулю. Оркестратор не управляет такими целями.",
+                    domain=domain,
+                ),
+                isClosable=True,
+                duration=5000,
+                parent=self.window(),
+                position=InfoBarPosition.TOP,
+            )
+
     def _reload_from_registry(self):
         """Перезагружает данные из реестра и обновляет список"""
         self._set_refresh_loading(True)
@@ -665,6 +681,11 @@ class OrchestraBlockedPage(BasePage):
 
     def _on_row_strategy_changed(self, hostname: str, old_strategy: int, new_strategy: int, askey: str):
         """Автосохранение при изменении стратегии в SpinBox"""
+        if is_orchestra_ignored_target(hostname):
+            self._show_ignored_target_warning(hostname)
+            self._refresh_data()
+            return
+
         runner = self._get_runner()
         if runner and hasattr(runner, 'blocked_manager'):
             # Удаляем старую блокировку и добавляем новую
@@ -757,6 +778,10 @@ class OrchestraBlockedPage(BasePage):
 
         domain = self.domain_input.text().strip().lower()
         if not domain:
+            return
+
+        if is_orchestra_ignored_target(domain):
+            self._show_ignored_target_warning(domain)
             return
 
         strategy = self.strat_spin.value()

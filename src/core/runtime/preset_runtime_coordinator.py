@@ -81,6 +81,13 @@ class PresetRuntimeCoordinator(QObject):
         log(f"Пресет переключен: {preset_file_name}", "INFO")
         self.setup_active_preset_file_watcher()
         self.request_dpi_restart_after_preset_switch()
+        try:
+            parent = self.parent()
+            store = getattr(parent, "ui_state_store", None)
+            if store is not None:
+                store.bump_active_preset_revision()
+        except Exception:
+            pass
         self.schedule_refresh_after_preset_switch()
 
     def request_dpi_restart_after_preset_switch(self) -> None:
@@ -102,14 +109,6 @@ class PresetRuntimeCoordinator(QObject):
 
     def schedule_refresh_after_preset_switch(self, delay_ms: int = 0) -> None:
         try:
-            try:
-                parent = self.parent()
-                store = getattr(parent, "ui_state_store", None)
-                if store is not None:
-                    store.bump_preset_revision()
-            except Exception:
-                pass
-
             timer = self._preset_switch_refresh_timer
             if timer is None:
                 timer = QTimer(self)
@@ -131,6 +130,14 @@ class PresetRuntimeCoordinator(QObject):
                 rearm = desired or path
                 if rearm and rearm not in (watcher.files() or []):
                     watcher.addPath(rearm)
+        except Exception:
+            pass
+
+        try:
+            parent = self.parent()
+            store = getattr(parent, "ui_state_store", None)
+            if store is not None:
+                store.bump_preset_content_revision()
         except Exception:
             pass
 

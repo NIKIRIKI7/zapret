@@ -49,11 +49,11 @@ class DirectRuntimePresetStore(QObject):
         self.presets_changed.emit()
 
     def notify_preset_saved(self, file_name: str) -> None:
-        self._reload_metadata()
+        self._invalidate_metadata_cache()
         self.preset_updated.emit(str(file_name or "").strip())
 
     def notify_presets_changed(self) -> None:
-        self._reload_metadata()
+        self._invalidate_metadata_cache()
         self.presets_changed.emit()
 
     def notify_preset_switched(self, file_name: str) -> None:
@@ -63,6 +63,11 @@ class DirectRuntimePresetStore(QObject):
     def _ensure_loaded(self) -> None:
         if not self._loaded:
             self._reload_metadata()
+
+    def _invalidate_metadata_cache(self) -> None:
+        self._manifests_by_file_name = {}
+        self._selected_source_file_name = None
+        self._loaded = False
 
     def _reload_metadata(self) -> None:
         from core.services import get_preset_repository, get_selection_service

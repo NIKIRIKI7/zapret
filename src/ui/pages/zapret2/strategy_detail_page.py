@@ -6,6 +6,7 @@
 
 import re
 import json
+import time as _time
 
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer, QEvent
 from PyQt6.QtWidgets import (
@@ -78,6 +79,15 @@ def _tr_text(language: str, key: str, default: str, **kwargs) -> str:
         except Exception:
             return text
     return text
+
+
+def _log_z2_detail_metric(section: str, elapsed_ms: float, *, extra: str | None = None) -> None:
+    try:
+        rounded = int(round(float(elapsed_ms)))
+    except Exception:
+        rounded = 0
+    suffix = f" ({extra})" if extra else ""
+    log(f"⏱ Startup UI Section: ZAPRET2_STRATEGY_DETAIL {section} {rounded}ms{suffix}", "⏱ STARTUP")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -652,8 +662,13 @@ class StrategyDetailPage(BasePage):
         self._last_parent_link_icon_color = None
         self._last_edit_args_icon_color = None
         self._preset_refresh_pending = False
+        self._suppress_next_preset_refresh = False
         self._last_sort_icon_color = None
         self._last_strategies_summary_text = None
+        self._pending_syndata_target_key: str | None = None
+        self._syndata_save_timer = QTimer(self)
+        self._syndata_save_timer.setSingleShot(True)
+        self._syndata_save_timer.timeout.connect(self._flush_syndata_settings_save)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         return _tr_text(self._ui_language, key, default, **kwargs)
@@ -1101,7 +1116,7 @@ class StrategyDetailPage(BasePage):
                 "--out-range: ограничение количества исходящих пакетов (n) или задержки (d)",
             ),
         )
-        self._out_range_spin.valueChanged.connect(self._save_syndata_settings)
+        self._out_range_spin.valueChanged.connect(self._schedule_syndata_settings_save)
         self._out_range_frame.control_container.addWidget(self._out_range_spin)
 
         self._general_card.add_widget(self._out_range_frame)
@@ -1138,7 +1153,7 @@ class StrategyDetailPage(BasePage):
             default_val=2,
         )
         self._send_repeats_spin = self._send_repeats_row.spinbox
-        self._send_repeats_row.valueChanged.connect(self._save_syndata_settings)
+        self._send_repeats_row.valueChanged.connect(self._schedule_syndata_settings_save)
         send_settings_layout.addWidget(self._send_repeats_row)
 
         # send_ip_ttl row
@@ -1151,7 +1166,7 @@ class StrategyDetailPage(BasePage):
             values=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
             labels=["off", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
         )
-        self._send_ip_ttl_selector.value_changed.connect(self._save_syndata_settings)
+        self._send_ip_ttl_selector.value_changed.connect(self._schedule_syndata_settings_save)
         self._send_ip_ttl_frame.set_control(self._send_ip_ttl_selector)
         send_settings_layout.addWidget(self._send_ip_ttl_frame)
 
@@ -1165,7 +1180,7 @@ class StrategyDetailPage(BasePage):
             values=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
             labels=["off", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
         )
-        self._send_ip6_ttl_selector.value_changed.connect(self._save_syndata_settings)
+        self._send_ip6_ttl_selector.value_changed.connect(self._schedule_syndata_settings_save)
         self._send_ip6_ttl_frame.set_control(self._send_ip6_ttl_selector)
         send_settings_layout.addWidget(self._send_ip6_ttl_frame)
 
@@ -1177,7 +1192,7 @@ class StrategyDetailPage(BasePage):
             items=[("none", None), ("seq", None), ("rnd", None), ("zero", None)],
         )
         self._send_ip_id_combo = self._send_ip_id_row.combo
-        self._send_ip_id_row.currentTextChanged.connect(self._save_syndata_settings)
+        self._send_ip_id_row.currentTextChanged.connect(self._schedule_syndata_settings_save)
         send_settings_layout.addWidget(self._send_ip_id_row)
 
         # send_badsum row
@@ -1190,7 +1205,7 @@ class StrategyDetailPage(BasePage):
             ),
         )
         self._send_badsum_check = SwitchButton()
-        self._send_badsum_check.checkedChanged.connect(self._save_syndata_settings)
+        self._send_badsum_check.checkedChanged.connect(self._schedule_syndata_settings_save)
         self._send_badsum_frame.set_control(self._send_badsum_check)
         send_settings_layout.addWidget(self._send_badsum_frame)
 
@@ -1237,7 +1252,7 @@ class StrategyDetailPage(BasePage):
             items=blob_items,
         )
         self._blob_combo = self._blob_row.combo
-        self._blob_row.currentTextChanged.connect(self._save_syndata_settings)
+        self._blob_row.currentTextChanged.connect(self._schedule_syndata_settings_save)
         settings_layout.addWidget(self._blob_row)
 
         # tls_mod selector row
@@ -1248,7 +1263,7 @@ class StrategyDetailPage(BasePage):
             items=[("none", None), ("rnd", None), ("rndsni", None), ("sni=google.com", None)],
         )
         self._tls_mod_combo = self._tls_mod_row.combo
-        self._tls_mod_row.currentTextChanged.connect(self._save_syndata_settings)
+        self._tls_mod_row.currentTextChanged.connect(self._schedule_syndata_settings_save)
         settings_layout.addWidget(self._tls_mod_row)
 
         # ═══════════════════════════════════════════════════════════════
@@ -1267,7 +1282,7 @@ class StrategyDetailPage(BasePage):
             values=[0, -1, -2, -3, -4, -5, -6, -7, -8, -9],
             labels=["OFF", "-1", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9"]
         )
-        self._autottl_delta_selector.value_changed.connect(self._save_syndata_settings)
+        self._autottl_delta_selector.value_changed.connect(self._schedule_syndata_settings_save)
         self._autottl_delta_frame.set_control(self._autottl_delta_selector)
         settings_layout.addWidget(self._autottl_delta_frame)
 
@@ -1281,7 +1296,7 @@ class StrategyDetailPage(BasePage):
             values=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
             labels=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
         )
-        self._autottl_min_selector.value_changed.connect(self._save_syndata_settings)
+        self._autottl_min_selector.value_changed.connect(self._schedule_syndata_settings_save)
         self._autottl_min_frame.set_control(self._autottl_min_selector)
         settings_layout.addWidget(self._autottl_min_frame)
 
@@ -1295,7 +1310,7 @@ class StrategyDetailPage(BasePage):
             values=[15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
             labels=["15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25"]
         )
-        self._autottl_max_selector.value_changed.connect(self._save_syndata_settings)
+        self._autottl_max_selector.value_changed.connect(self._schedule_syndata_settings_save)
         self._autottl_max_frame.set_control(self._autottl_max_selector)
         settings_layout.addWidget(self._autottl_max_frame)
 
@@ -1307,7 +1322,7 @@ class StrategyDetailPage(BasePage):
             items=[("none", None), ("ack", None), ("psh", None), ("ack,psh", None)],
         )
         self._tcp_flags_combo = self._tcp_flags_row.combo
-        self._tcp_flags_row.currentTextChanged.connect(self._save_syndata_settings)
+        self._tcp_flags_row.currentTextChanged.connect(self._schedule_syndata_settings_save)
         settings_layout.addWidget(self._tcp_flags_row)
 
         self._syndata_frame.add_widget(self._syndata_settings)
@@ -1590,9 +1605,16 @@ class StrategyDetailPage(BasePage):
 
     def show_target(self, target_key: str):
         """Открывает detail page для target из текущего source preset."""
+        _t_total = _time.perf_counter()
         self._ensure_content_built()
 
         prev_key = str(self._target_key or "").strip()
+        try:
+            pending_key = str(self._pending_syndata_target_key or "").strip()
+        except Exception:
+            pending_key = ""
+        if pending_key and pending_key != str(target_key or "").strip().lower():
+            self._flush_syndata_settings_save()
         if prev_key:
             self._save_scroll_state(prev_key)
 
@@ -1783,6 +1805,18 @@ class StrategyDetailPage(BasePage):
                     self._reset_row_widget.setVisible(True)
             except Exception:
                 pass
+
+        try:
+            _log_z2_detail_metric(
+                "show_target.total",
+                (_time.perf_counter() - _t_total) * 1000,
+                extra=(
+                    f"target={normalized_key}, reuse_list={'yes' if reuse_list else 'no'}, "
+                    f"tcp_phase={'yes' if self._tcp_phase_mode else 'no'}"
+                ),
+            )
+        except Exception:
+            pass
         else:
             self._send_frame.setVisible(True)
             self._syndata_frame.setVisible(True)
@@ -1829,12 +1863,21 @@ class StrategyDetailPage(BasePage):
         self._ui_state_store = store
         self._ui_state_unsubscribe = store.subscribe(
             self._on_ui_state_changed,
-            fields={"preset_revision"},
+            fields={"active_preset_revision", "preset_content_revision", "preset_structure_revision"},
             emit_initial=False,
         )
 
     def _on_ui_state_changed(self, _state: AppUiState, changed_fields: frozenset[str]) -> None:
-        if "preset_revision" in changed_fields:
+        if "preset_structure_revision" in changed_fields:
+            self.refresh_from_preset_switch()
+            return
+        if "active_preset_revision" in changed_fields:
+            self.refresh_from_preset_switch()
+            return
+        if "preset_content_revision" in changed_fields:
+            if self._suppress_next_preset_refresh:
+                self._suppress_next_preset_refresh = False
+                return
             self.refresh_from_preset_switch()
 
     def _apply_preset_refresh(self):
@@ -1843,20 +1886,6 @@ class StrategyDetailPage(BasePage):
             return
         if not self._target_key:
             return
-
-        try:
-            target_info = self._direct_facade.get_target_ui_item(self._target_key) or self._target_info
-        except Exception:
-            target_info = self._target_info
-
-        if not target_info:
-            return
-
-        try:
-            details = self._get_target_details(self._target_key)
-            current_strategy_id = (details.current_strategy if details is not None else "none") or "none"
-        except Exception:
-            current_strategy_id = "none"
 
         try:
             self.show_target(self._target_key)
@@ -1886,6 +1915,15 @@ class StrategyDetailPage(BasePage):
             center = vp.mapTo(self.content, rect.center())
             # ymargin: немного контекста вокруг строки
             self.ensureVisible(center.x(), center.y(), 0, 64)
+        except Exception:
+            pass
+
+    def _notify_preset_structure_changed(self) -> None:
+        store = self._ui_state_store
+        if store is None:
+            return
+        try:
+            store.bump_preset_structure_revision()
         except Exception:
             pass
 
@@ -1925,6 +1963,7 @@ class StrategyDetailPage(BasePage):
 
     def _load_strategies(self):
         """Загружает стратегии для текущего target'а."""
+        _t_total = _time.perf_counter()
         try:
             payload = self._direct_facade.get_target_detail_payload(self._target_key)
             if payload is not None:
@@ -2067,6 +2106,11 @@ class StrategyDetailPage(BasePage):
                 self._strategies_load_timer = QTimer(self)
                 self._strategies_load_timer.timeout.connect(self._load_next_strategies_batch)
             self._strategies_load_timer.start(5) # Быстрая подгрузка батчами
+            _log_z2_detail_metric(
+                "_load_strategies.total",
+                (_time.perf_counter() - _t_total) * 1000,
+                extra=f"target={self._target_key}, strategies={len(strategies)}, tcp_phase={'yes' if self._tcp_phase_mode else 'no'}",
+            )
             
         except Exception as e:
             log(f"StrategyDetailPage.error loading strategies: {e}", "ERROR")
@@ -2151,9 +2195,10 @@ class StrategyDetailPage(BasePage):
 
         chunk_size = 32
         end = min(start + chunk_size, total)
+        _t_batch = _time.perf_counter()
 
         try:
-            self._strategies_tree.setUpdatesEnabled(False)
+            self._strategies_tree.begin_bulk_update()
             for i in range(start, end):
                 item = self._pending_strategies_items[i]
                 strategy_id = str((item or {}).get("id") or "").strip()
@@ -2164,11 +2209,19 @@ class StrategyDetailPage(BasePage):
                 self._add_strategy_row(strategy_id, name, args_list)
         finally:
             try:
-                self._strategies_tree.setUpdatesEnabled(True)
+                self._strategies_tree.end_bulk_update()
             except Exception:
                 pass
 
         self._pending_strategies_index = end
+        try:
+            log(
+                f"StrategyDetailPage batch load: target={self._target_key}, rows={end - start}, "
+                f"progress={end}/{total}, elapsed={(_time.perf_counter() - _t_batch) * 1000:.0f}ms",
+                "DEBUG",
+            )
+        except Exception:
+            pass
 
         try:
             search_active = bool(self._search_input and self._search_input.text().strip())
@@ -2469,10 +2522,8 @@ class StrategyDetailPage(BasePage):
         """Открывает WinUI-диалог создания нового пресета."""
         try:
             from core.presets.direct_facade import DirectPresetFacade
-            from core.services import get_preset_store
 
             facade = DirectPresetFacade.from_launch_method("direct_zapret2")
-            store = get_preset_store()
         except Exception as e:
             if InfoBar:
                 InfoBar.error(
@@ -2490,7 +2541,7 @@ class StrategyDetailPage(BasePage):
             return
         try:
             facade.create(name, from_current=True)
-            store.notify_presets_changed()
+            self._notify_preset_structure_changed()
             log(f"Создан пресет '{name}'", "INFO")
             if InfoBar:
                 InfoBar.success(
@@ -2554,7 +2605,7 @@ class StrategyDetailPage(BasePage):
             return
         try:
             updated = facade.rename_by_file_name(old_file_name, new_name)
-            store.notify_presets_changed()
+            self._notify_preset_structure_changed()
             if facade.is_selected_file_name(updated.file_name):
                 store.notify_preset_switched(updated.file_name)
             log(f"Пресет '{old_name}' переименован в '{new_name}'", "INFO")
@@ -2586,22 +2637,27 @@ class StrategyDetailPage(BasePage):
         # 1. Reset through the direct facade (saves to the source preset file)
         if self._direct_facade.reset_target_settings(self._target_key):
             log(f"Настройки target'а {self._target_key} сброшены", "INFO")
+            self._suppress_next_preset_refresh = True
+            payload = self._reload_current_target_payload()
 
             # 2. Reload settings from the direct facade and apply them to UI
             self._apply_syndata_settings(self._load_syndata_settings(self._target_key))
 
             # 3. Reset filter_mode selector to stored default
             if hasattr(self, '_filter_mode_frame') and self._filter_mode_frame.isVisible():
-                current_mode = self._direct_facade.get_target_filter_mode(self._target_key)
+                current_mode = (
+                    str(getattr(payload, "filter_mode", "") or "").strip().lower()
+                    if payload is not None else self._direct_facade.get_target_filter_mode(self._target_key)
+                )
                 self._filter_mode_selector.blockSignals(True)
                 self._filter_mode_selector.setChecked(current_mode == "ipset")
                 self._filter_mode_selector.blockSignals(False)
 
             # 4. Update selected strategy highlight and enable toggle
-            try:
-                current_strategy_id = self._direct_facade.get_strategy_selections().get(self._target_key, "none")
-            except Exception:
-                current_strategy_id = "none"
+            current_strategy_id = (
+                (getattr(payload.details, "current_strategy", "none") or "none")
+                if payload is not None else "none"
+            )
 
             self._selected_strategy_id = current_strategy_id or "none"
             self._current_strategy_id = current_strategy_id or "none"
@@ -2660,6 +2716,7 @@ class StrategyDetailPage(BasePage):
 
         # Применяем стратегию (но остаёмся на странице)
         if self._target_key:
+            self._suppress_next_preset_refresh = True
             self.strategy_selected.emit(self._target_key, strategy_id)
 
     def _update_status_icon(self, active: bool):
@@ -2766,6 +2823,19 @@ class StrategyDetailPage(BasePage):
             return self._direct_facade.get_target_details(key)
         except Exception:
             return None
+
+    def _reload_current_target_payload(self):
+        """Перечитывает payload только для текущего target, без полного списка."""
+        key = str(self._target_key or "").strip().lower()
+        if not key or not getattr(self, "_direct_facade", None):
+            return None
+        try:
+            payload = self._direct_facade.get_target_detail_payload(key)
+        except Exception:
+            return None
+        if payload is not None:
+            self._target_payload = payload
+        return payload
 
     def _is_udp_like_target(self) -> bool:
         protocol_raw = str(getattr(self._target_info, "protocol", "") or "").upper()
@@ -3104,8 +3174,11 @@ class StrategyDetailPage(BasePage):
                 save_and_sync=True,
             ):
                 return
+            self._suppress_next_preset_refresh = True
+            payload = self._reload_current_target_payload()
             current_selection = (
-                self._direct_facade.get_strategy_selections().get(self._target_key, "none") or "none"
+                (getattr(payload.details, "current_strategy", "none") or "none")
+                if payload is not None else "none"
             )
 
             # Update local state for UI.
@@ -3297,6 +3370,7 @@ class StrategyDetailPage(BasePage):
 
     def _save_target_filter_mode(self, target_key: str, mode: str):
         """╨б╨╛╤Е╤А╨░╨╜╤П╨╡╤В ╤А╨╡╨╢╨╕╨╝ ╤Д╨╕╨╗╤М╤В╤А╨░╤Ж╨╕╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╤З╨╡╤А╨╡╨╖ PresetManager"""
+        self._suppress_next_preset_refresh = True
         self._direct_facade.update_target_filter_mode(
             target_key, mode, save_and_sync=True
         )
@@ -3396,7 +3470,7 @@ class StrategyDetailPage(BasePage):
                 self._out_range_seg.setCurrentItem(mode)
             except Exception:
                 pass
-            self._save_syndata_settings()
+            self._schedule_syndata_settings_save()
 
     # тХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХР
     # SYNDATA SETTINGS METHODS
@@ -3405,17 +3479,37 @@ class StrategyDetailPage(BasePage):
     def _on_send_toggled(self, checked: bool):
         """╨Ю╨▒╤А╨░╨▒╨╛╤В╤З╨╕╨║ ╨▓╨║╨╗╤О╤З╨╡╨╜╨╕╤П/╨▓╤Л╨║╨╗╤О╤З╨╡╨╜╨╕╤П send ╨┐╨░╤А╨░╨╝╨╡╤В╤А╨╛╨▓"""
         self._send_settings.setVisible(checked)
-        self._save_syndata_settings()
+        self._schedule_syndata_settings_save()
 
     def _on_syndata_toggled(self, checked: bool):
         """╨Ю╨▒╤А╨░╨▒╨╛╤В╤З╨╕╨║ ╨▓╨║╨╗╤О╤З╨╡╨╜╨╕╤П/╨▓╤Л╨║╨╗╤О╤З╨╡╨╜╨╕╤П syndata ╨┐╨░╤А╨░╨╝╨╡╤В╤А╨╛╨▓"""
         self._syndata_settings.setVisible(checked)
-        self._save_syndata_settings()
+        self._schedule_syndata_settings_save()
 
-    def _save_syndata_settings(self):
+    def _schedule_syndata_settings_save(self, delay_ms: int = 180):
+        """Пакетирует частые изменения UI в одно сохранение preset-а.
+
+        Это особенно важно для SpinBox/TTL-селекторов: пользователю удобно
+        быстро прокрутить несколько значений подряд, а вот писать preset и
+        триггерить синхронизацию после каждого шага — лишняя работа.
+        """
+        if not self._target_key:
+            return
+        self._pending_syndata_target_key = str(self._target_key or "").strip().lower()
+        try:
+            self._syndata_save_timer.start(max(0, int(delay_ms)))
+        except Exception:
+            self._flush_syndata_settings_save()
+
+    def _flush_syndata_settings_save(self):
         """Сохраняет out_range/send/syndata через новый direct facade."""
         if not self._target_key:
             return
+        pending_key = str(self._pending_syndata_target_key or "").strip().lower()
+        current_key = str(self._target_key or "").strip().lower()
+        if pending_key and pending_key != current_key:
+            return
+        self._pending_syndata_target_key = None
 
         payload = {
             "enabled": self._syndata_toggle.isChecked(),
@@ -3436,6 +3530,7 @@ class StrategyDetailPage(BasePage):
         }
 
         log(f"Syndata settings saved for {self._target_key}: {payload}", "DEBUG")
+        self._suppress_next_preset_refresh = True
         self._direct_facade.update_target_details_settings(
             self._target_key,
             payload,
@@ -3522,9 +3617,11 @@ class StrategyDetailPage(BasePage):
                 save_and_sync=True,
             ):
                 return
-
+            self._suppress_next_preset_refresh = True
+            payload = self._reload_current_target_payload()
             self._selected_strategy_id = (
-                self._direct_facade.get_strategy_selections().get(self._target_key, "none") or "none"
+                (getattr(payload.details, "current_strategy", "none") or "none")
+                if payload is not None else "none"
             )
             self._current_strategy_id = self._selected_strategy_id
             self._args_editor_dirty = False
@@ -3756,6 +3853,7 @@ class StrategyDetailPage(BasePage):
         """Применяет фильтры по технике к списку стратегий"""
         if not self._strategies_tree:
             return
+        _t_total = _time.perf_counter()
         search_text = self._search_input.text() if self._search_input else ""
         if self._tcp_phase_mode:
             try:
@@ -3765,6 +3863,18 @@ class StrategyDetailPage(BasePage):
             self._strategies_tree.apply_phase_filter(search_text, self._active_phase_key)
             self._sync_tree_selection_to_active_phase()
             self._update_strategies_summary()
+            try:
+                _log_z2_detail_metric(
+                    "_apply_filters.phase",
+                    (_time.perf_counter() - _t_total) * 1000,
+                    extra=(
+                        f"target={self._target_key}, visible={self._strategies_tree.visible_strategy_count()}, "
+                        f"total={self._strategies_tree.total_strategy_count()}, phase={self._active_phase_key or 'none'}, "
+                        f"search={'yes' if search_text.strip() else 'no'}"
+                    ),
+                )
+            except Exception:
+                pass
             return
 
         try:
@@ -3777,6 +3887,18 @@ class StrategyDetailPage(BasePage):
         if sid and self._strategies_tree.has_strategy(sid) and self._strategies_tree.is_strategy_visible(sid):
             self._strategies_tree.set_selected_strategy(sid)
         self._update_strategies_summary()
+        try:
+            _log_z2_detail_metric(
+                "_apply_filters.default",
+                (_time.perf_counter() - _t_total) * 1000,
+                extra=(
+                    f"target={self._target_key}, visible={self._strategies_tree.visible_strategy_count()}, "
+                    f"total={self._strategies_tree.total_strategy_count()}, active_filters={len(self._active_filters)}, "
+                    f"search={'yes' if search_text.strip() else 'no'}"
+                ),
+            )
+        except Exception:
+            pass
 
     def _sync_tree_selection_to_active_phase(self) -> None:
         """TCP multi-phase: restores highlighted row for the currently active phase."""
@@ -3836,6 +3958,7 @@ class StrategyDetailPage(BasePage):
         """Применяет текущую сортировку"""
         if not self._strategies_tree:
             return
+        _t_total = _time.perf_counter()
         self._strategies_tree.set_sort_mode(self._sort_mode)
         self._strategies_tree.apply_sort()
         self._update_sort_button_ui()
@@ -3844,6 +3967,14 @@ class StrategyDetailPage(BasePage):
         sid = self._selected_strategy_id or self._current_strategy_id or "none"
         if sid and self._strategies_tree.has_strategy(sid):
             self._strategies_tree.set_selected_strategy(sid)
+        try:
+            _log_z2_detail_metric(
+                "_apply_sort.total",
+                (_time.perf_counter() - _t_total) * 1000,
+                extra=f"target={self._target_key}, mode={self._sort_mode}, rows={self._strategies_tree.total_strategy_count()}",
+            )
+        except Exception:
+            pass
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
