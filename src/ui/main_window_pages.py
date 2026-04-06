@@ -6,11 +6,35 @@ from PyQt6.QtWidgets import QWidget
 
 from log import log
 from ui.page_names import PageName
+from ui.page_registry import iter_lazy_page_specs
 from ui.window_action_controller import (
     open_connection_test,
     open_folder,
     start_dpi,
     stop_dpi,
+)
+
+
+_IDLE_PRELOAD_INITIAL_DELAY_MS = 900
+_IDLE_PRELOAD_STEP_DELAY_MS = 140
+_IDLE_PRELOAD_PAGE_PRIORITY: tuple[PageName, ...] = (
+    PageName.DPI_SETTINGS,
+    PageName.BLOCKCHECK,
+    PageName.LOGS,
+    PageName.APPEARANCE,
+    PageName.SERVERS,
+    PageName.NETWORK,
+    PageName.HOSTS,
+    PageName.TELEGRAM_PROXY,
+    PageName.ABOUT,
+    PageName.AUTOSTART,
+)
+_IDLE_WARM_PAGE_ACTIONS: tuple[tuple[PageName, str], ...] = (
+    (PageName.DPI_SETTINGS, ""),
+    (PageName.BLOCKCHECK, "_ensure_ui_built"),
+    (PageName.LOGS, "_ensure_ui_built"),
+    (PageName.APPEARANCE, "_ensure_ui_built"),
+    (PageName.SERVERS, ""),
 )
 
 
@@ -53,6 +77,117 @@ def create_pages(window) -> None:
         "DEBUG",
     )
     window._pump_startup_ui(force=True)
+
+
+def _build_idle_page_preload_plan(window) -> tuple[tuple[str, object, str], ...]:
+    page_class_specs = getattr(window, "_page_class_specs", {}) or {}
+    tasks: list[tuple[str, object, str]] = []
+    seen_modules: set[str] = set()
+
+    def _append_module_for_page(page_name: PageName) -> None:
+        resolved_name = resolve_page_name(window, page_name)
+        spec = page_class_specs.get(resolved_name)
+        if spec is None:
+            return
+        module_name = str(spec[1] or "").strip()
+        if not module_name or module_name in seen_modules:
+            return
+        seen_modules.add(module_name)
+        tasks.append(("module", module_name, ""))
+
+    for page_name in _IDLE_PRELOAD_PAGE_PRIORITY:
+        _append_module_for_page(page_name)
+
+    for page_name, spec in iter_lazy_page_specs():
+        if page_name not in page_class_specs:
+            continue
+        module_name = str(spec[1] or "").strip()
+        if not module_name or module_name in seen_modules:
+            continue
+        seen_modules.add(module_name)
+        tasks.append(("module", module_name, ""))
+
+    for page_name, action_name in _IDLE_WARM_PAGE_ACTIONS:
+        resolved_name = resolve_page_name(window, page_name)
+        if resolved_name not in page_class_specs:
+            continue
+        tasks.append(("page", resolved_name, action_name))
+
+    return tuple(tasks)
+
+
+def schedule_idle_page_preload(window) -> None:
+    if bool(getattr(window, "_idle_page_preload_started", False)):
+        return
+
+    plan = _build_idle_page_preload_plan(window)
+    if not plan:
+        return
+
+    window._idle_page_preload_started = True
+    window._idle_page_preload_pending = list(plan)
+
+    try:
+        from PyQt6.QtCore import QTimer
+    except Exception:
+        return
+
+    QTimer.singleShot(_IDLE_PRELOAD_INITIAL_DELAY_MS, lambda: _run_next_idle_page_preload(window))
+
+
+def _run_next_idle_page_preload(window) -> None:
+    queue = getattr(window, "_idle_page_preload_pending", None)
+    if not isinstance(queue, list) or not queue:
+        return
+
+    task_kind, task_target, action_name = queue.pop(0)
+
+    import time as _time
+
+    started_at = _time.perf_counter()
+    label = str(task_target)
+
+    try:
+        if task_kind == "module":
+            module_name = str(task_target or "").strip()
+            if not module_name:
+                return
+            label = module_name
+            import_module(module_name)
+        elif task_kind == "page":
+            if not isinstance(task_target, PageName):
+                return
+            label = task_target.name
+            page = ensure_page(window, task_target)
+            if page is not None and action_name:
+                action = getattr(page, action_name, None)
+                if callable(action):
+                    action()
+        else:
+            return
+    except Exception as e:
+        log(f"Idle page preload failed for {label}: {e}", "DEBUG")
+    finally:
+        elapsed_ms = int((_time.perf_counter() - started_at) * 1000)
+        if elapsed_ms >= 80:
+            log(f"⏱ Idle page preload: {label} {elapsed_ms}ms", "DEBUG")
+
+        pump = getattr(window, "_pump_startup_ui", None)
+        if callable(pump):
+            try:
+                pump(force=True)
+            except Exception:
+                pass
+
+    if not queue:
+        return
+
+    try:
+        from PyQt6.QtCore import QTimer
+    except Exception:
+        return
+
+    QTimer.singleShot(_IDLE_PRELOAD_STEP_DELAY_MS, lambda: _run_next_idle_page_preload(window))
 
 
 def resolve_page_name(window, name: PageName) -> PageName:

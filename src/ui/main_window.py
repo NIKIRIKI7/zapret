@@ -95,6 +95,7 @@ from ui.main_window_pages import (
     get_page_route_key,
     has_nav_item,
     resolve_page_name,
+    schedule_idle_page_preload,
     set_stacked_widget_current_page,
 )
 from ui.main_window_mode_switch import (
@@ -336,6 +337,7 @@ class MainWindowUI:
         connect_main_window_page_signals(self)
         self._main_window_page_signals_connected = True
         self._log_startup_page_init_summary()
+        schedule_idle_page_preload(self)
 
     @staticmethod
     def _get_current_launch_method_for_preset_runtime() -> str:
