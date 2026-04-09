@@ -24,64 +24,11 @@ from ui.text_catalog import tr as tr_catalog, normalize_language
 from ui.page_performance import log_page_metric
 from ui.page_runtime import PageLoadController
 from ui.theme_refresh import ThemeRefreshController
-
-
-def _apply_widget_smooth_mode(widget, enabled: bool) -> None:
-    try:
-        from PyQt6.QtCore import Qt
-        from qfluentwidgets.common.smooth_scroll import SmoothMode
-
-        mode = SmoothMode.COSINE if enabled else SmoothMode.NO_SMOOTH
-
-        def _apply_delegate_mode(delegate) -> None:
-            if delegate is None:
-                return
-            try:
-                if hasattr(delegate, "useAni"):
-                    if not hasattr(delegate, "_zapret_base_use_ani"):
-                        delegate._zapret_base_use_ani = bool(delegate.useAni)
-                    delegate.useAni = bool(delegate._zapret_base_use_ani) if enabled else False
-            except Exception:
-                pass
-
-            for smooth_attr in ("verticalSmoothScroll", "horizonSmoothScroll"):
-                smooth = getattr(delegate, smooth_attr, None)
-                setter = getattr(smooth, "setSmoothMode", None)
-                if callable(setter):
-                    try:
-                        setter(mode)
-                    except Exception:
-                        pass
-
-            setter = getattr(delegate, "setSmoothMode", None)
-            if callable(setter):
-                try:
-                    setter(mode)
-                except TypeError:
-                    try:
-                        setter(mode, Qt.Orientation.Vertical)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-
-        setter = getattr(widget, "setSmoothMode", None)
-        if not callable(setter):
-            _apply_delegate_mode(getattr(widget, "scrollDelegate", None))
-            _apply_delegate_mode(getattr(widget, "scrollDelagate", None))
-            _apply_delegate_mode(getattr(widget, "delegate", None))
-            return
-
-        try:
-            setter(mode, Qt.Orientation.Vertical)
-        except TypeError:
-            setter(mode)
-
-        _apply_delegate_mode(getattr(widget, "scrollDelegate", None))
-        _apply_delegate_mode(getattr(widget, "scrollDelagate", None))
-        _apply_delegate_mode(getattr(widget, "delegate", None))
-    except Exception:
-        pass
+from ui.smooth_scroll import (
+    apply_editor_smooth_scroll_preference,
+    apply_page_smooth_scroll_preference,
+    apply_smooth_scroll_mode,
+)
 
 
 class ScrollBlockingPlainTextEdit(_FluentPlainTextEdit):
@@ -95,14 +42,10 @@ class ScrollBlockingPlainTextEdit(_FluentPlainTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setProperty("noDrag", True)
-        try:
-            from config.reg import get_smooth_scroll_enabled
-            self.set_smooth_scroll_enabled(get_smooth_scroll_enabled())
-        except Exception:
-            pass
+        apply_editor_smooth_scroll_preference(self)
 
     def set_smooth_scroll_enabled(self, enabled: bool) -> None:
-        _apply_widget_smooth_mode(self, enabled)
+        apply_smooth_scroll_mode(self, enabled)
 
     def wheelEvent(self, event):
         # SmoothScrollDelegate поглощает событие когда НЕ у границы (возвращает True),
@@ -116,14 +59,10 @@ class ScrollBlockingTextEdit(_FluentTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setProperty("noDrag", True)
-        try:
-            from config.reg import get_smooth_scroll_enabled
-            self.set_smooth_scroll_enabled(get_smooth_scroll_enabled())
-        except Exception:
-            pass
+        apply_editor_smooth_scroll_preference(self)
 
     def set_smooth_scroll_enabled(self, enabled: bool) -> None:
-        _apply_widget_smooth_mode(self, enabled)
+        apply_smooth_scroll_mode(self, enabled)
 
     def wheelEvent(self, event):
         event.accept()
@@ -188,14 +127,8 @@ class BasePage(_FluentScrollArea):
             "QScrollArea { background-color: transparent; border: none; }"
         )
 
-        # Apply smooth scroll preference from registry
-        try:
-            from config.reg import get_smooth_scroll_enabled
-            from qfluentwidgets.common.smooth_scroll import SmoothMode
-            if not get_smooth_scroll_enabled():
-                self.setSmoothMode(SmoothMode.NO_SMOOTH, Qt.Orientation.Vertical)
-        except Exception:
-            pass
+        # Применяем обычную прокрутку для страниц и списков.
+        apply_page_smooth_scroll_preference(self)
 
         # --- Content container ---
         self.content = QWidget(self)

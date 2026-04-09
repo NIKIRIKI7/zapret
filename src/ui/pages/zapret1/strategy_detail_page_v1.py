@@ -13,6 +13,7 @@ from ui.pages.base_page import BasePage
 from ui.compat_widgets import ActionButton, RefreshButton, SettingsCard
 from ui.widgets.direct_zapret2_strategies_tree import DirectZapret2StrategiesTree, StrategyTreeRow
 from ui.text_catalog import tr as tr_catalog
+from ui.smooth_scroll import apply_editor_smooth_scroll_preference
 from log import log
 
 try:
@@ -111,36 +112,7 @@ class _ArgsEditorDialog(MessageBoxBase):  # type: ignore[misc, valid-type]
         self.viewLayout.addWidget(hint)
 
         self._text_edit = TextEdit()
-        try:
-            from config.reg import get_smooth_scroll_enabled
-            from qfluentwidgets.common.smooth_scroll import SmoothMode
-
-            smooth_enabled = get_smooth_scroll_enabled()
-            mode = SmoothMode.COSINE if smooth_enabled else SmoothMode.NO_SMOOTH
-            delegate = (
-                getattr(self._text_edit, "scrollDelegate", None)
-                or getattr(self._text_edit, "scrollDelagate", None)
-                or getattr(self._text_edit, "delegate", None)
-            )
-            if delegate is not None:
-                if hasattr(delegate, "useAni"):
-                    if not hasattr(delegate, "_zapret_base_use_ani"):
-                        delegate._zapret_base_use_ani = bool(delegate.useAni)
-                    delegate.useAni = bool(delegate._zapret_base_use_ani) if smooth_enabled else False
-                for smooth_attr in ("verticalSmoothScroll", "horizonSmoothScroll"):
-                    smooth = getattr(delegate, smooth_attr, None)
-                    smooth_setter = getattr(smooth, "setSmoothMode", None)
-                    if callable(smooth_setter):
-                        smooth_setter(mode)
-
-            setter = getattr(self._text_edit, "setSmoothMode", None)
-            if callable(setter):
-                try:
-                    setter(mode, Qt.Orientation.Vertical)
-                except TypeError:
-                    setter(mode)
-        except Exception:
-            pass
+        apply_editor_smooth_scroll_preference(self._text_edit)
         self._text_edit.setPlaceholderText(
             self._tr(
                 "page.z1_strategy_detail.args_dialog.placeholder",

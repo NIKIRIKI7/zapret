@@ -623,67 +623,24 @@ class MainWindowUI:
         except Exception:
             pass
 
-    def _on_smooth_scroll_changed(self, enabled: bool):
-        """Toggle smooth scrolling on all existing pages and nested widgets."""
         try:
-            from PyQt6.QtCore import Qt
+            from config.reg import get_editor_smooth_scroll_enabled
+
+            self._on_editor_smooth_scroll_changed(get_editor_smooth_scroll_enabled())
+        except Exception:
+            pass
+
+    def _on_smooth_scroll_changed(self, enabled: bool):
+        """Переключает плавную прокрутку страниц, списков и деревьев, но не редакторов."""
+        try:
             from PyQt6.QtWidgets import QWidget
-            from qfluentwidgets.common.smooth_scroll import SmoothMode
-
-            mode = SmoothMode.COSINE if enabled else SmoothMode.NO_SMOOTH
-
-            def _apply_delegate_mode(delegate) -> None:
-                if delegate is None:
-                    return
-
-                try:
-                    if hasattr(delegate, "useAni"):
-                        if not hasattr(delegate, "_zapret_base_use_ani"):
-                            delegate._zapret_base_use_ani = bool(delegate.useAni)
-                        delegate.useAni = bool(delegate._zapret_base_use_ani) if enabled else False
-                except Exception:
-                    pass
-
-                for smooth_attr in ("verticalSmoothScroll", "horizonSmoothScroll"):
-                    smooth = getattr(delegate, smooth_attr, None)
-                    setter = getattr(smooth, "setSmoothMode", None)
-                    if callable(setter):
-                        try:
-                            setter(mode)
-                        except Exception:
-                            pass
-
-                setter = getattr(delegate, "setSmoothMode", None)
-                if callable(setter):
-                    try:
-                        setter(mode)
-                    except TypeError:
-                        try:
-                            setter(mode, Qt.Orientation.Vertical)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
+            from ui.smooth_scroll import apply_smooth_scroll_mode, is_editor_smooth_scroll_target
 
             def _apply_smooth_mode(target) -> None:
-                setter = getattr(target, "setSmoothMode", None)
-                if callable(setter):
-                    try:
-                        setter(mode, Qt.Orientation.Vertical)
-                    except TypeError:
-                        try:
-                            setter(mode)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
+                if is_editor_smooth_scroll_target(target):
+                    return
 
-                _apply_delegate_mode(getattr(target, "scrollDelegate", None))
-                _apply_delegate_mode(getattr(target, "scrollDelagate", None))
-                _apply_delegate_mode(getattr(target, "delegate", None))
-                _apply_delegate_mode(getattr(target, "_presets_scroll_delegate", None))
-                _apply_delegate_mode(getattr(target, "_smooth_scroll_delegate", None))
-
+                apply_smooth_scroll_mode(target, enabled)
                 custom_setter = getattr(target, "set_smooth_scroll_enabled", None)
                 if callable(custom_setter):
                     try:
@@ -695,6 +652,38 @@ class MainWindowUI:
                 _apply_smooth_mode(page)
                 for child in page.findChildren(QWidget):
                     _apply_smooth_mode(child)
+        except Exception:
+            pass
+
+    def _on_editor_smooth_scroll_changed(self, enabled: bool):
+        """Переключает плавную прокрутку только у текстовых редакторов."""
+        try:
+            from PyQt6.QtWidgets import QWidget
+            from ui.smooth_scroll import (
+                apply_smooth_scroll_mode,
+                get_effective_editor_smooth_scroll_enabled,
+                is_editor_smooth_scroll_target,
+            )
+
+            effective_enabled = get_effective_editor_smooth_scroll_enabled(enabled)
+
+            def _apply_editor_smooth_mode(target) -> None:
+                if not is_editor_smooth_scroll_target(target):
+                    return
+
+                apply_smooth_scroll_mode(target, effective_enabled)
+
+                custom_setter = getattr(target, "set_smooth_scroll_enabled", None)
+                if callable(custom_setter):
+                    try:
+                        custom_setter(effective_enabled)
+                    except Exception:
+                        pass
+
+            for page in list(self.pages.values()):
+                _apply_editor_smooth_mode(page)
+                for child in page.findChildren(QWidget):
+                    _apply_editor_smooth_mode(child)
         except Exception:
             pass
 

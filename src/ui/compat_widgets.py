@@ -22,13 +22,14 @@ try:
         TransparentPushButton, BodyLabel, StrongBodyLabel, CaptionLabel,
         SubtitleLabel, TitleLabel, IndeterminateProgressBar, FluentIcon,
         ProgressBar, InfoBar, InfoBarPosition, SwitchButton, isDarkTheme, themeColor,
-        LineEdit, ComboBox, CheckBox,
+        LineEdit, ComboBox, CheckBox, SettingCard as FluentSettingCard,
         ToolTipFilter, ToolTipPosition,
     )
     HAS_FLUENT = True
     _FluentPushButton = PushButton
 except ImportError:
     HAS_FLUENT = False
+    FluentSettingCard = QFrame  # type: ignore[assignment,misc]
     ToolTipFilter = None    # type: ignore[assignment,misc]
     ToolTipPosition = None  # type: ignore[assignment,misc]
     _FluentPushButton = QPushButton  # type: ignore[assignment,misc]
@@ -294,71 +295,72 @@ class PrimaryActionButton(PrimaryPushButton if HAS_FLUENT else QPushButton):
 # SettingsRow — icon + title/description left, control right
 # ---------------------------------------------------------------------------
 
-class SettingsRow(QWidget):
+class SettingsRow(FluentSettingCard if HAS_FLUENT else QWidget):
     """Settings row (icon + text on the left, control widget on the right)."""
 
     def __init__(self, icon_name: str, title: str, description: str = "", parent=None):
-        super().__init__(parent)
-
         self._icon_name = icon_name
         self._icon_label = None
-        self._icon_update_scheduled = False
         self._title_label = None
         self._desc_label = None
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 4, 0, 4)
-        layout.setSpacing(12)
-
-        # Icon
-        icon_label = QLabel()
-        self._icon_label = icon_label
-        self._refresh_icon()
-        icon_label.setFixedSize(24, 24)
-        layout.addWidget(icon_label)
-
-        # Text
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(2)
-
         if HAS_FLUENT:
-            title_label = BodyLabel(title)
+            try:
+                import qtawesome as qta
+                icon = qta.icon(icon_name, color=themeColor().name())
+            except Exception:
+                icon = QIcon()
+            super().__init__(icon, title, description or None, parent)
+            self._icon_label = getattr(self, "iconLabel", None)
+            self._title_label = getattr(self, "titleLabel", None)
+            self._desc_label = getattr(self, "contentLabel", None)
+            try:
+                self.setIconSize(20, 20)
+            except Exception:
+                pass
+            self.control_container = QHBoxLayout()
+            self.control_container.setSpacing(8)
+            try:
+                stretch_index = max(0, self.hBoxLayout.count() - 1)
+                self.hBoxLayout.insertSpacing(stretch_index, 16)
+                self.hBoxLayout.insertLayout(stretch_index, self.control_container)
+            except Exception:
+                self.hBoxLayout.addLayout(self.control_container)
         else:
+            super().__init__(parent)
+
+            layout = QHBoxLayout(self)
+            layout.setContentsMargins(0, 4, 0, 4)
+            layout.setSpacing(12)
+
+            # Icon
+            icon_label = QLabel()
+            self._icon_label = icon_label
+            self._refresh_icon()
+            icon_label.setFixedSize(24, 24)
+            layout.addWidget(icon_label)
+
+            # Text
+            text_layout = QVBoxLayout()
+            text_layout.setSpacing(2)
+
             title_label = QLabel(title)
             title_label.setStyleSheet("font-size: 13px; font-weight: 500;")
-        self._title_label = title_label
-        text_layout.addWidget(title_label)
+            self._title_label = title_label
+            text_layout.addWidget(title_label)
 
-        if description:
-            if HAS_FLUENT:
-                desc_label = CaptionLabel(description)
-            else:
+            if description:
                 desc_label = QLabel(description)
                 desc_label.setStyleSheet("font-size: 11px;")
-            desc_label.setWordWrap(True)
-            self._desc_label = desc_label
-            text_layout.addWidget(desc_label)
+                desc_label.setWordWrap(True)
+                self._desc_label = desc_label
+                text_layout.addWidget(desc_label)
 
-        layout.addLayout(text_layout, 1)
+            layout.addLayout(text_layout, 1)
 
-        # Control container (populated externally via set_control)
-        self.control_container = QHBoxLayout()
-        self.control_container.setSpacing(8)
-        layout.addLayout(self.control_container)
-
-    def changeEvent(self, event):  # noqa: N802 (Qt override)
-        try:
-            if event.type() in (QEvent.Type.StyleChange, QEvent.Type.PaletteChange):
-                if not self._icon_update_scheduled:
-                    self._icon_update_scheduled = True
-                    QTimer.singleShot(0, self._on_debounced_theme_change)
-        except Exception:
-            pass
-        return super().changeEvent(event)
-
-    def _on_debounced_theme_change(self) -> None:
-        self._icon_update_scheduled = False
-        self._refresh_icon()
+            # Control container (populated externally via set_control)
+            self.control_container = QHBoxLayout()
+            self.control_container.setSpacing(8)
+            layout.addLayout(self.control_container)
 
     def _refresh_icon(self) -> None:
         if self._icon_label is None:
@@ -376,14 +378,18 @@ class SettingsRow(QWidget):
 
     def set_title(self, text: str) -> None:
         try:
-            if self._title_label is not None:
+            if HAS_FLUENT:
+                self.setTitle(text)
+            elif self._title_label is not None:
                 self._title_label.setText(text)
         except Exception:
             pass
 
     def set_description(self, text: str) -> None:
         try:
-            if self._desc_label is not None:
+            if HAS_FLUENT:
+                self.setContent(text)
+            elif self._desc_label is not None:
                 self._desc_label.setText(text)
         except Exception:
             pass

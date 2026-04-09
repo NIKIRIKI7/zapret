@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 import qtawesome as qta
 
 from ui.pages.base_page import BasePage
-from ui.compat_widgets import ActionButton, PrimaryActionButton, PulsingDot, SettingsCard, SettingsRow, set_tooltip
+from ui.compat_widgets import ActionButton, PrimaryActionButton, PulsingDot, SettingsCard, set_tooltip
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
 from ui.window_action_controller import start_dpi, stop_and_exit, stop_dpi
@@ -19,7 +19,7 @@ try:
     from qfluentwidgets import (
         CaptionLabel, StrongBodyLabel, SubtitleLabel, BodyLabel,
         IndeterminateProgressBar, MessageBox, InfoBar,
-        PushButton, FluentIcon, CardWidget,
+        PushButton, FluentIcon, CardWidget, SettingCardGroup,
     )
     _HAS_FLUENT = True
 except ImportError:
@@ -30,6 +30,7 @@ except ImportError:
     PushButton = None
     FluentIcon = None
     CardWidget = QWidget  # type: ignore
+    SettingCardGroup = None  # type: ignore[assignment]
     _HAS_FLUENT = False
 
 
@@ -282,34 +283,54 @@ class Zapret1DirectControlPage(BasePage):
         self.add_spacing(16)
 
         # ── Настройки программы ─────────────────────────────────────────────
-        self.add_section_title(text_key="page.z1_control.section.program_settings")
-        program_settings_card = SettingsCard()
+        program_settings_title = tr_catalog(
+            "page.z1_control.section.program_settings",
+            language=self._ui_language,
+            default="Настройки программы",
+        )
+        if SettingCardGroup is not None and _HAS_FLUENT:
+            self.program_settings_section_label = None
+            program_settings_card = SettingCardGroup(program_settings_title, self.content)
+        else:
+            self.program_settings_section_label = self.add_section_title(
+                text_key="page.z1_control.section.program_settings"
+            )
+            program_settings_card = SettingsCard()
+        self.program_settings_card = program_settings_card
 
         try:
-            from ui.widgets.win11_controls import Win11ToggleSwitch
+            from ui.widgets.win11_controls import Win11ToggleRow
         except Exception:
-            Win11ToggleSwitch = None
+            Win11ToggleRow = None
 
-        auto_row = SettingsRow(
+        if Win11ToggleRow is None:
+            raise RuntimeError("Win11ToggleRow недоступен для страницы управления Zapret 1")
+
+        self.auto_dpi_toggle = Win11ToggleRow(
             "fa5s.bolt",
             tr_catalog("page.z1_control.setting.autostart.title", language=self._ui_language, default="Автозагрузка DPI"),
             tr_catalog("page.z1_control.setting.autostart.desc", language=self._ui_language, default="Запускать Zapret автоматически при старте программы"),
         )
-        self.auto_row = auto_row
-        self.auto_dpi_toggle = Win11ToggleSwitch() if Win11ToggleSwitch else ActionButton(
-            tr_catalog("common.toggle.on_off", language=self._ui_language, default="Вкл/Выкл")
-        )
-        self.auto_dpi_toggle.setProperty("noDrag", True)
-        if hasattr(self.auto_dpi_toggle, "toggled"):
-            self.auto_dpi_toggle.toggled.connect(self._on_auto_dpi_toggled)
-        auto_row.set_control(self.auto_dpi_toggle)
-        program_settings_card.add_widget(auto_row)
+        self.auto_dpi_toggle.toggled.connect(self._on_auto_dpi_toggled)
+
+        add_setting_card = getattr(program_settings_card, "addSettingCard", None)
+        if callable(add_setting_card):
+            add_setting_card(self.auto_dpi_toggle)
+        else:
+            program_settings_card.add_widget(self.auto_dpi_toggle)
 
         self.add_widget(program_settings_card)
 
         self._sync_program_settings()
 
     def _set_toggle_checked(self, toggle, checked: bool) -> None:
+        try:
+            toggle.setChecked(bool(checked), block_signals=True)
+            return
+        except TypeError:
+            pass
+        except Exception:
+            pass
         try:
             toggle.blockSignals(True)
         except Exception:
@@ -531,10 +552,13 @@ class Zapret1DirectControlPage(BasePage):
                 tr_catalog("page.z1_control.strategies.desc", language=self._ui_language, default="Выбор стратегии для YouTube, Discord и др.")
             )
 
-        self.auto_row.set_title(
-            tr_catalog("page.z1_control.setting.autostart.title", language=self._ui_language, default="Автозагрузка DPI")
-        )
-        self.auto_row.set_description(
+        title_label = getattr(getattr(self, "program_settings_card", None), "titleLabel", None)
+        if title_label is not None:
+            title_label.setText(
+                tr_catalog("page.z1_control.section.program_settings", language=self._ui_language, default="Настройки программы")
+            )
+        self.auto_dpi_toggle.set_texts(
+            tr_catalog("page.z1_control.setting.autostart.title", language=self._ui_language, default="Автозагрузка DPI"),
             tr_catalog("page.z1_control.setting.autostart.desc", language=self._ui_language, default="Запускать Zapret автоматически при старте программы")
         )
 

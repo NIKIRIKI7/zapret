@@ -497,6 +497,13 @@ def connect_lazy_page_signals(window, page_name: PageName, page: QWidget) -> Non
                 page.smooth_scroll_changed,
                 window._on_smooth_scroll_changed,
             )
+        if hasattr(page, "editor_smooth_scroll_changed"):
+            connect_signal_once(
+                window,
+                "appearance.editor_smooth_scroll_changed",
+                page.editor_smooth_scroll_changed,
+                window._on_editor_smooth_scroll_changed,
+            )
         if hasattr(page, "ui_language_changed"):
             connect_signal_once(
                 window,

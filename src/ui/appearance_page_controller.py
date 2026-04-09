@@ -183,7 +183,7 @@ class AppearancePageController:
 
             enabled = bool(get_animations_enabled())
         except Exception:
-            enabled = True
+            enabled = False
         return AppearanceTogglePlan(enabled=enabled)
 
     @staticmethod
@@ -212,6 +212,26 @@ class AppearancePageController:
             from config.reg import set_smooth_scroll_enabled
 
             set_smooth_scroll_enabled(bool(enabled))
+        except Exception:
+            pass
+        return AppearanceTogglePlan(enabled=bool(enabled))
+
+    @staticmethod
+    def load_editor_smooth_scroll_enabled() -> AppearanceTogglePlan:
+        try:
+            from config.reg import get_editor_smooth_scroll_enabled
+
+            enabled = bool(get_editor_smooth_scroll_enabled())
+        except Exception:
+            enabled = False
+        return AppearanceTogglePlan(enabled=enabled)
+
+    @staticmethod
+    def save_editor_smooth_scroll_enabled(enabled: bool) -> AppearanceTogglePlan:
+        try:
+            from config.reg import set_editor_smooth_scroll_enabled
+
+            set_editor_smooth_scroll_enabled(bool(enabled))
         except Exception:
             pass
         return AppearanceTogglePlan(enabled=bool(enabled))

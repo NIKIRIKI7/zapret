@@ -26,60 +26,11 @@ except ImportError:
     _HAS_FLUENT_LABELS = False
 
 from .base_page import BasePage, ScrollBlockingPlainTextEdit
+from core.hostlist_page_controller import HostlistPageController
 from ui.compat_widgets import SettingsCard, ActionButton
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 from log import log
-from utils.netrogat_manager import (
-    NETROGAT_USER_PATH,
-    ensure_netrogat_base_defaults,
-    ensure_netrogat_user_file,
-    get_netrogat_base_set,
-    load_netrogat,
-    save_netrogat,
-    _normalize_domain,
-)
-import os
-import re
-
-def split_domains(text: str) -> list[str]:
-    """Разделяет домены по пробелам и склеенные."""
-    parts = re.split(r'[\s,;]+', text)
-    result = []
-    for part in parts:
-        part = part.strip().lower()
-        if not part or part.startswith('#'):
-            if part:
-                result.append(part)
-            continue
-        separated = _split_glued_domains(part)
-        result.extend(separated)
-    return result
-
-def _split_glued_domains(text: str) -> list[str]:
-    """Разделяет склеенные домены типа vk.comyoutube.com"""
-    if not text or len(text) < 5:
-        return [text] if text else []
-    
-    # Паттерн: TLD за которым идёт начало нового домена (буквы + точка)
-    pattern = r'(\.(com|ru|org|net|io|me|by|uk|de|fr|it|es|nl|pl|ua|kz|su|co|tv|cc|to|ai|gg|info|biz|xyz|dev|app|pro|online|store|cloud|shop|blog|tech|site|рф))([a-z][a-z0-9-]*\.)'
-    
-    result = []
-    remaining = text
-    
-    while remaining:
-        match = re.search(pattern, remaining, re.IGNORECASE)
-        if match:
-            end_of_first = match.start() + len(match.group(1))
-            first_domain = remaining[:end_of_first]
-            result.append(first_domain)
-            remaining = remaining[end_of_first:]
-        else:
-            if remaining:
-                result.append(remaining)
-            break
-    
-    return result if result else [text]
 
 
 class NetrogatPage(BasePage):
@@ -95,7 +46,7 @@ class NetrogatPage(BasePage):
             title_key="page.netrogat.title",
             subtitle_key="page.netrogat.subtitle",
         )
-        self._base_domains_set_cache: set[str] | None = None
+        self._controller = HostlistPageController()
         self._desc_label = None
         self._add_card = None
         self._actions_card = None
@@ -264,16 +215,14 @@ class NetrogatPage(BasePage):
         self.layout.addWidget(self.status_label)
 
     def _load(self):
-        ensure_netrogat_user_file()
-        self._base_domains_set_cache = get_netrogat_base_set()
-        domains = load_netrogat()
+        state = self._controller.load_custom_netrogat_text()
         # Блокируем сигнал чтобы не срабатывало автосохранение
         self.text_edit.blockSignals(True)
-        self.text_edit.setPlainText('\n'.join(domains))
+        self.text_edit.setPlainText(state.text)
         self.text_edit.blockSignals(False)
         self._status_state["saved"] = False
         self._update_status()
-        log(f"Загружено {len(domains)} строк из netrogat.user.txt", "INFO")
+        log(f"Загружено {state.lines_count} строк из netrogat.user.txt", "INFO")
 
     def _render_status_label(self):
         summary = self._tr(
@@ -349,36 +298,10 @@ class NetrogatPage(BasePage):
 
     def _save(self):
         text = self.text_edit.toPlainText()
-        domains = []
-        normalized_lines = []  # Для обновления UI
-        
-        for line in text.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            # Сохраняем комментарии как есть
-            if line.startswith('#'):
-                domains.append(line)
-                normalized_lines.append(line)
-                continue
-            
-            # Разделяем склеенные домены (vk.comyoutube.com -> vk.com, youtube.com)
-            separated = split_domains(line)
-            
-            for item in separated:
-                # Нормализуем каждый домен
-                norm = _normalize_domain(item)
-                if norm:
-                    if norm not in domains:
-                        domains.append(norm)
-                        normalized_lines.append(norm)
-                else:
-                    # Невалидная строка - оставляем как есть
-                    normalized_lines.append(item)
-        
-        if save_netrogat(domains):
+        state = self._controller.save_custom_netrogat_text(text)
+        if state.success:
             # Обновляем UI - заменяем URL на домены
-            new_text = '\n'.join(normalized_lines)
+            new_text = state.normalized_text
             if new_text != text:
                 cursor = self.text_edit.textCursor()
                 pos = cursor.position()
@@ -393,124 +316,49 @@ class NetrogatPage(BasePage):
                 self.text_edit.blockSignals(False)
             
             self.data_changed.emit()
+            return
+
+        log("Не удалось сохранить netrogat.user.txt или синхронизировать итоговый netrogat.txt", "ERROR")
 
     def _update_status(self):
-        text = self.text_edit.toPlainText()
-        lines = [l.strip() for l in text.split('\n') if l.strip() and not l.strip().startswith('#')]
-
-        base_set = self._get_base_domains_set()
-        valid_entries: set[str] = set()
-        for line in lines:
-            for item in split_domains(line):
-                norm = _normalize_domain(item)
-                if norm:
-                    valid_entries.add(norm)
-
-        user_count = len({d for d in valid_entries if d not in base_set})
-        base_count = len(base_set)
-        total_count = len(base_set.union(valid_entries))
-        self._status_state["total"] = total_count
-        self._status_state["base"] = base_count
-        self._status_state["user"] = user_count
+        plan = self._controller.build_custom_netrogat_status_plan(self.text_edit.toPlainText())
+        self._status_state["total"] = plan.total_count
+        self._status_state["base"] = plan.base_count
+        self._status_state["user"] = plan.user_count
         self._render_status_label()
 
-    def _get_base_domains_set(self) -> set[str]:
-        if self._base_domains_set_cache is not None:
-            return self._base_domains_set_cache
-
-        try:
-            self._base_domains_set_cache = get_netrogat_base_set()
-        except Exception:
-            self._base_domains_set_cache = set()
-        return self._base_domains_set_cache
-
     def _add(self):
-        raw = self.input.text().strip()
-        if not raw:
+        plan = self._controller.build_add_custom_netrogat_plan(
+            raw_text=self.input.text().strip(),
+            current_text=self.text_edit.toPlainText(),
+        )
+        if plan.new_text is None and plan.level is None:
             return
 
-        # Разделяем на несколько доменов
-        parts = split_domains(raw)
-        if not parts:
+        if plan.level == "warning":
             if InfoBar:
                 InfoBar.warning(
                     title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr("page.netrogat.error.parse_domain", "Не удалось распознать домен."),
+                    content=plan.content,
                     parent=self.window(),
                 )
             return
-
-        # Проверяем дубликаты
-        current = self.text_edit.toPlainText()
-        current_domains = [l.strip().lower() for l in current.split('\n') if l.strip() and not l.strip().startswith('#')]
-
-        added = []
-        skipped = []
-        invalid = []
-
-        for part in parts:
-            if part.startswith('#'):
-                continue
-            norm = _normalize_domain(part)
-            if not norm:
-                invalid.append(part)
-                continue
-            if norm.lower() in current_domains or norm.lower() in [a.lower() for a in added]:
-                skipped.append(norm)
-                continue
-            added.append(norm)
-
-        if not added and not skipped and invalid:
+        if plan.level == "info":
             if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr("page.netrogat.error.parse_domains", "Не удалось распознать домены."),
+                InfoBar.info(
+                    title=self._tr("page.netrogat.infobar.info_title", "Информация"),
+                    content=plan.content,
                     parent=self.window(),
                 )
             return
-
-        if not added and skipped:
-            if InfoBar:
-                if len(skipped) == 1:
-                    InfoBar.info(
-                        title=self._tr("page.netrogat.infobar.info_title", "Информация"),
-                        content=self._tr(
-                            "page.netrogat.info.already_exists_one",
-                            "Домен уже есть: {domain}",
-                            domain=skipped[0],
-                        ),
-                        parent=self.window(),
-                    )
-                else:
-                    InfoBar.info(
-                        title=self._tr("page.netrogat.infobar.info_title", "Информация"),
-                        content=self._tr(
-                            "page.netrogat.info.already_exists_many",
-                            "Все домены уже есть ({count})",
-                            count=len(skipped),
-                        ),
-                        parent=self.window(),
-                    )
-            return
-
-        # Добавляем в конец
-        if current and not current.endswith('\n'):
-            current += '\n'
-        current += '\n'.join(added)
-
-        self.text_edit.setPlainText(current)
-        self.input.clear()
-
-        # Показываем результат если были пропущенные
-        if skipped:
+        self.text_edit.setPlainText(plan.new_text or "")
+        if plan.clear_input:
+            self.input.clear()
+        if plan.level == "success":
             if InfoBar:
                 InfoBar.success(
-                    title=self._tr("page.netrogat.infobar.added_title", "Добавлено"),
-                    content=self._tr(
-                        "page.netrogat.info.added_with_skipped",
-                        "Добавлено доменов. Пропущено уже существующих: {count}",
-                        count=len(skipped),
-                    ),
+                    title=plan.title,
+                    content=plan.content,
                     parent=self.window(),
                 )
 
@@ -533,17 +381,9 @@ class NetrogatPage(BasePage):
 
     def _open_file(self):
         try:
-            import subprocess
-
             # Сохраняем перед открытием
             self._save()
-            ensure_netrogat_user_file()
-
-            if NETROGAT_USER_PATH and os.path.exists(NETROGAT_USER_PATH):
-                subprocess.run(["explorer", "/select,", NETROGAT_USER_PATH])
-            else:
-                from config import LISTS_FOLDER
-                subprocess.run(["explorer", LISTS_FOLDER])
+            self._controller.open_netrogat_user_file()
         except Exception as e:
             log(f"Ошибка открытия netrogat.user.txt: {e}", "ERROR")
             if InfoBar:
@@ -555,18 +395,9 @@ class NetrogatPage(BasePage):
 
     def _open_final_file(self):
         try:
-            import subprocess
-            from config import LISTS_FOLDER, NETROGAT_PATH
-            from utils.netrogat_manager import ensure_netrogat_exists
-
             # Сохраняем user и пересобираем итог перед открытием
             self._save()
-            ensure_netrogat_exists()
-
-            if NETROGAT_PATH and os.path.exists(NETROGAT_PATH):
-                subprocess.run(["explorer", "/select,", NETROGAT_PATH])
-            else:
-                subprocess.run(["explorer", LISTS_FOLDER])
+            self._controller.open_netrogat_final_file()
         except Exception as e:
             log(f"Ошибка открытия итогового netrogat.txt: {e}", "ERROR")
             if InfoBar:
@@ -582,8 +413,7 @@ class NetrogatPage(BasePage):
 
     def _add_missing_defaults(self):
         self._save()
-        added = ensure_netrogat_base_defaults()
-        self._base_domains_set_cache = None
+        added = self._controller.add_missing_netrogat_defaults()
         if added == 0:
             if InfoBar:
                 InfoBar.success(

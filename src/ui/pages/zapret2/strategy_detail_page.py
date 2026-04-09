@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QFont, QFontMetrics, QColor
 import qtawesome as qta
+from ui.smooth_scroll import apply_editor_smooth_scroll_preference
 
 try:
     from qfluentwidgets import (
@@ -24,7 +25,7 @@ try:
         ToolButton, TransparentToolButton, SwitchButton, SegmentedWidget, TogglePushButton,
         PixmapLabel,
         TitleLabel, TransparentPushButton, IndeterminateProgressRing, RoundMenu, Action,
-        MessageBoxBase, InfoBar, FluentIcon,
+        MessageBoxBase, InfoBar, FluentIcon, SettingCardGroup,
     )
     _HAS_FLUENT = True
 except ImportError:
@@ -51,6 +52,7 @@ except ImportError:
     Action = lambda *a, **kw: None
     InfoBar = None
     FluentIcon = None
+    SettingCardGroup = None
     _HAS_FLUENT = False
 
 try:
@@ -96,6 +98,27 @@ def _log_z2_detail_metric(section: str, elapsed_ms: float, *, extra: str | None 
     log(f"⏱ Startup UI Section: ZAPRET2_STRATEGY_DETAIL {section} {rounded}ms{suffix}", "⏱ STARTUP")
 
 
+def _prepare_compact_setting_group(group) -> None:
+    """Скрывает заголовок fluent-group, чтобы она работала как чистый settings-container."""
+    try:
+        title_label = getattr(group, "titleLabel", None)
+        if title_label is not None:
+            title_label.hide()
+    except Exception:
+        pass
+
+    try:
+        layout = getattr(group, "vBoxLayout", None)
+        if layout is None:
+            return
+        spacer_item = layout.itemAt(1)
+        if spacer_item is not None and spacer_item.spacerItem() is not None:
+            spacer_item.spacerItem().changeSize(0, 0)
+        layout.invalidate()
+    except Exception:
+        pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ДИАЛОГ РЕДАКТИРОВАНИЯ АРГУМЕНТОВ (MessageBoxBase)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,36 +156,7 @@ class _ArgsEditorDialog(MessageBoxBase):
         self.viewLayout.addWidget(hint)
 
         self._text_edit = TextEdit()
-        try:
-            from config.reg import get_smooth_scroll_enabled
-            from qfluentwidgets.common.smooth_scroll import SmoothMode
-
-            smooth_enabled = get_smooth_scroll_enabled()
-            mode = SmoothMode.COSINE if smooth_enabled else SmoothMode.NO_SMOOTH
-            delegate = (
-                getattr(self._text_edit, "scrollDelegate", None)
-                or getattr(self._text_edit, "scrollDelagate", None)
-                or getattr(self._text_edit, "delegate", None)
-            )
-            if delegate is not None:
-                if hasattr(delegate, "useAni"):
-                    if not hasattr(delegate, "_zapret_base_use_ani"):
-                        delegate._zapret_base_use_ani = bool(delegate.useAni)
-                    delegate.useAni = bool(delegate._zapret_base_use_ani) if smooth_enabled else False
-                for smooth_attr in ("verticalSmoothScroll", "horizonSmoothScroll"):
-                    smooth = getattr(delegate, smooth_attr, None)
-                    smooth_setter = getattr(smooth, "setSmoothMode", None)
-                    if callable(smooth_setter):
-                        smooth_setter(mode)
-
-            setter = getattr(self._text_edit, "setSmoothMode", None)
-            if callable(setter):
-                try:
-                    setter(mode, Qt.Orientation.Vertical)
-                except TypeError:
-                    setter(mode)
-        except Exception:
-            pass
+        apply_editor_smooth_scroll_preference(self._text_edit)
         self._text_edit.setPlaceholderText(
             _tr_text(
                 self._ui_language,
@@ -1114,7 +1108,14 @@ class StrategyDetailPage(BasePage):
         # ═══════════════════════════════════════════════════════════════
         # SEND SETTINGS (collapsible)
         # ═══════════════════════════════════════════════════════════════
-        self._send_frame = SettingsCard()
+        if SettingCardGroup is not None and _HAS_FLUENT:
+            self._send_frame = SettingCardGroup(
+                self._tr("page.z2_strategy_detail.send.toggle.title", "Send параметры"),
+                self.content,
+            )
+            _prepare_compact_setting_group(self._send_frame)
+        else:
+            self._send_frame = SettingsCard()
         self._send_frame.setVisible(False)
 
         self._send_toggle_row = Win11ToggleRow(
@@ -1124,7 +1125,10 @@ class StrategyDetailPage(BasePage):
         )
         self._send_toggle = self._send_toggle_row.toggle
         self._send_toggle_row.toggled.connect(self._on_send_toggled)
-        self._send_frame.add_widget(self._send_toggle_row)
+        if hasattr(self._send_frame, "addSettingCard"):
+            self._send_frame.addSettingCard(self._send_toggle_row)
+        else:
+            self._send_frame.add_widget(self._send_toggle_row)
 
         # Settings panel (shown when enabled)
         self._send_settings = QWidget()
@@ -1199,13 +1203,23 @@ class StrategyDetailPage(BasePage):
         self._send_badsum_frame.set_control(self._send_badsum_check)
         send_settings_layout.addWidget(self._send_badsum_frame)
 
-        self._send_frame.add_widget(self._send_settings)
+        if hasattr(self._send_frame, "addSettingCard"):
+            self._send_frame.addSettingCard(self._send_settings)
+        else:
+            self._send_frame.add_widget(self._send_settings)
         toolbar_layout.addWidget(self._send_frame)
 
         # ═══════════════════════════════════════════════════════════════
         # SYNDATA SETTINGS (collapsible)
         # ═══════════════════════════════════════════════════════════════
-        self._syndata_frame = SettingsCard()
+        if SettingCardGroup is not None and _HAS_FLUENT:
+            self._syndata_frame = SettingCardGroup(
+                self._tr("page.z2_strategy_detail.syndata.toggle.title", "Syndata параметры"),
+                self.content,
+            )
+            _prepare_compact_setting_group(self._syndata_frame)
+        else:
+            self._syndata_frame = SettingsCard()
         self._syndata_frame.setVisible(False)
 
         self._syndata_toggle_row = Win11ToggleRow(
@@ -1218,7 +1232,10 @@ class StrategyDetailPage(BasePage):
         )
         self._syndata_toggle = self._syndata_toggle_row.toggle
         self._syndata_toggle_row.toggled.connect(self._on_syndata_toggled)
-        self._syndata_frame.add_widget(self._syndata_toggle_row)
+        if hasattr(self._syndata_frame, "addSettingCard"):
+            self._syndata_frame.addSettingCard(self._syndata_toggle_row)
+        else:
+            self._syndata_frame.add_widget(self._syndata_toggle_row)
 
         # Settings panel (shown when enabled)
         self._syndata_settings = QWidget()
@@ -1316,7 +1333,10 @@ class StrategyDetailPage(BasePage):
         self._tcp_flags_row.currentTextChanged.connect(self._schedule_syndata_settings_save)
         settings_layout.addWidget(self._tcp_flags_row)
 
-        self._syndata_frame.add_widget(self._syndata_settings)
+        if hasattr(self._syndata_frame, "addSettingCard"):
+            self._syndata_frame.addSettingCard(self._syndata_settings)
+        else:
+            self._syndata_frame.add_widget(self._syndata_settings)
         toolbar_layout.addWidget(self._syndata_frame)
 
         # ═══════════════════════════════════════════════════════════════

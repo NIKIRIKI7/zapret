@@ -7,7 +7,6 @@ from PyQt6.QtCore import (
     Qt,
     QSize,
     QTimer,
-    QThread,
     pyqtSignal,
     QUrl,
 )
@@ -19,6 +18,7 @@ from PyQt6.QtGui import QColor, QDesktopServices
 import qtawesome as qta
 
 from .base_page import BasePage
+from ui.home_page_controller import HomePageController
 from ui.compat_widgets import SettingsCard, StatusIndicator, ActionButton, set_tooltip
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
@@ -41,27 +41,6 @@ except ImportError:
     from PyQt6.QtWidgets import QProgressBar as IndeterminateProgressBar  # type: ignore[assignment]
     HAS_FLUENT = False
     CardWidget = QFrame
-
-
-class AutostartCheckWorker(QThread):
-    """Быстрая фоновая проверка статуса автозапуска"""
-    finished = pyqtSignal(bool)  # True если автозапуск включён
-    
-    def run(self):
-        try:
-            result = self._check_autostart()
-            self.finished.emit(result)
-        except Exception as e:
-            log(f"AutostartCheckWorker error: {e}", "WARNING")
-            self.finished.emit(False)
-    
-    def _check_autostart(self) -> bool:
-        """Быстрая проверка наличия автозапуска через реестр"""
-        try:
-            from autostart.registry_check import AutostartRegistryChecker
-            return AutostartRegistryChecker.is_autostart_enabled()
-        except Exception:
-            return False
 
 
 def _accent_hex() -> str:
@@ -281,13 +260,6 @@ class HomePage(BasePage):
     navigate_to_premium = pyqtSignal()
     navigate_to_dpi_settings = pyqtSignal()
 
-    _LAUNCH_METHOD_LABELS = {
-        "direct_zapret2": "page.home.launch_method.direct_z2",
-        "direct_zapret1": "page.home.launch_method.direct_z1",
-        "orchestra": "page.home.launch_method.orchestra",
-        "direct_zapret2_orchestra": "page.home.launch_method.orchestra_z2",
-    }
-
     def __init__(self, parent=None):
         _t_init = _time.perf_counter()
         _t_base = _time.perf_counter()
@@ -300,6 +272,7 @@ class HomePage(BasePage):
         )
         _log_startup_home_metric("__init__.base_page", (_time.perf_counter() - _t_base) * 1000)
 
+        self._controller = HomePageController()
         self._autostart_worker = None
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
@@ -322,24 +295,12 @@ class HomePage(BasePage):
             self._startup_showevent_profile_logged = True
             _log_startup_home_metric("activation.schedule_deferred", (_time.perf_counter() - _t_show) * 1000)
 
-    def _get_launch_method_display_name(self) -> str:
-        """Возвращает человекочитаемое название текущего метода запуска."""
-        try:
-            from strategy_menu import get_strategy_launch_method
-
-            method = (get_strategy_launch_method() or "").strip().lower()
-            if method:
-                label_key = self._LAUNCH_METHOD_LABELS.get(method, self._LAUNCH_METHOD_LABELS["direct_zapret2"])
-                return tr_catalog(label_key, language=self._ui_language, default="Zapret 2")
-        except Exception:
-            pass
-        return tr_catalog(self._LAUNCH_METHOD_LABELS["direct_zapret2"], language=self._ui_language, default="Zapret 2")
-
     def update_launch_method_card(self) -> None:
         """Обновляет карточку метода запуска на главной странице."""
+        plan = self._controller.build_launch_method_plan(language=self._ui_language)
         self.strategy_card.set_value(
-            self._get_launch_method_display_name(),
-            tr_catalog("page.home.strategy.current_method", language=self._ui_language, default="Текущий метод запуска"),
+            plan.value,
+            plan.info,
         )
 
     def _refresh_strategy_card(self) -> None:
@@ -351,19 +312,24 @@ class HomePage(BasePage):
         if self._autostart_worker is not None and self._autostart_worker.isRunning():
             return
         
-        self._autostart_worker = AutostartCheckWorker()
+        self._autostart_worker = self._controller.create_autostart_worker()
         self._autostart_worker.finished.connect(self._on_autostart_checked)
         self._autostart_worker.start()
     
     def _on_autostart_checked(self, enabled: bool):
         """Обработчик результата проверки автозапуска"""
+        dispatch_plan = self._controller.build_autostart_dispatch_plan(
+            has_runtime_state=getattr(self.window(), "app_runtime_state", None) is not None,
+            has_store=self._ui_state_store is not None,
+            enabled=enabled,
+        )
         app_runtime_state = getattr(self.window(), "app_runtime_state", None)
-        if app_runtime_state is not None:
-            app_runtime_state.set_autostart(bool(enabled))
-        elif self._ui_state_store is not None:
-            self._ui_state_store.set_autostart(enabled)
+        if dispatch_plan.target == "runtime" and app_runtime_state is not None:
+            app_runtime_state.set_autostart(dispatch_plan.enabled)
+        elif dispatch_plan.target == "store" and self._ui_state_store is not None:
+            self._ui_state_store.set_autostart(dispatch_plan.enabled)
         else:
-            self.update_autostart_status(enabled)
+            self.update_autostart_status(dispatch_plan.enabled)
 
     def bind_ui_state_store(self, store: MainWindowStateStore) -> None:
         if self._ui_state_store is store:
@@ -430,10 +396,11 @@ class HomePage(BasePage):
         cards_layout.addWidget(self.dpi_status_card, 0, 0)
         
         # Карточка стратегии
+        launch_plan = self._controller.build_launch_method_plan(language=self._ui_language)
         self.strategy_card = StatusCard("fa5s.cog", tr_catalog("page.home.card.method.title", language=self._ui_language, default="Метод запуска"))
         self.strategy_card.set_value(
-            self._get_launch_method_display_name(),
-            tr_catalog("page.home.strategy.current_method", language=self._ui_language, default="Текущий метод запуска"),
+            launch_plan.value,
+            launch_plan.info,
         )
         cards_layout.addWidget(self.strategy_card, 0, 1)
         
@@ -550,58 +517,18 @@ class HomePage(BasePage):
         """Локальный обработчик открытия рабочей папки приложения."""
         _open_folder_action(self)
         
-    @staticmethod
-    def _short_dpi_error(last_error: str) -> str:
-        text = str(last_error or "").strip()
-        if not text:
-            return ""
-        first_line = text.splitlines()[0].strip()
-        if len(first_line) <= 160:
-            return first_line
-        return first_line[:157] + "..."
-
     def update_dpi_status(self, state: str | bool, strategy_name: str | None = None, last_error: str = ""):
         """Обновляет отображение статуса DPI"""
-        phase = str(state or "").strip().lower()
-        if phase not in {"autostart_pending", "starting", "running", "stopping", "failed", "stopped"}:
-            phase = "running" if bool(state) else "stopped"
-
-        if phase == "running":
-            self.dpi_status_card.set_value(
-                tr_catalog("page.home.status.running", language=self._ui_language, default="Запущен"),
-                tr_catalog("page.home.status.bypass_active", language=self._ui_language, default="Обход блокировок активен"),
-            )
-            self.dpi_status_card.set_status_color('running')
-            self.start_btn.setVisible(False)
-            self.stop_btn.setVisible(True)
-        elif phase == "autostart_pending":
-            self.dpi_status_card.set_value("Автозапуск запланирован", "Подготавливаем стартовый запуск после инициализации")
-            self.dpi_status_card.set_status_color('warning')
-            self.start_btn.setVisible(False)
-            self.stop_btn.setVisible(False)
-        elif phase == "starting":
-            self.dpi_status_card.set_value("Запускается", "Ждём подтверждение процесса winws")
-            self.dpi_status_card.set_status_color('warning')
-            self.start_btn.setVisible(False)
-            self.stop_btn.setVisible(False)
-        elif phase == "stopping":
-            self.dpi_status_card.set_value("Останавливается", "Завершаем процесс и освобождаем WinDivert")
-            self.dpi_status_card.set_status_color('warning')
-            self.start_btn.setVisible(False)
-            self.stop_btn.setVisible(False)
-        elif phase == "failed":
-            self.dpi_status_card.set_value("Ошибка запуска", self._short_dpi_error(last_error) or "Процесс не подтвердился или завершился сразу")
-            self.dpi_status_card.set_status_color('stopped')
-            self.start_btn.setVisible(True)
-            self.stop_btn.setVisible(False)
-        else:
-            self.dpi_status_card.set_value(
-                tr_catalog("page.home.status.stopped", language=self._ui_language, default="Остановлен"),
-                tr_catalog("page.home.status.press_start", language=self._ui_language, default="Нажмите Запустить"),
-            )
-            self.dpi_status_card.set_status_color('stopped')
-            self.start_btn.setVisible(True)
-            self.stop_btn.setVisible(False)
+        _ = strategy_name
+        plan = self._controller.build_dpi_status_plan(
+            state=state,
+            last_error=last_error,
+            language=self._ui_language,
+        )
+        self.dpi_status_card.set_value(plan.value, plan.info)
+        self.dpi_status_card.set_status_color(plan.status_color)
+        self.start_btn.setVisible(plan.show_start)
+        self.stop_btn.setVisible(plan.show_stop)
             
         # На главной всегда отображаем текущий метод запуска (без иконок категорий).
         self.update_launch_method_card()
@@ -611,74 +538,21 @@ class HomePage(BasePage):
         _ = strategy_name
         self.update_launch_method_card()
     
-    def _truncate_strategy_name(self, name: str, max_items: int = 2) -> str:
-        """Обрезает длинное название стратегии для карточки"""
-        if not name or name in ("Не выбрана", "Прямой запуск"):
-            return name
-        
-        # Определяем разделитель - поддерживаем и " • " (Direct режим) и ", " (старый формат)
-        separator = " • " if " • " in name else ", "
-        
-        # Если это список категорий
-        if separator in name:
-            parts = name.split(separator)
-            # Проверяем есть ли "+N ещё" в конце
-            extra = ""
-            if parts and (parts[-1].startswith("+") or "ещё" in parts[-1]):
-                # Извлекаем число из "+N ещё"
-                last_part = parts[-1]
-                if last_part.startswith("+"):
-                    # Формат "+2 ещё"
-                    extra_num = int(''.join(filter(str.isdigit, last_part))) or 0
-                    parts = parts[:-1]
-                    extra_num += len(parts) - max_items
-                    if extra_num > 0:
-                        extra = f"+{extra_num}"
-            elif len(parts) > max_items:
-                extra = f"+{len(parts) - max_items}"
-                
-            if len(parts) > max_items:
-                return separator.join(parts[:max_items]) + (f" {extra}" if extra else "")
-            elif extra:
-                return separator.join(parts) + f" {extra}"
-                
-        return name
-            
     def update_autostart_status(self, enabled: bool):
         """Обновляет отображение статуса автозапуска"""
-        if enabled:
-            self.autostart_card.set_value(
-                tr_catalog("page.home.autostart.enabled", language=self._ui_language, default="Включён"),
-                tr_catalog("page.home.autostart.with_windows", language=self._ui_language, default="Запускается с Windows"),
-            )
-            self.autostart_card.set_status_color('running')
-        else:
-            self.autostart_card.set_value(
-                tr_catalog("page.home.autostart.disabled", language=self._ui_language, default="Отключён"),
-                tr_catalog("page.home.autostart.manual", language=self._ui_language, default="Запускайте вручную"),
-            )
-            self.autostart_card.set_status_color('neutral')
+        plan = self._controller.build_autostart_status_plan(enabled=enabled, language=self._ui_language)
+        self.autostart_card.set_value(plan.value, plan.info)
+        self.autostart_card.set_status_color(plan.status_color)
             
     def update_subscription_status(self, is_premium: bool, days: int | None = None):
         """Обновляет отображение статуса подписки"""
-        if is_premium:
-            if days:
-                self.subscription_card.set_value(
-                    tr_catalog("page.home.subscription.premium", language=self._ui_language, default="Premium"),
-                    tr_catalog("page.home.subscription.days_left", language=self._ui_language, default="Осталось {days} дней").format(days=days),
-                )
-            else:
-                self.subscription_card.set_value(
-                    tr_catalog("page.home.subscription.premium", language=self._ui_language, default="Premium"),
-                    tr_catalog("page.home.subscription.all_features", language=self._ui_language, default="Все функции доступны"),
-                )
-            self.subscription_card.set_status_color('running')
-        else:
-            self.subscription_card.set_value(
-                tr_catalog("page.home.subscription.free", language=self._ui_language, default="Free"),
-                tr_catalog("page.home.subscription.basic", language=self._ui_language, default="Базовые функции"),
-            )
-            self.subscription_card.set_status_color('neutral')
+        plan = self._controller.build_subscription_status_plan(
+            is_premium=is_premium,
+            days=days,
+            language=self._ui_language,
+        )
+        self.subscription_card.set_value(plan.value, plan.info)
+        self.subscription_card.set_status_color(plan.status_color)
             
     def set_status(self, text: str, status: str = "neutral"):
         """Устанавливает текст статусной строки"""

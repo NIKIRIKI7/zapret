@@ -17,6 +17,7 @@ from qfluentwidgets import (
 from qfluentwidgets.common.style_sheet import FluentStyleSheet
 
 from log import log
+from ui.smooth_scroll import apply_editor_smooth_scroll_preference
 from ui.theme_refresh import ThemeRefreshController
 
 
@@ -106,6 +107,7 @@ class ArgsPreviewDialog(QDialog):
         args_layout.addLayout(args_header)
 
         self.args_text = TextEdit()
+        apply_editor_smooth_scroll_preference(self.args_text)
         self.args_text.setReadOnly(True)
         self.args_text.setMinimumHeight(60)
         self.args_text.setMaximumHeight(200)

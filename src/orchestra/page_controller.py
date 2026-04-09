@@ -87,6 +87,11 @@ class OrchestraLearnedDataPlan:
     data: dict
 
 
+@dataclass(slots=True)
+class OrchestraRunnerBindingPlan:
+    callback_attached: bool
+
+
 class OrchestraPageController:
     @staticmethod
     def build_status_display_plan(
@@ -459,3 +464,24 @@ class OrchestraPageController:
         if isinstance(learned_data, dict):
             return OrchestraLearnedDataPlan(data=learned_data)
         return OrchestraLearnedDataPlan(data={'tls': {}, 'http': {}, 'udp': {}})
+
+    @staticmethod
+    def build_learned_data_plan_from_runner(runner) -> OrchestraLearnedDataPlan:
+        if runner is None:
+            return OrchestraLearnedDataPlan(data={'tls': {}, 'http': {}, 'udp': {}})
+        try:
+            return OrchestraLearnedDataPlan(data=runner.get_learned_data())
+        except Exception:
+            return OrchestraLearnedDataPlan(data={'tls': {}, 'http': {}, 'udp': {}})
+
+    @staticmethod
+    def ensure_output_callback(runner, callback) -> OrchestraRunnerBindingPlan:
+        if runner is None:
+            return OrchestraRunnerBindingPlan(callback_attached=False)
+        try:
+            if getattr(runner, "output_callback", None) is None:
+                runner.set_output_callback(callback)
+                return OrchestraRunnerBindingPlan(callback_attached=True)
+        except Exception:
+            return OrchestraRunnerBindingPlan(callback_attached=False)
+        return OrchestraRunnerBindingPlan(callback_attached=False)

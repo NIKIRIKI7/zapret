@@ -18,10 +18,12 @@ from ui.widgets.win11_controls import (
 from log import log
 
 try:
-    from qfluentwidgets import StrongBodyLabel, CaptionLabel as _CaptionLabel
+    from qfluentwidgets import StrongBodyLabel, CaptionLabel as _CaptionLabel, SettingCardGroup
 except ImportError:
     StrongBodyLabel = QLabel  # type: ignore[assignment,misc]
     _CaptionLabel = QLabel  # type: ignore[assignment,misc]
+    SettingCardGroup = None  # type: ignore[assignment,misc]
+
 class DpiSettingsPage(BasePage):
     """Страница настроек DPI"""
 
@@ -190,19 +192,13 @@ class DpiSettingsPage(BasePage):
         method_layout.addWidget(self.separator2)
 
         # Перезапуск Discord (только для Zapret 1/2)
-        self.discord_restart_container = QWidget()
-        discord_layout = QVBoxLayout(self.discord_restart_container)
-        discord_layout.setContentsMargins(0, 0, 0, 0)
-        discord_layout.setSpacing(0)
-
         self.discord_restart_toggle = Win11ToggleRow(
             "mdi.discord",
             self._tr("page.dpi_settings.discord_restart.title", "Перезапуск Discord"),
             self._tr("page.dpi_settings.discord_restart.desc", "Автоперезапуск при смене стратегии"),
             "#7289da",
         )
-        discord_layout.addWidget(self.discord_restart_toggle)
-        method_layout.addWidget(self.discord_restart_container)
+        method_layout.addWidget(self.discord_restart_toggle)
 
         # ─────────────────────────────────────────────────────────────────────
         # НАСТРОЙКИ ОРКЕСТРАТОРА (только в режиме оркестратора)
@@ -289,39 +285,46 @@ class DpiSettingsPage(BasePage):
         # ═══════════════════════════════════════════════════════════════════════
         # ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ
         # ═══════════════════════════════════════════════════════════════════════
-        self.advanced_card = SettingsCard(
-            self._tr("page.dpi_settings.card.advanced", "ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ")
-        )
-        advanced_layout = QVBoxLayout()
-        advanced_layout.setSpacing(6)
-        
-        # Описание
         advanced_desc = _CaptionLabel(
             self._tr("page.dpi_settings.advanced.warning", "⚠ Изменяйте только если знаете что делаете")
         )
         self._advanced_desc_label = advanced_desc
         advanced_desc.setContentsMargins(0, 0, 0, 8)
-        advanced_layout.addWidget(advanced_desc)
-        
-        # WSSize
+
         self.wssize_toggle = Win11ToggleRow(
             "fa5s.ruler-horizontal",
             self._tr("page.dpi_settings.advanced.wssize.title", "Включить --wssize"),
             self._tr("page.dpi_settings.advanced.wssize.desc", "Добавляет параметр размера окна TCP"),
             "#9c27b0",
         )
-        advanced_layout.addWidget(self.wssize_toggle)
-        
-        # Debug лог
         self.debug_log_toggle = Win11ToggleRow(
             "mdi.file-document-outline",
             self._tr("page.dpi_settings.advanced.debug_log.title", "Включить лог-файл (--debug)"),
             self._tr("page.dpi_settings.advanced.debug_log.desc", "Записывает логи winws в папку logs"),
             "#00bcd4",
         )
-        advanced_layout.addWidget(self.debug_log_toggle)
-        
-        self.advanced_card.add_layout(advanced_layout)
+
+        if SettingCardGroup is not None and _HAS_FLUENT_LABELS:
+            self.advanced_card = SettingCardGroup(
+                self._tr("page.dpi_settings.card.advanced", "ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"),
+                self.content,
+            )
+            try:
+                self.advanced_card.vBoxLayout.insertWidget(1, advanced_desc)
+            except Exception:
+                pass
+            self.advanced_card.addSettingCard(self.wssize_toggle)
+            self.advanced_card.addSettingCard(self.debug_log_toggle)
+        else:
+            self.advanced_card = SettingsCard(
+                self._tr("page.dpi_settings.card.advanced", "ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ")
+            )
+            advanced_layout = QVBoxLayout()
+            advanced_layout.setSpacing(6)
+            advanced_layout.addWidget(advanced_desc)
+            advanced_layout.addWidget(self.wssize_toggle)
+            advanced_layout.addWidget(self.debug_log_toggle)
+            self.advanced_card.add_layout(advanced_layout)
         self.layout.addWidget(self.advanced_card)
         
         self.layout.addStretch()
@@ -513,7 +516,7 @@ class DpiSettingsPage(BasePage):
                     pass
 
             # Discord restart только для Zapret 1/2 (без оркестратора)
-            self.discord_restart_container.setVisible(visibility.show_discord_restart)
+            self.discord_restart_toggle.setVisible(visibility.show_discord_restart)
             if visibility.show_discord_restart:
                 try:
                     self.discord_restart_toggle.setChecked(self._controller.get_discord_restart_enabled(), block_signals=True)
@@ -625,9 +628,18 @@ class DpiSettingsPage(BasePage):
         )
 
         if hasattr(self, "advanced_card") and self.advanced_card is not None:
-            self.advanced_card.set_title(
-                self._tr("page.dpi_settings.card.advanced", "ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ")
-            )
+            try:
+                title_label = getattr(self.advanced_card, "titleLabel", None)
+                if title_label is not None:
+                    title_label.setText(
+                        self._tr("page.dpi_settings.card.advanced", "ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ")
+                    )
+                else:
+                    self.advanced_card.set_title(
+                        self._tr("page.dpi_settings.card.advanced", "ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ")
+                    )
+            except Exception:
+                pass
         if self._advanced_desc_label is not None:
             self._advanced_desc_label.setText(
                 self._tr("page.dpi_settings.advanced.warning", "⚠ Изменяйте только если знаете что делаете")

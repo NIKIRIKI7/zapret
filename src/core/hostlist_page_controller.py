@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import os
+import ipaddress
+import re
 import subprocess
 from dataclasses import dataclass
+from typing import Optional
+from urllib.parse import urlparse
 
 from config import LISTS_FOLDER, NETROGAT_PATH, OTHER_USER_PATH
 from log import log
@@ -24,7 +28,178 @@ class HostlistEntriesState:
     base_set: set[str] | None = None
 
 
+@dataclass(slots=True)
+class CustomDomainsLoadState:
+    text: str
+    lines_count: int
+
+
+@dataclass(slots=True)
+class CustomDomainsSaveState:
+    normalized_text: str
+    saved_lines: list[str]
+    saved_count: int
+
+
+@dataclass(slots=True)
+class CustomDomainsStatusPlan:
+    total_count: int
+    base_count: int
+    user_count: int
+
+
+@dataclass(slots=True)
+class CustomDomainsAddPlan:
+    level: str | None
+    title: str
+    content: str
+    new_text: str | None
+    clear_input: bool
+
+
+@dataclass(slots=True)
+class CustomIpSetLoadState:
+    text: str
+    lines_count: int
+    base_set: set[str]
+
+
+@dataclass(slots=True)
+class CustomIpSetSaveState:
+    normalized_text: str
+    saved_lines: list[str]
+    saved_count: int
+
+
+@dataclass(slots=True)
+class CustomIpSetStatusPlan:
+    total_count: int
+    base_count: int
+    user_count: int
+    invalid_lines: list[tuple[int, str]]
+
+
+@dataclass(slots=True)
+class CustomIpSetAddPlan:
+    level: str | None
+    title: str
+    content: str
+    new_text: str | None
+    clear_input: bool
+
+
+@dataclass(slots=True)
+class CustomNetrogatLoadState:
+    text: str
+    lines_count: int
+    base_set: set[str]
+
+
+@dataclass(slots=True)
+class CustomNetrogatSaveState:
+    success: bool
+    normalized_text: str
+    saved_lines: list[str]
+    saved_count: int
+
+
+@dataclass(slots=True)
+class CustomNetrogatStatusPlan:
+    total_count: int
+    base_count: int
+    user_count: int
+
+
+@dataclass(slots=True)
+class CustomNetrogatAddPlan:
+    level: str | None
+    title: str
+    content: str
+    new_text: str | None
+    clear_input: bool
+
+
 class HostlistPageController:
+    @staticmethod
+    def split_domains(text: str) -> list[str]:
+        parts = re.split(r"[\s,;]+", str(text or ""))
+        result: list[str] = []
+
+        for part in parts:
+            part = part.strip().lower()
+            if not part or part.startswith("#"):
+                if part:
+                    result.append(part)
+                continue
+            result.extend(HostlistPageController._split_glued_domains(part))
+
+        return result
+
+    @staticmethod
+    def _split_glued_domains(text: str) -> list[str]:
+        if not text or len(text) < 5:
+            return [text] if text else []
+
+        valid_tld_pattern = (
+            r"\.(com|ru|org|net|io|me|by|uk|de|fr|it|es|nl|pl|ua|kz|su|co|tv|cc|to|ai|gg|info|biz|xyz|dev|app|pro|online|store|cloud|shop|blog|tech|site|рф)$"
+        )
+        if re.search(valid_tld_pattern, text, re.IGNORECASE):
+            glued_pattern = r"(\.(com|ru|org|net|io|me))([a-z]{2,}[a-z0-9-]*\.[a-z]{2,})$"
+            match = re.search(glued_pattern, text, re.IGNORECASE)
+            if match:
+                end_of_first = match.start() + len(match.group(1))
+                first_domain = text[:end_of_first]
+                second_domain = match.group(3)
+                return [first_domain, second_domain]
+            return [text]
+
+        return [text]
+
+    @staticmethod
+    def extract_domain(text: str) -> Optional[str]:
+        text = str(text or "").strip()
+
+        marker = ""
+        if text.startswith("^"):
+            marker = "^"
+            text = text[1:].strip()
+            if not text:
+                return None
+
+        if text.startswith("."):
+            text = text[1:]
+
+        if "://" in text or text.startswith("www."):
+            if not text.startswith(("http://", "https://")):
+                text = "https://" + text
+            try:
+                parsed = urlparse(text)
+                domain = parsed.netloc or parsed.path.split("/")[0]
+                if domain.startswith("www."):
+                    domain = domain[4:]
+                domain = domain.split(":")[0]
+                if domain.startswith("."):
+                    domain = domain[1:]
+                domain = domain.lower()
+                return f"{marker}{domain}" if marker else domain
+            except Exception:
+                pass
+
+        domain = text.split("/")[0].split(":")[0].lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        if domain.startswith("."):
+            domain = domain[1:]
+
+        if re.match(r"^[a-z]{2,10}$", domain):
+            return f"{marker}{domain}" if marker else domain
+
+        if "." in domain and len(domain) > 3:
+            if re.match(r"^[a-z0-9][a-z0-9\-\.]*[a-z0-9]$", domain):
+                return f"{marker}{domain}" if marker else domain
+
+        return None
+
     @staticmethod
     def _is_ipset_file_name(file_name: str) -> bool:
         lower = (file_name or "").lower()
@@ -84,6 +259,17 @@ class HostlistPageController:
         return HostlistEntriesState(entries=entries)
 
     @staticmethod
+    def load_custom_domains_text() -> CustomDomainsLoadState:
+        from utils.hostlists_manager import ensure_hostlists_exist
+
+        ensure_hostlists_exist()
+        lines: list[str] = []
+        if os.path.exists(OTHER_USER_PATH):
+            with open(OTHER_USER_PATH, "r", encoding="utf-8") as fh:
+                lines = [line.strip() for line in fh if line.strip()]
+        return CustomDomainsLoadState(text="\n".join(lines), lines_count=len(lines))
+
+    @staticmethod
     def save_domains_entries(entries: list[str]) -> bool:
         from utils.hostlists_manager import rebuild_other_files
 
@@ -95,6 +281,467 @@ class HostlistPageController:
         except Exception:
             pass
         return True
+
+    def save_custom_domains_text(self, text: str) -> CustomDomainsSaveState:
+        from utils.hostlists_manager import rebuild_other_files
+
+        os.makedirs(os.path.dirname(OTHER_USER_PATH), exist_ok=True)
+
+        saved_lines: list[str] = []
+        normalized_lines: list[str] = []
+
+        for raw_line in str(text or "").split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                saved_lines.append(line)
+                normalized_lines.append(line)
+                continue
+
+            for item in self.split_domains(line):
+                domain = self.extract_domain(item)
+                if domain:
+                    if domain not in saved_lines:
+                        saved_lines.append(domain)
+                        normalized_lines.append(domain)
+                else:
+                    normalized_lines.append(item)
+
+        with open(OTHER_USER_PATH, "w", encoding="utf-8") as fh:
+            for item in saved_lines:
+                fh.write(f"{item}\n")
+
+        try:
+            rebuild_other_files()
+        except Exception:
+            pass
+
+        return CustomDomainsSaveState(
+            normalized_text="\n".join(normalized_lines),
+            saved_lines=saved_lines,
+            saved_count=len(saved_lines),
+        )
+
+    @staticmethod
+    def get_custom_domains_base_set() -> set[str]:
+        try:
+            from utils.hostlists_manager import get_base_domains_set
+
+            return get_base_domains_set()
+        except Exception:
+            return set()
+
+    def build_custom_domains_status_plan(self, text: str) -> CustomDomainsStatusPlan:
+        lines = [
+            line.strip()
+            for line in str(text or "").split("\n")
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        base_set = self.get_custom_domains_base_set()
+        valid_domains: list[str] = []
+
+        for line in lines:
+            domain = self.extract_domain(line)
+            if domain:
+                valid_domains.append(domain)
+
+        user_set = {d for d in valid_domains if d}
+        user_count = len({d for d in user_set if d not in base_set})
+        base_count = len(base_set)
+        total_count = len(base_set.union(user_set))
+        return CustomDomainsStatusPlan(
+            total_count=total_count,
+            base_count=base_count,
+            user_count=user_count,
+        )
+
+    def build_add_custom_domain_plan(self, *, raw_text: str, current_text: str) -> CustomDomainsAddPlan:
+        text = str(raw_text or "").strip()
+        if not text:
+            return CustomDomainsAddPlan(
+                level=None,
+                title="",
+                content="",
+                new_text=None,
+                clear_input=False,
+            )
+
+        domain = self.extract_domain(text)
+        if not domain:
+            return CustomDomainsAddPlan(
+                level="warning",
+                title="Ошибка",
+                content=(
+                    "Не удалось распознать домен:\n"
+                    f"{text}\n\n"
+                    "Введите корректный домен (например: example.com)"
+                ),
+                new_text=None,
+                clear_input=False,
+            )
+
+        current_domains = [
+            line.strip().lower()
+            for line in str(current_text or "").split("\n")
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        if domain.lower() in current_domains:
+            return CustomDomainsAddPlan(
+                level="info",
+                title="Информация",
+                content=f"Домен уже добавлен:\n{domain}",
+                new_text=None,
+                clear_input=False,
+            )
+
+        next_text = str(current_text or "")
+        if next_text and not next_text.endswith("\n"):
+            next_text += "\n"
+        next_text += domain
+
+        return CustomDomainsAddPlan(
+            level=None,
+            title="",
+            content="",
+            new_text=next_text,
+            clear_input=True,
+        )
+
+    @staticmethod
+    def split_ip_entries(text: str) -> list[str]:
+        parts = re.split(r"[\s,;]+", str(text or ""))
+        return [part.strip() for part in parts if part.strip()]
+
+    @staticmethod
+    def normalize_ipset_entry(text: str) -> str | None:
+        line = str(text or "").strip()
+        if not line or line.startswith("#"):
+            return None
+
+        if "://" in line:
+            try:
+                parsed = urlparse(line)
+                host = parsed.netloc or parsed.path.split("/")[0]
+                host = host.split(":")[0]
+                line = host
+            except Exception:
+                pass
+
+        if "-" in line:
+            return None
+
+        if "/" in line:
+            try:
+                net = ipaddress.ip_network(line, strict=False)
+                return net.with_prefixlen
+            except Exception:
+                return None
+
+        try:
+            addr = ipaddress.ip_address(line)
+            return str(addr)
+        except Exception:
+            return None
+
+    @staticmethod
+    def get_custom_ipset_base_set() -> set[str]:
+        try:
+            from utils.ipsets_manager import get_ipset_all_base_set
+
+            return get_ipset_all_base_set()
+        except Exception:
+            return set()
+
+    def load_custom_ipset_text(self) -> CustomIpSetLoadState:
+        from utils.ipsets_manager import ensure_ipset_all_user_file
+
+        ensure_ipset_all_user_file()
+        state = self.load_ipset_all_entries()
+        return CustomIpSetLoadState(
+            text="\n".join(state.entries),
+            lines_count=len(state.entries),
+            base_set=set(state.base_set or set()),
+        )
+
+    def save_custom_ipset_text(self, text: str) -> CustomIpSetSaveState:
+        entries: list[str] = []
+        normalized_lines: list[str] = []
+
+        for raw_line in str(text or "").split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                entries.append(line)
+                normalized_lines.append(line)
+                continue
+
+            for item in self.split_ip_entries(line):
+                norm = self.normalize_ipset_entry(item)
+                if norm:
+                    if norm not in entries:
+                        entries.append(norm)
+                        normalized_lines.append(norm)
+                else:
+                    normalized_lines.append(item)
+
+        self.save_ipset_all_entries(entries)
+        return CustomIpSetSaveState(
+            normalized_text="\n".join(normalized_lines),
+            saved_lines=entries,
+            saved_count=len(entries),
+        )
+
+    def build_custom_ipset_status_plan(self, text: str) -> CustomIpSetStatusPlan:
+        lines = [
+            line.strip()
+            for line in str(text or "").split("\n")
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        base_set = self.get_custom_ipset_base_set()
+        valid_entries: set[str] = set()
+
+        for line in lines:
+            for item in self.split_ip_entries(line):
+                norm = self.normalize_ipset_entry(item)
+                if norm:
+                    valid_entries.add(norm)
+
+        invalid_lines: list[tuple[int, str]] = []
+        for i, raw_line in enumerate(str(text or "").split("\n"), 1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            for item in self.split_ip_entries(line):
+                if not self.normalize_ipset_entry(item):
+                    invalid_lines.append((i, item))
+
+        return CustomIpSetStatusPlan(
+            total_count=len(base_set.union(valid_entries)),
+            base_count=len(base_set),
+            user_count=len({ip for ip in valid_entries if ip not in base_set}),
+            invalid_lines=invalid_lines,
+        )
+
+    def build_add_custom_ipset_plan(self, *, raw_text: str, current_text: str) -> CustomIpSetAddPlan:
+        text = str(raw_text or "").strip()
+        if not text:
+            return CustomIpSetAddPlan(
+                level=None,
+                title="",
+                content="",
+                new_text=None,
+                clear_input=False,
+            )
+
+        norm = self.normalize_ipset_entry(text)
+        if not norm:
+            return CustomIpSetAddPlan(
+                level="warning",
+                title="Ошибка",
+                content=(
+                    "Не удалось распознать IP или подсеть.\n"
+                    "Примеры:\n"
+                    "- 1.2.3.4\n"
+                    "- 10.0.0.0/8\n"
+                    "Диапазоны a-b не поддерживаются."
+                ),
+                new_text=None,
+                clear_input=False,
+            )
+
+        current_entries = [
+            line.strip().lower()
+            for line in str(current_text or "").split("\n")
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        if norm.lower() in current_entries:
+            return CustomIpSetAddPlan(
+                level="info",
+                title="Информация",
+                content=f"Запись уже есть:\n{norm}",
+                new_text=None,
+                clear_input=False,
+            )
+
+        next_text = str(current_text or "")
+        if next_text and not next_text.endswith("\n"):
+            next_text += "\n"
+        next_text += norm
+
+        return CustomIpSetAddPlan(
+            level=None,
+            title="",
+            content="",
+            new_text=next_text,
+            clear_input=True,
+        )
+
+    def load_custom_netrogat_text(self) -> CustomNetrogatLoadState:
+        state = self.load_netrogat_entries()
+        return CustomNetrogatLoadState(
+            text="\n".join(state.entries),
+            lines_count=len(state.entries),
+            base_set=set(state.base_set or set()),
+        )
+
+    def save_custom_netrogat_text(self, text: str) -> CustomNetrogatSaveState:
+        from utils.netrogat_manager import _normalize_domain
+
+        domains: list[str] = []
+        normalized_lines: list[str] = []
+
+        for raw_line in str(text or "").split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                domains.append(line)
+                normalized_lines.append(line)
+                continue
+
+            for item in self.split_domains(line):
+                norm = _normalize_domain(item)
+                if norm:
+                    if norm not in domains:
+                        domains.append(norm)
+                        normalized_lines.append(norm)
+                else:
+                    normalized_lines.append(item)
+
+        success = self.save_netrogat_entries(domains)
+        return CustomNetrogatSaveState(
+            success=bool(success),
+            normalized_text="\n".join(normalized_lines),
+            saved_lines=domains,
+            saved_count=len(domains),
+        )
+
+    def build_custom_netrogat_status_plan(self, text: str) -> CustomNetrogatStatusPlan:
+        from utils.netrogat_manager import _normalize_domain
+
+        lines = [
+            line.strip()
+            for line in str(text or "").split("\n")
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        base_set = self.get_netrogat_base_set()
+        valid_entries: set[str] = set()
+
+        for line in lines:
+            for item in self.split_domains(line):
+                norm = _normalize_domain(item)
+                if norm:
+                    valid_entries.add(norm)
+
+        return CustomNetrogatStatusPlan(
+            total_count=len(base_set.union(valid_entries)),
+            base_count=len(base_set),
+            user_count=len({d for d in valid_entries if d not in base_set}),
+        )
+
+    @staticmethod
+    def get_netrogat_base_set() -> set[str]:
+        try:
+            from utils.netrogat_manager import get_netrogat_base_set
+
+            return get_netrogat_base_set()
+        except Exception:
+            return set()
+
+    def build_add_custom_netrogat_plan(self, *, raw_text: str, current_text: str) -> CustomNetrogatAddPlan:
+        from utils.netrogat_manager import _normalize_domain
+
+        raw = str(raw_text or "").strip()
+        if not raw:
+            return CustomNetrogatAddPlan(
+                level=None,
+                title="",
+                content="",
+                new_text=None,
+                clear_input=False,
+            )
+
+        parts = self.split_domains(raw)
+        if not parts:
+            return CustomNetrogatAddPlan(
+                level="warning",
+                title="Ошибка",
+                content="Не удалось распознать домен.",
+                new_text=None,
+                clear_input=False,
+            )
+
+        current_domains = [
+            line.strip().lower()
+            for line in str(current_text or "").split("\n")
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+        added: list[str] = []
+        skipped: list[str] = []
+        invalid: list[str] = []
+
+        for part in parts:
+            if part.startswith("#"):
+                continue
+            norm = _normalize_domain(part)
+            if not norm:
+                invalid.append(part)
+                continue
+            if norm.lower() in current_domains or norm.lower() in [a.lower() for a in added]:
+                skipped.append(norm)
+                continue
+            added.append(norm)
+
+        if not added and not skipped and invalid:
+            return CustomNetrogatAddPlan(
+                level="warning",
+                title="Ошибка",
+                content="Не удалось распознать домены.",
+                new_text=None,
+                clear_input=False,
+            )
+
+        if not added and skipped:
+            if len(skipped) == 1:
+                return CustomNetrogatAddPlan(
+                    level="info",
+                    title="Информация",
+                    content=f"Домен уже есть: {skipped[0]}",
+                    new_text=None,
+                    clear_input=False,
+                )
+            return CustomNetrogatAddPlan(
+                level="info",
+                title="Информация",
+                content=f"Все домены уже есть ({len(skipped)})",
+                new_text=None,
+                clear_input=False,
+            )
+
+        next_text = str(current_text or "")
+        if next_text and not next_text.endswith("\n"):
+            next_text += "\n"
+        next_text += "\n".join(added)
+
+        if skipped:
+            return CustomNetrogatAddPlan(
+                level="success",
+                title="Добавлено",
+                content=f"Добавлено доменов. Пропущено уже существующих: {len(skipped)}",
+                new_text=next_text,
+                clear_input=True,
+            )
+
+        return CustomNetrogatAddPlan(
+            level=None,
+            title="",
+            content="",
+            new_text=next_text,
+            clear_input=True,
+        )
 
     @staticmethod
     def open_domains_user_file() -> None:

@@ -26,6 +26,7 @@ import qtawesome as qta
 
 from ..base_page import BasePage
 from ui.compat_widgets import set_tooltip
+from ui.smooth_scroll import apply_editor_smooth_scroll_preference
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 from log import log
@@ -127,37 +128,7 @@ class OrchestraRatingsPage(BasePage):
         self._history_card = history_card
 
         self.history_text = PlainTextEdit()
-        try:
-            from config.reg import get_smooth_scroll_enabled
-            from qfluentwidgets.common.smooth_scroll import SmoothMode
-            from PyQt6.QtCore import Qt
-
-            smooth_enabled = get_smooth_scroll_enabled()
-            mode = SmoothMode.COSINE if smooth_enabled else SmoothMode.NO_SMOOTH
-            delegate = (
-                getattr(self.history_text, "scrollDelegate", None)
-                or getattr(self.history_text, "scrollDelagate", None)
-                or getattr(self.history_text, "delegate", None)
-            )
-            if delegate is not None:
-                if hasattr(delegate, "useAni"):
-                    if not hasattr(delegate, "_zapret_base_use_ani"):
-                        delegate._zapret_base_use_ani = bool(delegate.useAni)
-                    delegate.useAni = bool(delegate._zapret_base_use_ani) if smooth_enabled else False
-                for smooth_attr in ("verticalSmoothScroll", "horizonSmoothScroll"):
-                    smooth = getattr(delegate, smooth_attr, None)
-                    smooth_setter = getattr(smooth, "setSmoothMode", None)
-                    if callable(smooth_setter):
-                        smooth_setter(mode)
-
-            setter = getattr(self.history_text, "setSmoothMode", None)
-            if callable(setter):
-                try:
-                    setter(mode, Qt.Orientation.Vertical)
-                except TypeError:
-                    setter(mode)
-        except Exception:
-            pass
+        apply_editor_smooth_scroll_preference(self.history_text)
         self.history_text.setReadOnly(True)
         self.history_text.setMinimumHeight(300)
         # Styled in _apply_theme()

@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QFileDialog
 
 from ui.pages.base_page import BasePage
 from ui.popup_menu import exec_popup_menu
+from ui.smooth_scroll import apply_editor_smooth_scroll_preference
 
 try:
     from qfluentwidgets import (
@@ -307,6 +308,7 @@ class PresetSubpageBase(BasePage):
         self.add_widget(actions)
 
         self.editor = PlainTextEdit(self)
+        apply_editor_smooth_scroll_preference(self.editor)
         self.editor.textChanged.connect(self._on_text_changed)
         self.add_widget(self.editor, 1)
 

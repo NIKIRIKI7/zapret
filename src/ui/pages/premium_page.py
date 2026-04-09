@@ -596,25 +596,17 @@ class PremiumPage(BasePage):
             self.key_input_container.setVisible(visible)
 
     def _has_pending_pair_code(self) -> bool:
-        if not self.RegistryManager:
-            return False
-
-        try:
-            pair_code = self.RegistryManager.get_pair_code()
-            pair_expires_at = self.RegistryManager.get_pair_expires_at()
-            if not pair_code or not pair_expires_at:
-                return False
-            return int(pair_expires_at) >= int(time.time())
-        except Exception:
-            return False
+        snapshot = self._controller.read_pairing_snapshot(
+            self.RegistryManager,
+            current_time=int(time.time()),
+        )
+        return snapshot.has_pending_pair_code
 
     def _can_poll_pairing_status(self) -> bool:
-        has_device_token = False
-        try:
-            if self.RegistryManager:
-                has_device_token = bool(self.RegistryManager.get_device_token())
-        except Exception:
-            has_device_token = False
+        snapshot = self._controller.read_pairing_snapshot(
+            self.RegistryManager,
+            current_time=int(time.time()),
+        )
 
         plan = self._controller.build_pairing_autopoll_plan(
             checker_ready=bool(self.checker),
@@ -623,12 +615,16 @@ class PremiumPage(BasePage):
             activation_in_progress=self._activation_in_progress,
             connection_test_in_progress=self._connection_test_in_progress,
             worker_running=bool(self.current_thread and self.current_thread.isRunning()),
-            has_device_token=has_device_token,
-            has_pending_pair_code=self._has_pending_pair_code(),
+            has_device_token=snapshot.has_device_token,
+            has_pending_pair_code=snapshot.has_pending_pair_code,
         )
         return plan.can_poll
 
     def _start_pairing_status_autopoll(self) -> None:
+        snapshot = self._controller.read_pairing_snapshot(
+            self.RegistryManager,
+            current_time=int(time.time()),
+        )
         plan = self._controller.build_pairing_autopoll_plan(
             checker_ready=bool(self.checker),
             storage_ready=bool(self.RegistryManager),
@@ -636,8 +632,8 @@ class PremiumPage(BasePage):
             activation_in_progress=self._activation_in_progress,
             connection_test_in_progress=self._connection_test_in_progress,
             worker_running=bool(self.current_thread and self.current_thread.isRunning()),
-            has_device_token=bool(self.RegistryManager and self.RegistryManager.get_device_token()) if self.RegistryManager else False,
-            has_pending_pair_code=self._has_pending_pair_code(),
+            has_device_token=snapshot.has_device_token,
+            has_pending_pair_code=snapshot.has_pending_pair_code,
         )
         if plan.start_timer and not self._pairing_status_timer.isActive():
             self._pairing_status_timer.start()
@@ -647,12 +643,10 @@ class PremiumPage(BasePage):
             self._pairing_status_timer.stop()
 
     def _sync_pairing_status_autopoll(self) -> None:
-        has_device_token = False
-        try:
-            if self.RegistryManager:
-                has_device_token = bool(self.RegistryManager.get_device_token())
-        except Exception:
-            has_device_token = False
+        snapshot = self._controller.read_pairing_snapshot(
+            self.RegistryManager,
+            current_time=int(time.time()),
+        )
 
         plan = self._controller.build_pairing_autopoll_plan(
             checker_ready=bool(self.checker),
@@ -661,8 +655,8 @@ class PremiumPage(BasePage):
             activation_in_progress=self._activation_in_progress,
             connection_test_in_progress=self._connection_test_in_progress,
             worker_running=bool(self.current_thread and self.current_thread.isRunning()),
-            has_device_token=has_device_token,
-            has_pending_pair_code=self._has_pending_pair_code(),
+            has_device_token=snapshot.has_device_token,
+            has_pending_pair_code=snapshot.has_pending_pair_code,
         )
         if plan.start_timer:
             self._start_pairing_status_autopoll()
@@ -713,24 +707,19 @@ class PremiumPage(BasePage):
             log(f"Ошибка обновления информации об устройстве: {e}", "DEBUG")
 
     def _open_extend_bot(self) -> None:
-        try:
-            from config.telegram_links import open_telegram_link
-            open_telegram_link("zapretvpns_bot")
+        result = self._controller.open_extend_bot()
+        if result.ok:
             return
-        except Exception:
-            try:
-                webbrowser.open("https://t.me/zapretvpns_bot")
-            except Exception as e:
-                if InfoBar:
-                    InfoBar.warning(
-                        title=self._tr("common.error.title", "Ошибка"),
-                        content=self._tr(
-                            "page.premium.error.open_telegram",
-                            "Не удалось открыть Telegram: {error}",
-                            error=e,
-                        ),
-                        parent=self.window(),
-                    )
+        if InfoBar:
+            InfoBar.warning(
+                title=self._tr("common.error.title", "Ошибка"),
+                content=self._tr(
+                    "page.premium.error.open_telegram",
+                    "Не удалось открыть Telegram: {error}",
+                    error=result.message,
+                ),
+                parent=self.window(),
+            )
 
     # ── pair code ────────────────────────────────────────────────────────────
 

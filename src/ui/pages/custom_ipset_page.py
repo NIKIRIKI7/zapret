@@ -6,7 +6,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit
 )
-import ipaddress
 
 try:
     from qfluentwidgets import LineEdit, MessageBox, InfoBar
@@ -24,20 +23,12 @@ except ImportError:
     StrongBodyLabel = QLabel; BodyLabel = QLabel; CaptionLabel = QLabel
     _HAS_FLUENT_LABELS = False
 
-import os
-
 from .base_page import BasePage, ScrollBlockingPlainTextEdit
+from core.hostlist_page_controller import HostlistPageController
 from ui.compat_widgets import SettingsCard, ActionButton
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 from log import log
-import re
-
-
-def split_ip_entries(text: str) -> list[str]:
-    """Разделяет IP по пробелам, запятым, точкам с запятой."""
-    parts = re.split(r'[\s,;]+', text)
-    return [p.strip() for p in parts if p.strip()]
 
 
 class CustomIpSetPage(BasePage):
@@ -53,7 +44,7 @@ class CustomIpSetPage(BasePage):
             title_key="page.custom_ipset.title",
             subtitle_key="page.custom_ipset.subtitle",
         )
-        self._base_ipset_set_cache: set[str] | None = None
+        self._controller = HostlistPageController()
         self._desc_label = None
         self._add_card = None
         self._actions_card = None
@@ -96,47 +87,6 @@ class CustomIpSetPage(BasePage):
             except Exception:
                 return text
         return text
-
-    @staticmethod
-    def normalize_ip_entry(text: str) -> str | None:
-        """Приводит IP/подсеть к каноничному виду, либо None если некорректно.
-        Диапазоны (a-b) не поддерживаются.
-        Поддерживает извлечение IP из URL (https://1.2.3.4/...)
-        """
-        line = text.strip()
-        if not line or line.startswith("#"):
-            return None
-
-        # Извлекаем IP из URL если это ссылка
-        if "://" in line:
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(line)
-                host = parsed.netloc or parsed.path.split('/')[0]
-                # Убираем порт если есть
-                host = host.split(':')[0]
-                line = host
-            except:
-                pass
-
-        # Диапазоны не поддерживаются
-        if "-" in line:
-            return None
-
-        # Подсеть
-        if "/" in line:
-            try:
-                net = ipaddress.ip_network(line, strict=False)
-                return net.with_prefixlen
-            except Exception:
-                return None
-
-        # Одиночный IP
-        try:
-            addr = ipaddress.ip_address(line)
-            return str(addr)
-        except Exception:
-            return None
 
     def _build_ui(self):
         tokens = get_theme_tokens()
@@ -280,30 +230,15 @@ class CustomIpSetPage(BasePage):
     def _load_entries(self):
         """Загружает пользовательский список из ipset-all.user.txt."""
         try:
-            from utils.ipsets_manager import (
-                IPSET_ALL_USER_PATH,
-                ensure_ipset_all_user_file,
-                get_ipset_all_base_set,
-            )
-
-            ensure_ipset_all_user_file()
-            self._base_ipset_set_cache = get_ipset_all_base_set()
-
-            entries = []
-            if os.path.exists(IPSET_ALL_USER_PATH):
-                with open(IPSET_ALL_USER_PATH, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            entries.append(line)
+            state = self._controller.load_custom_ipset_text()
 
             # Блокируем сигнал чтобы не срабатывало автосохранение
             self.text_edit.blockSignals(True)
-            self.text_edit.setPlainText('\n'.join(entries))
+            self.text_edit.setPlainText(state.text)
             self.text_edit.blockSignals(False)
             self._status_state["saved"] = False
             self._update_status()
-            log(f"Загружено {len(entries)} строк из ipset-all.user.txt", "INFO")
+            log(f"Загружено {state.lines_count} строк из ipset-all.user.txt", "INFO")
         except Exception as e:
             log(f"Ошибка загрузки ipset-all.user.txt: {e}", "ERROR")
             self._status_state["error_key"] = "page.custom_ipset.status.error_load"
@@ -418,47 +353,11 @@ class CustomIpSetPage(BasePage):
     def _save_entries(self):
         """Сохраняет пользовательский список в ipset-all.user.txt."""
         try:
-            from utils.ipsets_manager import IPSET_ALL_USER_PATH, sync_ipset_all_after_user_change
-
-            os.makedirs(os.path.dirname(IPSET_ALL_USER_PATH), exist_ok=True)
-            
             text = self.text_edit.toPlainText()
-            entries = []
-            normalized_lines = []  # Для обновления UI
-            
-            for line in text.split('\n'):
-                line = line.strip()
-                if not line:
-                    continue
-                # Сохраняем комментарии как есть
-                if line.startswith('#'):
-                    entries.append(line)
-                    normalized_lines.append(line)
-                    continue
-                
-                # Разделяем по пробелам/запятым (1.1.1.1 2.2.2.2 -> отдельные строки)
-                separated = split_ip_entries(line)
-                
-                for item in separated:
-                    # Нормализуем каждый IP/подсеть
-                    norm = self.normalize_ip_entry(item)
-                    if norm:
-                        if norm not in entries:
-                            entries.append(norm)
-                            normalized_lines.append(norm)
-                    else:
-                        # Невалидная строка - оставляем как есть
-                        normalized_lines.append(item)
-
-            with open(IPSET_ALL_USER_PATH, "w", encoding="utf-8") as f:
-                for entry in entries:
-                    f.write(f"{entry}\n")
-
-            if not sync_ipset_all_after_user_change():
-                log("Не удалось быстро синхронизировать ipset-all после сохранения", "WARNING")
+            state = self._controller.save_custom_ipset_text(text)
 
             # Обновляем UI - заменяем URL на IP
-            new_text = '\n'.join(normalized_lines)
+            new_text = state.normalized_text
             if new_text != text:
                 cursor = self.text_edit.textCursor()
                 pos = cursor.position()
@@ -472,45 +371,20 @@ class CustomIpSetPage(BasePage):
                 self.text_edit.setTextCursor(cursor)
                 self.text_edit.blockSignals(False)
 
-            log(f"Сохранено {len(entries)} строк в ipset-all.user.txt", "SUCCESS")
+            log(f"Сохранено {state.saved_count} строк в ipset-all.user.txt", "SUCCESS")
             self.ipset_changed.emit()
         except Exception as e:
             log(f"Ошибка сохранения ipset-all.user.txt: {e}", "ERROR")
 
     def _update_status(self):
-        text = self.text_edit.toPlainText()
-        lines = [l.strip() for l in text.split('\n') if l.strip() and not l.strip().startswith('#')]
-        base_set = self._get_base_ips_set()
-        valid_entries: set[str] = set()
-
-        for line in lines:
-            for item in split_ip_entries(line):
-                norm = self.normalize_ip_entry(item)
-                if norm:
-                    valid_entries.add(norm)
-
-        user_count = len({ip for ip in valid_entries if ip not in base_set})
-        base_count = len(base_set)
-        total_count = len(base_set.union(valid_entries))
-        
-        # Валидируем строки
-        invalid_lines: list[tuple[int, str]] = []
-        for i, line in enumerate(text.split('\n'), 1):
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            
-            # Разделяем по пробелам
-            for item in split_ip_entries(line):
-                if not self.normalize_ip_entry(item):
-                    invalid_lines.append((i, item))
+        plan = self._controller.build_custom_ipset_status_plan(self.text_edit.toPlainText())
 
         # Обновляем UI
-        if invalid_lines:
+        if plan.invalid_lines:
             if not self._has_validation_error:
                 self.text_edit.setStyleSheet(self._error_style)
                 self._has_validation_error = True
-            self._invalid_line_items = invalid_lines
+            self._invalid_line_items = plan.invalid_lines
             self._render_validation_error()
         else:
             if self._has_validation_error:
@@ -519,65 +393,43 @@ class CustomIpSetPage(BasePage):
             self._invalid_line_items = []
             self._render_validation_error()
 
-        self._status_state["total"] = total_count
-        self._status_state["base"] = base_count
-        self._status_state["user"] = user_count
+        self._status_state["total"] = plan.total_count
+        self._status_state["base"] = plan.base_count
+        self._status_state["user"] = plan.user_count
         self._status_state["error_key"] = None
         self._status_state["error_default"] = ""
         self._status_state["error_kwargs"] = {}
         self._status_state["error_text"] = ""
         self._render_status_label()
 
-    def _get_base_ips_set(self) -> set[str]:
-        if self._base_ipset_set_cache is not None:
-            return self._base_ipset_set_cache
-
-        try:
-            from utils.ipsets_manager import get_ipset_all_base_set
-
-            self._base_ipset_set_cache = get_ipset_all_base_set()
-        except Exception:
-            self._base_ipset_set_cache = set()
-        return self._base_ipset_set_cache
-
     def _add_entry(self):
-        text = self.input.text().strip()
-        if not text:
+        plan = self._controller.build_add_custom_ipset_plan(
+            raw_text=self.input.text().strip(),
+            current_text=self.text_edit.toPlainText(),
+        )
+        if plan.new_text is None and plan.level is None:
             return
 
-        norm = self.normalize_ip_entry(text)
-        if not norm:
+        if plan.level == "warning":
             if InfoBar:
                 InfoBar.warning(
                     title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr(
-                        "page.custom_ipset.error.parse_entry",
-                        "Не удалось распознать IP или подсеть.\nПримеры:\n- 1.2.3.4\n- 10.0.0.0/8\nДиапазоны a-b не поддерживаются.",
-                    ),
+                    content=plan.content,
                     parent=self.window(),
                 )
             return
-
-        # Проверяем дубликат
-        current = self.text_edit.toPlainText()
-        current_entries = [l.strip().lower() for l in current.split('\n') if l.strip() and not l.strip().startswith('#')]
-
-        if norm.lower() in current_entries:
+        if plan.level == "info":
             if InfoBar:
                 InfoBar.info(
                     title=self._tr("page.custom_ipset.infobar.info_title", "Информация"),
-                    content=self._tr("page.custom_ipset.info.entry_exists", "Запись уже есть:\n{entry}", entry=norm),
+                    content=plan.content,
                     parent=self.window(),
                 )
             return
 
-        # Добавляем в конец
-        if current and not current.endswith('\n'):
-            current += '\n'
-        current += norm
-        
-        self.text_edit.setPlainText(current)
-        self.input.clear()
+        self.text_edit.setPlainText(plan.new_text or "")
+        if plan.clear_input:
+            self.input.clear()
 
     def _clear_all(self):
         text = self.text_edit.toPlainText().strip()
@@ -598,20 +450,9 @@ class CustomIpSetPage(BasePage):
 
     def _open_file(self):
         try:
-            from utils.ipsets_manager import IPSET_ALL_USER_PATH, ensure_ipset_all_user_file
-            import subprocess
-
             # Сохраняем перед открытием
             self._save_entries()
-            ensure_ipset_all_user_file()
-
-            if os.path.exists(IPSET_ALL_USER_PATH):
-                subprocess.run(["explorer", "/select,", IPSET_ALL_USER_PATH])
-            else:
-                os.makedirs(os.path.dirname(IPSET_ALL_USER_PATH), exist_ok=True)
-                with open(IPSET_ALL_USER_PATH, "w", encoding="utf-8") as f:
-                    f.write("")
-                subprocess.run(["explorer", os.path.dirname(IPSET_ALL_USER_PATH)])
+            self._controller.open_ipset_all_user_file()
         except Exception as e:
             log(f"Ошибка открытия ipset-all.user.txt: {e}", "ERROR")
             if InfoBar:

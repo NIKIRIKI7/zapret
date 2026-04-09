@@ -103,7 +103,7 @@ PAGE_CLASS_SPECS: dict[PageName, tuple[str, str, str]] = {
     PageName.ORCHESTRA: ("orchestra_page", "ui.pages.orchestra_page", "OrchestraPage"),
     PageName.ORCHESTRA_SETTINGS: (
         "orchestra_settings_page",
-        "ui.pages.orchestra",
+        "ui.pages.orchestra.orchestra_settings_page",
         "OrchestraSettingsPage",
     ),
     PageName.TELEGRAM_PROXY: (

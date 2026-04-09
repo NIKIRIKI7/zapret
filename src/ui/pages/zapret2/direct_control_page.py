@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 import qtawesome as qta
 
 from ui.pages.base_page import BasePage
-from ui.compat_widgets import ActionButton, PrimaryActionButton, PulsingDot, ResetActionButton, SettingsCard, SettingsRow, set_tooltip
+from ui.compat_widgets import ActionButton, PrimaryActionButton, PulsingDot, ResetActionButton, SettingsCard, set_tooltip
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
@@ -34,7 +34,7 @@ try:
         CaptionLabel, StrongBodyLabel, SubtitleLabel, BodyLabel,
         IndeterminateProgressBar, MessageBox, InfoBar,
         SegmentedWidget, MessageBoxBase, CardWidget,
-        PushButton, TransparentPushButton, FluentIcon,
+        PushButton, TransparentPushButton, FluentIcon, SettingCardGroup, PushSettingCard,
     )
     _HAS_FLUENT_LABELS = True
 except ImportError:
@@ -47,6 +47,8 @@ except ImportError:
     PushButton = None  # type: ignore[assignment]
     TransparentPushButton = None  # type: ignore[assignment]
     FluentIcon = None  # type: ignore[assignment]
+    SettingCardGroup = None  # type: ignore[assignment]
+    PushSettingCard = None  # type: ignore[assignment]
     _HAS_FLUENT_LABELS = False
 
 
@@ -533,20 +535,32 @@ class Zapret2DirectControlPage(BasePage):
 
         # Настройки программы
         _t_program = _time.perf_counter()
-        self.program_settings_section_label = self.add_section_title(
-            return_widget=True,
-            text_key="page.z2_control.section.program_settings",
+        program_settings_title = tr_catalog(
+            "page.z2_control.section.program_settings",
+            language=self._ui_language,
+            default="Настройки программы",
         )
-        program_settings_card = SettingsCard()
+        if SettingCardGroup is not None and PushSettingCard is not None and _HAS_FLUENT_LABELS:
+            self.program_settings_section_label = None
+            program_settings_card = SettingCardGroup(program_settings_title, self.content)
+        else:
+            self.program_settings_section_label = self.add_section_title(
+                return_widget=True,
+                text_key="page.z2_control.section.program_settings",
+            )
+            program_settings_card = SettingsCard()
         self.program_settings_card = program_settings_card
 
         _t_program_toggles = _time.perf_counter()
         try:
-            from ui.widgets.win11_controls import Win11ToggleSwitch
+            from ui.widgets.win11_controls import Win11ToggleRow
         except Exception:
-            Win11ToggleSwitch = None  # type: ignore[assignment]
+            Win11ToggleRow = None  # type: ignore[assignment]
 
-        auto_row = SettingsRow(
+        if Win11ToggleRow is None:
+            raise RuntimeError("Win11ToggleRow недоступен для страницы управления Zapret 2")
+
+        self.auto_dpi_toggle = Win11ToggleRow(
             "fa5s.bolt",
             tr_catalog("page.z2_control.setting.autostart.title", language=self._ui_language, default="Автозагрузка DPI"),
             tr_catalog(
@@ -555,16 +569,9 @@ class Zapret2DirectControlPage(BasePage):
                 default="Запускать Zapret автоматически при старте программы",
             ),
         )
-        self.auto_dpi_toggle = Win11ToggleSwitch() if Win11ToggleSwitch else ActionButton(
-            tr_catalog("common.toggle.on_off", language=self._ui_language, default="Вкл/Выкл")
-        )
-        self.auto_dpi_toggle.setProperty("noDrag", True)
-        if hasattr(self.auto_dpi_toggle, "toggled"):
-            self.auto_dpi_toggle.toggled.connect(self._on_auto_dpi_toggled)
-        auto_row.set_control(self.auto_dpi_toggle)
-        program_settings_card.add_widget(auto_row)
+        self.auto_dpi_toggle.toggled.connect(self._on_auto_dpi_toggled)
 
-        defender_row = SettingsRow(
+        self.defender_toggle = Win11ToggleRow(
             "fa5s.shield-alt",
             tr_catalog(
                 "page.z2_control.setting.defender.title",
@@ -577,16 +584,9 @@ class Zapret2DirectControlPage(BasePage):
                 default="Требуются права администратора",
             ),
         )
-        self.defender_toggle = Win11ToggleSwitch() if Win11ToggleSwitch else ActionButton(
-            tr_catalog("common.toggle.on_off", language=self._ui_language, default="Вкл/Выкл")
-        )
-        self.defender_toggle.setProperty("noDrag", True)
-        if hasattr(self.defender_toggle, "toggled"):
-            self.defender_toggle.toggled.connect(self._on_defender_toggled)
-        defender_row.set_control(self.defender_toggle)
-        program_settings_card.add_widget(defender_row)
+        self.defender_toggle.toggled.connect(self._on_defender_toggled)
 
-        max_row = SettingsRow(
+        self.max_block_toggle = Win11ToggleRow(
             "fa5s.ban",
             tr_catalog(
                 "page.z2_control.setting.max_block.title",
@@ -599,53 +599,79 @@ class Zapret2DirectControlPage(BasePage):
                 default="Блокирует запуск/установку MAX и домены в hosts",
             ),
         )
-        self.max_block_toggle = Win11ToggleSwitch() if Win11ToggleSwitch else ActionButton(
-            tr_catalog("common.toggle.on_off", language=self._ui_language, default="Вкл/Выкл")
-        )
-        self.max_block_toggle.setProperty("noDrag", True)
-        if hasattr(self.max_block_toggle, "toggled"):
-            self.max_block_toggle.toggled.connect(self._on_max_blocker_toggled)
-        max_row.set_control(self.max_block_toggle)
-        program_settings_card.add_widget(max_row)
+        self.max_block_toggle.toggled.connect(self._on_max_blocker_toggled)
+
+        add_setting_card = getattr(program_settings_card, "addSettingCard", None)
+        if callable(add_setting_card):
+            add_setting_card(self.auto_dpi_toggle)
+            add_setting_card(self.defender_toggle)
+            add_setting_card(self.max_block_toggle)
+        else:
+            program_settings_card.add_widget(self.auto_dpi_toggle)
+            program_settings_card.add_widget(self.defender_toggle)
+            program_settings_card.add_widget(self.max_block_toggle)
         _log_startup_z2_control_metric("_build_ui.toggle_setup", (_time.perf_counter() - _t_program_toggles) * 1000)
 
-        reset_row = SettingsRow(
-            "fa5s.undo",
-            tr_catalog("page.z2_control.setting.reset.title", language=self._ui_language, default="Сбросить программу"),
-            tr_catalog(
-                "page.z2_control.setting.reset.desc",
-                language=self._ui_language,
-                default="Очистить кэш проверок запуска (без удаления пресетов/настроек)",
-            ),
-        )
-        self.reset_program_btn = ResetActionButton(
-            tr_catalog("page.z2_control.button.reset", language=self._ui_language, default="Сбросить"),
-            confirm_text=tr_catalog("page.z2_control.button.reset_confirm", language=self._ui_language, default="Сбросить?"),
-        )
-        self.reset_program_btn.setProperty("noDrag", True)
-        self.reset_program_btn.reset_confirmed.connect(self._on_reset_program_clicked)
-        reset_row.set_control(self.reset_program_btn)
-        program_settings_card.add_widget(reset_row)
-
-        self.add_widget(program_settings_card)
+        self.reset_program_card = None
+        self.reset_program_btn = None
+        self._reset_program_desc_label = None
+        if callable(add_setting_card) and PushSettingCard is not None:
+            self.reset_program_card = PushSettingCard(
+                tr_catalog("page.z2_control.button.reset", language=self._ui_language, default="Сбросить"),
+                qta.icon("fa5s.undo", color="#ff9800"),
+                tr_catalog("page.z2_control.setting.reset.title", language=self._ui_language, default="Сбросить программу"),
+                tr_catalog(
+                    "page.z2_control.setting.reset.desc",
+                    language=self._ui_language,
+                    default="Очистить кэш проверок запуска (без удаления пресетов/настроек)",
+                ),
+            )
+            self.reset_program_card.clicked.connect(self._confirm_reset_program_clicked)
+            add_setting_card(self.reset_program_card)
+            self.add_widget(program_settings_card)
+        else:
+            self.reset_program_btn = ResetActionButton(
+                tr_catalog("page.z2_control.button.reset", language=self._ui_language, default="Сбросить"),
+                confirm_text=tr_catalog("page.z2_control.button.reset_confirm", language=self._ui_language, default="Сбросить?"),
+            )
+            self.reset_program_btn.setProperty("noDrag", True)
+            self.reset_program_btn.reset_confirmed.connect(self._on_reset_program_clicked)
+            reset_card = SettingsCard(
+                tr_catalog("page.z2_control.setting.reset.title", language=self._ui_language, default="Сбросить программу")
+            )
+            reset_desc_label = CaptionLabel(
+                tr_catalog(
+                    "page.z2_control.setting.reset.desc",
+                    language=self._ui_language,
+                    default="Очистить кэш проверок запуска (без удаления пресетов/настроек)",
+                )
+            ) if _HAS_FLUENT_LABELS else QLabel(
+                tr_catalog(
+                    "page.z2_control.setting.reset.desc",
+                    language=self._ui_language,
+                    default="Очистить кэш проверок запуска (без удаления пресетов/настроек)",
+                )
+            )
+            reset_desc_label.setWordWrap(True)
+            self._reset_program_desc_label = reset_desc_label
+            reset_card.add_widget(reset_desc_label)
+            reset_layout = QHBoxLayout()
+            reset_layout.setSpacing(8)
+            reset_layout.addWidget(self.reset_program_btn)
+            reset_layout.addStretch()
+            reset_card.add_layout(reset_layout)
+            self.reset_program_card = reset_card
+            self.add_widget(program_settings_card)
+            self.add_widget(reset_card)
         _log_startup_z2_control_metric("_build_ui.program_settings_rows", (_time.perf_counter() - _t_program) * 1000)
 
         self.add_spacing(16)
 
         # ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ (direct_zapret2)
         _t_advanced = _time.perf_counter()
-        self.advanced_settings_section_label = self.add_section_title(
-            return_widget=True,
-            text_key="page.z2_control.section.advanced_settings",
-        )
-
-        self.advanced_card = SettingsCard(tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"))
-        advanced_layout = QVBoxLayout()
-        advanced_layout.setContentsMargins(0, 0, 0, 0)
-        advanced_layout.setSpacing(4)
+        self.advanced_settings_section_label = None
 
         self.advanced_desc = CaptionLabel(tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="⚠ Изменяйте только если знаете что делаете")) if _HAS_FLUENT_LABELS else QLabel(tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="⚠ Изменяйте только если знаете что делаете"))
-        advanced_layout.addWidget(self.advanced_desc)
 
         try:
             from ui.widgets.win11_controls import Win11ToggleRow
@@ -664,7 +690,6 @@ class Zapret2DirectControlPage(BasePage):
         )
         if self.discord_restart_toggle:
             self.discord_restart_toggle.toggled.connect(self._on_discord_restart_changed)
-            advanced_layout.addWidget(self.discord_restart_toggle)
 
         self.wssize_toggle = (
             Win11ToggleRow(
@@ -678,7 +703,6 @@ class Zapret2DirectControlPage(BasePage):
         )
         if self.wssize_toggle:
             self.wssize_toggle.toggled.connect(self._on_wssize_toggled)
-            advanced_layout.addWidget(self.wssize_toggle)
 
         self.debug_log_toggle = (
             Win11ToggleRow(
@@ -692,9 +716,43 @@ class Zapret2DirectControlPage(BasePage):
         )
         if self.debug_log_toggle:
             self.debug_log_toggle.toggled.connect(self._on_debug_log_toggled)
-            advanced_layout.addWidget(self.debug_log_toggle)
 
-        self.advanced_card.add_layout(advanced_layout)
+        if SettingCardGroup is not None and _HAS_FLUENT_LABELS:
+            self.advanced_card = SettingCardGroup(
+                tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"),
+                self.content,
+            )
+            try:
+                self.advanced_card.vBoxLayout.insertWidget(2, self.advanced_desc)
+            except Exception:
+                pass
+            for card in (
+                self.discord_restart_toggle,
+                self.wssize_toggle,
+                self.debug_log_toggle,
+            ):
+                if card is None:
+                    continue
+                self.advanced_card.addSettingCard(card)
+        else:
+            self.advanced_settings_section_label = self.add_section_title(
+                return_widget=True,
+                text_key="page.z2_control.section.advanced_settings",
+            )
+            self.advanced_card = SettingsCard(tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"))
+            advanced_layout = QVBoxLayout()
+            advanced_layout.setContentsMargins(0, 0, 0, 0)
+            advanced_layout.setSpacing(4)
+            advanced_layout.addWidget(self.advanced_desc)
+            for row in (
+                self.discord_restart_toggle,
+                self.wssize_toggle,
+                self.debug_log_toggle,
+            ):
+                if row is not None:
+                    advanced_layout.addWidget(row)
+            self.advanced_card.add_layout(advanced_layout)
+
         self.add_widget(self.advanced_card)
         _log_startup_z2_control_metric("_build_ui.advanced_settings_block", (_time.perf_counter() - _t_advanced) * 1000)
 
@@ -1009,6 +1067,14 @@ class Zapret2DirectControlPage(BasePage):
 
     def _set_toggle_checked(self, toggle, checked: bool) -> None:
         try:
+            toggle.setChecked(bool(checked), block_signals=True)
+            return
+        except TypeError:
+            pass
+        except Exception:
+            pass
+
+        try:
             toggle.blockSignals(True)
         except Exception:
             pass
@@ -1029,6 +1095,22 @@ class Zapret2DirectControlPage(BasePage):
             toggle.blockSignals(False)
         except Exception:
             pass
+
+    def _confirm_reset_program_clicked(self) -> None:
+        title = tr_catalog("page.z2_control.button.reset", language=self._ui_language, default="Сбросить")
+        confirm_text = tr_catalog(
+            "page.z2_control.button.reset_confirm",
+            language=self._ui_language,
+            default="Сбросить?",
+        )
+        if MessageBox is not None:
+            try:
+                box = MessageBox(title, confirm_text, self.window())
+                if not box.exec():
+                    return
+            except Exception:
+                pass
+        self._on_reset_program_clicked()
 
     def _sync_program_settings(self) -> None:
         try:
@@ -1397,6 +1479,96 @@ class Zapret2DirectControlPage(BasePage):
         self.current_preset_caption.setText(tr_catalog("page.z2_control.preset.current", language=self._ui_language, default="Текущий активный пресет"))
         self.direct_mode_caption.setText(tr_catalog("page.z2_control.direct_mode.caption", language=self._ui_language, default="Режим прямого запуска"))
         self.advanced_desc.setText(tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="⚠ Изменяйте только если знаете что делаете"))
+        try:
+            title_label = getattr(self.program_settings_card, "titleLabel", None)
+            if title_label is not None:
+                title_label.setText(
+                    tr_catalog("page.z2_control.section.program_settings", language=self._ui_language, default="Настройки программы")
+                )
+        except Exception:
+            pass
+        try:
+            self.auto_dpi_toggle.set_texts(
+                tr_catalog("page.z2_control.setting.autostart.title", language=self._ui_language, default="Автозагрузка DPI"),
+                tr_catalog(
+                    "page.z2_control.setting.autostart.desc",
+                    language=self._ui_language,
+                    default="Запускать Zapret автоматически при старте программы",
+                ),
+            )
+        except Exception:
+            pass
+        try:
+            self.defender_toggle.set_texts(
+                tr_catalog(
+                    "page.z2_control.setting.defender.title",
+                    language=self._ui_language,
+                    default="Отключить Windows Defender",
+                ),
+                tr_catalog(
+                    "page.z2_control.setting.defender.desc",
+                    language=self._ui_language,
+                    default="Требуются права администратора",
+                ),
+            )
+        except Exception:
+            pass
+        try:
+            self.max_block_toggle.set_texts(
+                tr_catalog(
+                    "page.z2_control.setting.max_block.title",
+                    language=self._ui_language,
+                    default="Блокировать установку MAX",
+                ),
+                tr_catalog(
+                    "page.z2_control.setting.max_block.desc",
+                    language=self._ui_language,
+                    default="Блокирует запуск/установку MAX и домены в hosts",
+                ),
+            )
+        except Exception:
+            pass
+        try:
+            if self.reset_program_card is not None and hasattr(self.reset_program_card, "setTitle"):
+                self.reset_program_card.setTitle(
+                    tr_catalog("page.z2_control.setting.reset.title", language=self._ui_language, default="Сбросить программу")
+                )
+                self.reset_program_card.setContent(
+                    tr_catalog(
+                        "page.z2_control.setting.reset.desc",
+                        language=self._ui_language,
+                        default="Очистить кэш проверок запуска (без удаления пресетов/настроек)",
+                    )
+                )
+                button = getattr(self.reset_program_card, "button", None)
+                if button is not None:
+                    button.setText(
+                        tr_catalog("page.z2_control.button.reset", language=self._ui_language, default="Сбросить")
+                    )
+            elif self.reset_program_btn is not None:
+                self.reset_program_btn._default_text = tr_catalog("page.z2_control.button.reset", language=self._ui_language, default="Сбросить")
+                self.reset_program_btn._confirm_text = tr_catalog("page.z2_control.button.reset_confirm", language=self._ui_language, default="Сбросить?")
+                self.reset_program_btn.setText(self.reset_program_btn._default_text)
+                if self._reset_program_desc_label is not None:
+                    self._reset_program_desc_label.setText(
+                        tr_catalog(
+                            "page.z2_control.setting.reset.desc",
+                            language=self._ui_language,
+                            default="Очистить кэш проверок запуска (без удаления пресетов/настроек)",
+                        )
+                    )
+        except Exception:
+            pass
+        try:
+            if hasattr(self.advanced_card, "set_title"):
+                self.advanced_card.set_title(
+                    tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ")
+                )
+            title_label = getattr(self.advanced_card, "titleLabel", None)
+            if title_label is not None:
+                title_label.setText(tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"))
+        except Exception:
+            pass
         self.blobs_title_label.setText(tr_catalog("page.z2_control.blobs.title", language=self._ui_language, default="Блобы"))
         self.blobs_desc_label.setText(tr_catalog("page.z2_control.blobs.desc", language=self._ui_language, default="Бинарные данные (.bin / hex) для стратегий"))
 

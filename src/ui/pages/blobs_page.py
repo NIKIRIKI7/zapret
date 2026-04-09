@@ -605,7 +605,7 @@ class BlobsPage(BasePage):
             )
 
             # Refresh styles for newly created widgets.
-            self._apply_theme()
+            self._apply_page_theme(force=True)
             
         except Exception as e:
             log(f"Ошибка загрузки блобов: {e}", "ERROR")
@@ -618,7 +618,7 @@ class BlobsPage(BasePage):
             error_label.setProperty("blobSection", "error")
             self.blobs_layout.addWidget(error_label)
 
-            self._apply_theme()
+            self._apply_page_theme(force=True)
             
     def _filter_blobs(self, text: str):
         """Фильтрует блобы по тексту"""

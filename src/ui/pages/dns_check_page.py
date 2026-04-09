@@ -5,10 +5,11 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QWidget
 )
-from PyQt6.QtCore import QThread, QObject, pyqtSignal, Qt
+from PyQt6.QtCore import QThread, Qt
 from PyQt6.QtGui import QFont, QTextCursor
 
 from .base_page import BasePage, ScrollBlockingTextEdit
+from dns.dns_check_page_controller import DNSCheckPageController
 from ui.compat_widgets import SettingsCard, ActionButton
 from ui.theme import get_theme_tokens
 from ui.theme_semantic import get_semantic_palette
@@ -31,23 +32,6 @@ except ImportError:
     _HAS_FLUENT_LABELS = False
 
 
-class DNSCheckWorker(QObject):
-    """Worker для выполнения DNS проверки в отдельном потоке"""
-    update_signal = pyqtSignal(str)
-    progress_signal = pyqtSignal(int, int)  # current, total
-    finished_signal = pyqtSignal(dict)
-    
-    def run(self):
-        try:
-            from dns_checker import DNSChecker
-            checker = DNSChecker()
-            results = checker.check_dns_poisoning(log_callback=self.update_signal.emit)
-            self.finished_signal.emit(results)
-        except Exception as e:
-            self.update_signal.emit(f"❌ Ошибка: {str(e)}")
-            self.finished_signal.emit({})
-
-
 class DNSCheckPage(BasePage):
     """Страница проверки DNS подмены провайдером."""
     
@@ -61,6 +45,7 @@ class DNSCheckPage(BasePage):
         )
         self.worker = None
         self.thread = None
+        self._controller = DNSCheckPageController()
         self._status_tone = "muted"
         self._status_bold = False
         self._info_icon_labels = []
@@ -75,6 +60,24 @@ class DNSCheckPage(BasePage):
 
     def _after_ui_built(self) -> None:
         self._apply_page_theme(force=True)
+
+    def _apply_interaction_state(
+        self,
+        *,
+        check_enabled: bool,
+        quick_enabled: bool,
+        save_enabled: bool,
+        progress_visible: bool,
+    ) -> None:
+        self.check_button.setEnabled(check_enabled)
+        self.quick_check_button.setEnabled(quick_enabled)
+        self.save_button.setEnabled(save_enabled)
+        self.progress_bar.setVisible(progress_visible)
+        if _HAS_FLUENT_PROGRESS:
+            if progress_visible:
+                self.progress_bar.start()
+            else:
+                self.progress_bar.stop()
     
     def _build_ui(self):
         """Создаёт интерфейс страницы."""
@@ -240,19 +243,18 @@ class DNSCheckPage(BasePage):
             return
         
         self.result_text.clear()
-        self.check_button.setEnabled(False)
-        self.quick_check_button.setEnabled(False)
-        self.save_button.setEnabled(False)
-        
-        # Показываем прогресс
-        self.progress_bar.setVisible(True)
-        if _HAS_FLUENT_PROGRESS:
-            self.progress_bar.start()
-        self._set_status("🔄 Выполняется проверка DNS...", tone="accent", bold=False)
+        start_plan = self._controller.build_start_plan()
+        self._apply_interaction_state(
+            check_enabled=start_plan.check_enabled,
+            quick_enabled=start_plan.quick_enabled,
+            save_enabled=start_plan.save_enabled,
+            progress_visible=start_plan.progress_visible,
+        )
+        self._set_status(start_plan.status_text, tone=start_plan.status_tone, bold=False)
         
         # Создаём поток и worker
         self.thread = QThread()
-        self.worker = DNSCheckWorker()
+        self.worker = self._controller.create_worker()
         self.worker.moveToThread(self.thread)
         
         # Подключаем сигналы
@@ -267,21 +269,17 @@ class DNSCheckPage(BasePage):
         """Добавляет текст в результаты с форматированием."""
         tokens = get_theme_tokens()
         semantic = get_semantic_palette()
-        # Применяем цветовое форматирование
-        if "✅" in text:
-            color = semantic.success
-        elif "❌" in text:
-            color = semantic.error
-        elif "⚠️" in text:
-            color = semantic.warning
-        elif "🚫" in text:
-            color = "#e91e63"
-        elif "🔍" in text or "📊" in text:
-            color = tokens.accent_hex
-        elif "=" in text and len(text) > 20:
-            color = tokens.fg_faint
-        else:
-            color = tokens.fg
+        plan = self._controller.build_result_line_plan(text)
+        role_map = {
+            "success": semantic.success,
+            "error": semantic.error,
+            "warning": semantic.warning,
+            "blocked": "#e91e63",
+            "accent": tokens.accent_hex,
+            "faint": tokens.fg_faint,
+            "normal": tokens.fg,
+        }
+        color = role_map.get(plan.color_role, tokens.fg)
         
         # Форматируем текст
         formatted_text = f'<span style="color: {color};">{text}</span>'
@@ -298,71 +296,46 @@ class DNSCheckPage(BasePage):
     
     def on_check_finished(self, results):
         """Обработчик завершения проверки."""
-        self.check_button.setEnabled(True)
-        self.quick_check_button.setEnabled(True)
-        self.save_button.setEnabled(True)
-        if _HAS_FLUENT_PROGRESS:
-            self.progress_bar.stop()
-        self.progress_bar.setVisible(False)
-        
         # Обновляем статус
-        if results and results.get('summary', {}).get('dns_poisoning_detected'):
-            self._set_status("⚠️ Обнаружена DNS подмена!", tone="error", bold=True)
-        else:
-            self._set_status("✅ Проверка завершена", tone="success", bold=True)
+        plan = self._controller.build_finish_plan(results)
+        self._apply_interaction_state(
+            check_enabled=plan.check_enabled,
+            quick_enabled=plan.quick_enabled,
+            save_enabled=plan.save_enabled,
+            progress_visible=plan.progress_visible,
+        )
+        self._set_status(plan.status_text, tone=plan.status_tone, bold=True)
         
         # Очистка потока
-        if self.thread:
+        cleanup_plan = self._controller.build_cleanup_plan(
+            has_thread=self.thread is not None,
+            has_worker=self.worker is not None,
+            thread_running=bool(self.thread and self.thread.isRunning()),
+        )
+        if cleanup_plan.should_quit_thread and self.thread:
             self.thread.quit()
-            self.thread.wait(500)  # Короткий таймаут (поток уже завершается)
+            self.thread.wait(cleanup_plan.wait_timeout_ms)
+        if cleanup_plan.should_delete_thread and self.thread:
             self.thread.deleteLater()
             self.thread = None
-        
-        if self.worker:
+        if cleanup_plan.should_delete_worker and self.worker:
             self.worker.deleteLater()
             self.worker = None
     
     def quick_dns_check(self):
         """Выполняет быструю проверку только системного DNS."""
-        import socket
-        
         self.result_text.clear()
-        self.append_result("⚡ БЫСТРАЯ ПРОВЕРКА СИСТЕМНОГО DNS")
-        self.append_result("=" * 45)
-        self.append_result("")
-        
-        test_domains = {
-            'YouTube': 'www.youtube.com',
-            'Discord': 'discord.com',
-            'Google': 'google.com',
-            'Cloudflare': 'cloudflare.com',
-        }
-        
-        all_ok = True
-        for name, domain in test_domains.items():
-            try:
-                ip = socket.gethostbyname(domain)
-                self.append_result(f"✅ {name} ({domain}): {ip}")
-            except Exception as e:
-                self.append_result(f"❌ {name} ({domain}): Ошибка - {e}")
-                all_ok = False
-        
-        self.append_result("")
-        if all_ok:
-            self.append_result("✅ Все домены резолвятся корректно")
-        else:
-            self.append_result("⚠️ Есть проблемы с резолвингом некоторых доменов")
-        
-        self.save_button.setEnabled(True)
+        plan = self._controller.run_quick_dns_check()
+        for line in plan.lines:
+            self.append_result(line)
+        self.save_button.setEnabled(plan.enable_save)
     
     def save_results(self):
         """Сохраняет результаты в файл."""
         from PyQt6.QtWidgets import QFileDialog
-        from datetime import datetime
-        import os
         
         # Выбираем путь для сохранения
-        default_filename = f"dns_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        default_filename = self._controller.build_save_default_filename()
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Сохранить результаты DNS проверки",
@@ -371,40 +344,41 @@ class DNSCheckPage(BasePage):
         )
         
         if file_path:
-            try:
-                # Получаем текст без HTML тегов
-                plain_text = self.result_text.toPlainText()
-                
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write("DNS CHECK RESULTS\n")
-                    f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    f.write("=" * 60 + "\n\n")
-                    f.write(plain_text)
-                
-                if InfoBar:
-                    InfoBar.success(title="Сохранено", content=f"Результаты сохранены в:\n{file_path}", parent=self.window())
-
-                # Открываем папку с файлом
-                os.startfile(os.path.dirname(file_path))
-
-            except Exception as e:
-                if InfoBar:
-                    InfoBar.error(title="Ошибка", content=f"Не удалось сохранить файл:\n{str(e)}", parent=self.window())
+            plan = self._controller.save_results_text(
+                file_path=file_path,
+                plain_text=self.result_text.toPlainText(),
+            )
+            if InfoBar:
+                if plan.success:
+                    InfoBar.success(title=plan.title, content=plan.content, parent=self.window())
+                else:
+                    InfoBar.error(title=plan.title, content=plan.content, parent=self.window())
     
     def cleanup(self):
         """Очистка потоков при закрытии"""
         from log import log
         try:
-            if self.thread and self.thread.isRunning():
+            cleanup_plan = self._controller.build_cleanup_plan(
+                has_thread=self.thread is not None,
+                has_worker=self.worker is not None,
+                thread_running=bool(self.thread and self.thread.isRunning()),
+            )
+            if cleanup_plan.should_quit_thread and self.thread and self.thread.isRunning():
                 log("Останавливаем DNS check worker...", "DEBUG")
                 self.thread.quit()
-                if not self.thread.wait(2000):
+                if not self.thread.wait(cleanup_plan.wait_timeout_ms):
                     log("⚠ DNS check worker не завершился, принудительно завершаем", "WARNING")
                     try:
                         self.thread.terminate()
                         self.thread.wait(500)
                     except:
                         pass
+            if cleanup_plan.should_delete_thread and self.thread is not None:
+                self.thread.deleteLater()
+                self.thread = None
+            if cleanup_plan.should_delete_worker and self.worker is not None:
+                self.worker.deleteLater()
+                self.worker = None
         except Exception as e:
             log(f"Ошибка при очистке dns_check_page: {e}", "DEBUG")
 

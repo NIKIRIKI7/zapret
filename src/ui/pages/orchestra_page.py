@@ -1,7 +1,6 @@
 # ui/pages/orchestra_page.py
 """Страница оркестратора автоматического обучения (circular)"""
 
-import os
 from queue import Queue, Empty
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QSize
 from PyQt6.QtWidgets import (
@@ -553,49 +552,6 @@ class OrchestraPage(BasePage):
             except Empty:
                 break
 
-    def _get_current_log_path(self) -> str | None:
-        """Получает путь к текущему лог-файлу из runner'а"""
-        try:
-            app = self.window()
-            if hasattr(app, 'orchestra_runner') and app.orchestra_runner:
-                return app.orchestra_runner.debug_log_path
-        except Exception:
-            pass
-        return None
-
-    def _read_log_file(self):
-        """Читает новые строки из лог-файла и определяет состояние"""
-        try:
-            # Получаем актуальный путь к логу из runner'а
-            current_log_path = self._get_current_log_path()
-
-            # Если путь изменился - сбрасываем позицию
-            if current_log_path != self._log_file_path:
-                self._log_file_path = current_log_path
-                self._last_log_position = 0
-
-            if not self._log_file_path or not os.path.exists(self._log_file_path):
-                return
-
-            with open(self._log_file_path, 'r', encoding='utf-8', errors='replace') as f:
-                # Переходим к последней прочитанной позиции
-                f.seek(self._last_log_position)
-
-                # Читаем новые строки
-                new_content = f.read()
-                if new_content:
-                    # Добавляем в лог и определяем состояние
-                    for line in new_content.splitlines():
-                        if line.strip():
-                            self.append_log(line)
-                            # Определяем состояние из лога
-                            self._detect_state_from_line(line)
-
-                    # Обновляем позицию
-                    self._last_log_position = f.tell()
-        except Exception as e:
-            log(f"Ошибка чтения лог-файла: {e}", "DEBUG")
-
     def _detect_state_from_line(self, line: str):
         """Определяет состояние оркестратора из строки лога
 
@@ -623,12 +579,9 @@ class OrchestraPage(BasePage):
         """Обновляет данные обученных доменов из реестра через runner"""
         try:
             app = self.window()
-            if hasattr(app, 'orchestra_runner') and app.orchestra_runner:
-                plan = self._controller.build_learned_data_plan(app.orchestra_runner.get_learned_data())
-                self._update_domains(plan.data)
-            else:
-                plan = self._controller.build_learned_data_plan(None)
-                self._update_domains(plan.data)
+            runner = app.orchestra_runner if hasattr(app, 'orchestra_runner') else None
+            plan = self._controller.build_learned_data_plan_from_runner(runner)
+            self._update_domains(plan.data)
         except Exception as e:
             log(f"Ошибка чтения обученных доменов: {e}", "DEBUG")
 
@@ -692,10 +645,8 @@ class OrchestraPage(BasePage):
         # Подключаем callback к runner если он уже запущен (при автозапуске callback не устанавливается)
         try:
             app = self.window()
-            if hasattr(app, 'orchestra_runner') and app.orchestra_runner:
-                runner = app.orchestra_runner
-                if runner.output_callback is None:
-                    runner.set_output_callback(self.emit_log)
+            runner = app.orchestra_runner if hasattr(app, 'orchestra_runner') else None
+            self._controller.ensure_output_callback(runner, self.emit_log)
         except Exception:
             pass
 

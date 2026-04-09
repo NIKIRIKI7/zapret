@@ -5649,6 +5649,14 @@ TEXTS_PAGES_FINAL: dict[str, dict[str, str]] = {
         "ru": "Инерционная прокрутка страниц настроек",
         "en": "Inertial scrolling on settings pages",
     },
+    "page.appearance.performance.editor_scroll.title": {
+        "ru": "Плавная прокрутка редакторов",
+        "en": "Editor Smooth Scrolling",
+    },
+    "page.appearance.performance.editor_scroll.description": {
+        "ru": "Плавная прокрутка внутри больших текстовых полей и редакторов. Работает только при включённых анимациях интерфейса.",
+        "en": "Smooth scrolling inside large text fields and editors. Works only when interface animations are enabled.",
+    },
     "page.autostart.recommended": {
         "ru": "Рекомендуется",
         "en": "Recommended",

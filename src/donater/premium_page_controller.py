@@ -124,6 +124,18 @@ class PremiumAutopollPlan:
     stop_timer: bool
 
 
+@dataclass(slots=True)
+class PremiumPairingSnapshot:
+    has_device_token: bool
+    has_pending_pair_code: bool
+
+
+@dataclass(slots=True)
+class PremiumActionResult:
+    ok: bool
+    message: str
+
+
 class PremiumPageController:
     @staticmethod
     def resolve_checker_bundle() -> PremiumCheckerInitResult:
@@ -672,3 +684,46 @@ class PremiumPageController:
             start_timer=can_poll,
             stop_timer=not can_poll,
         )
+
+    @staticmethod
+    def read_pairing_snapshot(storage, *, current_time: int) -> PremiumPairingSnapshot:
+        if storage is None:
+            return PremiumPairingSnapshot(
+                has_device_token=False,
+                has_pending_pair_code=False,
+            )
+
+        has_device_token = False
+        has_pending_pair_code = False
+        try:
+            has_device_token = bool(storage.get_device_token())
+        except Exception:
+            has_device_token = False
+
+        try:
+            pair_code = storage.get_pair_code()
+            pair_expires_at = storage.get_pair_expires_at()
+            has_pending_pair_code = bool(pair_code and pair_expires_at and int(pair_expires_at) >= int(current_time))
+        except Exception:
+            has_pending_pair_code = False
+
+        return PremiumPairingSnapshot(
+            has_device_token=has_device_token,
+            has_pending_pair_code=has_pending_pair_code,
+        )
+
+    @staticmethod
+    def open_extend_bot() -> PremiumActionResult:
+        try:
+            from config.telegram_links import open_telegram_link
+
+            open_telegram_link("zapretvpns_bot")
+            return PremiumActionResult(ok=True, message="zapretvpns_bot")
+        except Exception:
+            try:
+                import webbrowser
+
+                webbrowser.open("https://t.me/zapretvpns_bot")
+                return PremiumActionResult(ok=True, message="https://t.me/zapretvpns_bot")
+            except Exception as e:
+                return PremiumActionResult(ok=False, message=str(e))

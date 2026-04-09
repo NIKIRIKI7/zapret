@@ -22,13 +22,15 @@ try:
     from qfluentwidgets import (
         SubtitleLabel, BodyLabel, StrongBodyLabel, CaptionLabel,
         SegmentedWidget, InfoBar,
-        HyperlinkCard, PushSettingCard, SettingCardGroup, FluentIcon,
+        HyperlinkCard, PushSettingCard, PrimaryPushSettingCard, SettingCard, SettingCardGroup, FluentIcon,
     )
     _HAS_FLUENT = True
 except ImportError:
     _HAS_FLUENT = False
     FluentIcon = None
     InfoBar = None
+    PrimaryPushSettingCard = None  # type: ignore[assignment]
+    SettingCard = None  # type: ignore[assignment]
 
 def _make_section_label(text: str, parent: QWidget | None = None) -> QLabel:
     """Создаёт заголовок секции для использования внутри sub-layout."""
@@ -56,6 +58,9 @@ class AboutPage(BasePage):
         self._controller = AboutPageController()
         # UI refs (support tab)
         self._support_icon_label: QLabel | None = None
+        self._support_discussions_card = None
+        self._support_telegram_card = None
+        self._support_discord_card = None
 
         # Tab lazy init flags
         self._support_tab_initialized = False
@@ -505,7 +510,80 @@ class AboutPage(BasePage):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _build_support_content(self, layout: QVBoxLayout):
+        self._support_icon_label = None
+        self._support_discussions_card = None
+        self._support_telegram_card = None
+        self._support_discord_card = None
         tokens = get_theme_tokens()
+
+        if _HAS_FLUENT and PrimaryPushSettingCard is not None:
+            discussions_group = SettingCardGroup(
+                tr_catalog(
+                    "page.about.support.section.discussions",
+                    language=self._ui_language,
+                    default="GitHub Discussions",
+                ),
+                self.content,
+            )
+            self._support_discussions_card = PrimaryPushSettingCard(
+                tr_catalog("page.about.support.discussions.button", language=self._ui_language, default="Открыть"),
+                qta.icon("fa5b.github", color=tokens.accent_hex),
+                tr_catalog(
+                    "page.about.support.discussions.title",
+                    language=self._ui_language,
+                    default="GitHub Discussions",
+                ),
+                tr_catalog(
+                    "page.about.support.discussions.desc",
+                    language=self._ui_language,
+                    default="Основной канал поддержки. Здесь можно задать вопрос, описать проблему и приложить материалы вручную.",
+                ),
+            )
+            self._support_discussions_card.clicked.connect(self._open_support_discussions)
+            discussions_group.addSettingCard(self._support_discussions_card)
+            layout.addWidget(discussions_group)
+
+            layout.addSpacing(8)
+
+            community_group = SettingCardGroup(
+                tr_catalog(
+                    "page.about.support.section.community",
+                    language=self._ui_language,
+                    default="Каналы сообщества",
+                ),
+                self.content,
+            )
+            self._support_telegram_card = PushSettingCard(
+                tr_catalog("page.about.support.button.open", language=self._ui_language, default="Открыть"),
+                qta.icon("fa5b.telegram", color="#229ED9"),
+                tr_catalog("page.about.support.telegram.title", language=self._ui_language, default="Telegram"),
+                tr_catalog(
+                    "page.about.support.telegram.desc",
+                    language=self._ui_language,
+                    default="Быстрые вопросы и общение с сообществом",
+                ),
+            )
+            self._support_telegram_card.clicked.connect(self._open_telegram_support)
+
+            self._support_discord_card = PushSettingCard(
+                tr_catalog("page.about.support.button.open", language=self._ui_language, default="Открыть"),
+                qta.icon("fa5b.discord", color="#5865F2"),
+                tr_catalog("page.about.support.discord.title", language=self._ui_language, default="Discord"),
+                tr_catalog(
+                    "page.about.support.discord.desc",
+                    language=self._ui_language,
+                    default="Обсуждение и живое общение",
+                ),
+            )
+            self._support_discord_card.clicked.connect(self._open_discord)
+
+            community_group.addSettingCards([
+                self._support_telegram_card,
+                self._support_discord_card,
+            ])
+            layout.addWidget(community_group)
+            layout.addStretch()
+            return
 
         # ── GitHub Discussions ────────────────────────────────────────────
         layout.addWidget(
@@ -915,81 +993,180 @@ class AboutPage(BasePage):
         layout.addSpacing(8)
 
         # ── Возможности ────────────────────────────────────────────────────
-        layout.addWidget(_make_section_label("Возможности"))
+        if _HAS_FLUENT and SettingCardGroup is not None and SettingCard is not None:
+            features_group = SettingCardGroup("Возможности", self.content)
 
-        features_card = SettingsCard()
+            yt_card = SettingCard(
+                qta.icon("fa5s.rocket", color=tokens.accent_hex),
+                "Ускорение YouTube и Discord",
+                "Позволяет ускорить замедленные сервера в случае если те перестали работать и начали деградировать",
+                self.content,
+            )
+            game_card = SettingCard(
+                qta.icon("fa5s.gamepad", color="#4CAF50"),
+                "Игровые серверы",
+                "Также подходит для ускорения игровых серверов",
+                self.content,
+            )
+            features_group.addSettingCards([yt_card, game_card])
+            layout.addWidget(features_group)
+            layout.addSpacing(16)
 
-        yt_row = SettingsRow(
-            "fa5s.rocket",
-            "Ускорение YouTube и Discord",
-            "Позволяет ускорить замедленные сервера в случае если те перестали работать и начали деградировать",
-        )
-        features_card.add_widget(yt_row)
+            # ── Ссылки ─────────────────────────────────────────────────────────
+            links_group = SettingCardGroup("Ссылки", self.content)
 
-        game_row = SettingsRow(
-            "fa5s.gamepad",
-            "Игровые серверы",
-            "Также подходит для ускорения игровых серверов",
-        )
-        features_card.add_widget(game_row)
+            tg_card = PushSettingCard(
+                "Открыть",
+                qta.icon("fa5b.telegram", color="#229ED9"),
+                "Канал Zapret KVN",
+                "Новости и обновления",
+                self.content,
+            )
+            tg_card.clicked.connect(self._open_kvn_channel)
+
+            bot_card = PrimaryPushSettingCard(
+                "Купить",
+                qta.icon("fa5s.star", color="#ff9800"),
+                "Купить подписку",
+                "Оформление через Telegram-бота @zapretvpns_bot",
+                self.content,
+            )
+            bot_card.clicked.connect(self._open_kvn_bot)
+
+            bypass_card = PushSettingCard(
+                "Открыть",
+                qta.icon("fa5b.telegram", color="#229ED9"),
+                "Канал BypassBlock",
+                "Второй канал с новостями",
+                self.content,
+            )
+            bypass_card.clicked.connect(self._open_kvn_bypass)
+
+            gh_card = PushSettingCard(
+                "Открыть",
+                qta.icon("fa5b.github", color=tokens.accent_hex),
+                "Исходный код",
+                "GitHub репозиторий Zapret KVN",
+                self.content,
+            )
+            gh_card.clicked.connect(self._open_kvn_github)
+
+            links_group.addSettingCards([tg_card, bot_card, bypass_card, gh_card])
+            layout.addWidget(links_group)
+        else:
+            layout.addWidget(_make_section_label("Возможности"))
+
+            features_card = SettingsCard()
+
+            yt_row = SettingsRow(
+                "fa5s.rocket",
+                "Ускорение YouTube и Discord",
+                "Позволяет ускорить замедленные сервера в случае если те перестали работать и начали деградировать",
+            )
+            features_card.add_widget(yt_row)
+
+            game_row = SettingsRow(
+                "fa5s.gamepad",
+                "Игровые серверы",
+                "Также подходит для ускорения игровых серверов",
+            )
+            features_card.add_widget(game_row)
 
         layout.addWidget(features_card)
         layout.addSpacing(16)
 
         # ── Ссылки ─────────────────────────────────────────────────────────
-        layout.addWidget(_make_section_label("Ссылки"))
+        if _HAS_FLUENT:
+            links_group = SettingCardGroup("Ссылки", self.content)
 
-        links_card = SettingsCard()
+            tg_card = PushSettingCard(
+                "Открыть",
+                qta.icon("fa5b.telegram", color="#229ED9"),
+                "Канал Zapret KVN",
+                "Новости и обновления",
+            )
+            tg_card.clicked.connect(self._open_kvn_channel)
 
-        tg_row = SettingsRow(
-            "fa5b.telegram",
-            "Канал Zapret KVN",
-            "Новости и обновления",
-        )
-        tg_btn = ActionButton("Открыть", "fa5s.external-link-alt", accent=False)
-        tg_btn.setProperty("noDrag", True)
-        tg_btn.setFixedHeight(36)
-        tg_btn.clicked.connect(self._open_kvn_channel)
-        tg_row.set_control(tg_btn)
-        links_card.add_widget(tg_row)
+            bot_card = PrimaryPushSettingCard(
+                "Купить",
+                qta.icon("fa5s.shopping-cart", color="#f59e0b"),
+                "Купить подписку",
+                "Оформление через Telegram-бота @zapretvpns_bot",
+            )
+            bot_card.clicked.connect(self._open_kvn_bot)
 
-        bot_row = SettingsRow(
-            "fa5s.shopping-cart",
-            "Купить подписку",
-            "Оформление через Telegram-бота @zapretvpns_bot",
-        )
-        bot_btn = ActionButton("Купить", "fa5s.star", accent=True)
-        bot_btn.setProperty("noDrag", True)
-        bot_btn.setFixedHeight(36)
-        bot_btn.clicked.connect(self._open_kvn_bot)
-        bot_row.set_control(bot_btn)
-        links_card.add_widget(bot_row)
+            bypass_card = PushSettingCard(
+                "Открыть",
+                qta.icon("fa5b.telegram", color="#229ED9"),
+                "Канал BypassBlock",
+                "Второй канал с новостями",
+            )
+            bypass_card.clicked.connect(self._open_kvn_bypass)
 
-        bypass_row = SettingsRow(
-            "fa5b.telegram",
-            "Канал BypassBlock",
-            "Второй канал с новостями",
-        )
-        bypass_btn = ActionButton("Открыть", "fa5s.external-link-alt", accent=False)
-        bypass_btn.setProperty("noDrag", True)
-        bypass_btn.setFixedHeight(36)
-        bypass_btn.clicked.connect(self._open_kvn_bypass)
-        bypass_row.set_control(bypass_btn)
-        links_card.add_widget(bypass_row)
+            gh_card = PushSettingCard(
+                "Открыть",
+                qta.icon("fa5b.github", color=tokens.accent_hex),
+                "Исходный код",
+                "GitHub репозиторий Zapret KVN",
+            )
+            gh_card.clicked.connect(self._open_kvn_github)
 
-        gh_row = SettingsRow(
-            "fa5b.github",
-            "Исходный код",
-            "GitHub репозиторий Zapret KVN",
-        )
-        gh_btn = ActionButton("Открыть", "fa5s.external-link-alt", accent=False)
-        gh_btn.setProperty("noDrag", True)
-        gh_btn.setFixedHeight(36)
-        gh_btn.clicked.connect(self._open_kvn_github)
-        gh_row.set_control(gh_btn)
-        links_card.add_widget(gh_row)
+            links_group.addSettingCards([tg_card, bot_card, bypass_card, gh_card])
+            layout.addWidget(links_group)
+        else:
+            layout.addWidget(_make_section_label("Ссылки"))
 
-        layout.addWidget(links_card)
+            links_card = SettingsCard()
+
+            tg_row = SettingsRow(
+                "fa5b.telegram",
+                "Канал Zapret KVN",
+                "Новости и обновления",
+            )
+            tg_btn = ActionButton("Открыть", "fa5s.external-link-alt", accent=False)
+            tg_btn.setProperty("noDrag", True)
+            tg_btn.setFixedHeight(36)
+            tg_btn.clicked.connect(self._open_kvn_channel)
+            tg_row.set_control(tg_btn)
+            links_card.add_widget(tg_row)
+
+            bot_row = SettingsRow(
+                "fa5s.shopping-cart",
+                "Купить подписку",
+                "Оформление через Telegram-бота @zapretvpns_bot",
+            )
+            bot_btn = ActionButton("Купить", "fa5s.star", accent=True)
+            bot_btn.setProperty("noDrag", True)
+            bot_btn.setFixedHeight(36)
+            bot_btn.clicked.connect(self._open_kvn_bot)
+            bot_row.set_control(bot_btn)
+            links_card.add_widget(bot_row)
+
+            bypass_row = SettingsRow(
+                "fa5b.telegram",
+                "Канал BypassBlock",
+                "Второй канал с новостями",
+            )
+            bypass_btn = ActionButton("Открыть", "fa5s.external-link-alt", accent=False)
+            bypass_btn.setProperty("noDrag", True)
+            bypass_btn.setFixedHeight(36)
+            bypass_btn.clicked.connect(self._open_kvn_bypass)
+            bypass_row.set_control(bypass_btn)
+            links_card.add_widget(bypass_row)
+
+            gh_row = SettingsRow(
+                "fa5b.github",
+                "Исходный код",
+                "GitHub репозиторий Zapret KVN",
+            )
+            gh_btn = ActionButton("Открыть", "fa5s.external-link-alt", accent=False)
+            gh_btn.setProperty("noDrag", True)
+            gh_btn.setFixedHeight(36)
+            gh_btn.clicked.connect(self._open_kvn_github)
+            gh_row.set_control(gh_btn)
+            links_card.add_widget(gh_row)
+
+            layout.addWidget(links_card)
 
         layout.addStretch()
 
@@ -1024,6 +1201,27 @@ class AboutPage(BasePage):
     def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
         _ = force
         tokens = tokens or get_theme_tokens()
+        if self._support_discussions_card is not None:
+            try:
+                self._support_discussions_card.iconLabel.setIcon(
+                    qta.icon("fa5b.github", color=tokens.accent_hex)
+                )
+            except Exception:
+                pass
+        if self._support_telegram_card is not None:
+            try:
+                self._support_telegram_card.iconLabel.setIcon(
+                    qta.icon("fa5b.telegram", color="#229ED9")
+                )
+            except Exception:
+                pass
+        if self._support_discord_card is not None:
+            try:
+                self._support_discord_card.iconLabel.setIcon(
+                    qta.icon("fa5b.discord", color="#5865F2")
+                )
+            except Exception:
+                pass
         if self._support_icon_label is not None:
             try:
                 self._support_icon_label.setPixmap(

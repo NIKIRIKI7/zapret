@@ -14,6 +14,7 @@ try:
         SpinBox,
         InfoBadge,
         InfoLevel as _InfoLevel,
+        SettingCard as FluentSettingCard,
         SwitchSettingCard,
         StrongBodyLabel,
         BodyLabel as _BodyLabel,
@@ -27,6 +28,7 @@ except ImportError:
     _HAS_INFO_BADGE = False
     ComboBox = QComboBox  # type: ignore[assignment,misc]
     SpinBox = QSpinBox  # type: ignore[assignment,misc]
+    FluentSettingCard = None  # type: ignore[assignment,misc]
     SwitchSettingCard = None  # type: ignore[assignment,misc]
     StrongBodyLabel = QLabel  # type: ignore[assignment,misc]
     _BodyLabel = QLabel  # type: ignore[assignment,misc]
@@ -515,7 +517,7 @@ class Win11RadioOption(QWidget):
         painter.end()
 
 
-class Win11NumberRow(QWidget):
+class Win11NumberRow(FluentSettingCard if _HAS_FLUENT else QWidget):
     """Строка с числовым вводом в стиле Windows 11."""
 
     valueChanged = pyqtSignal(int)
@@ -532,39 +534,52 @@ class Win11NumberRow(QWidget):
         suffix: str = "",
         parent=None,
     ):
-        super().__init__(parent)
-
         self._icon_name = icon_name
         self._icon_color = icon_color
         self._title_label = None
         self._desc_label = None
+        self._icon_label = None
         self._applying_theme_styles = False
         initial_tokens = get_theme_tokens()
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 6, 0, 6)
-        layout.setSpacing(12)
+        if _HAS_FLUENT:
+            super().__init__(
+                self._build_icon(initial_tokens),
+                title,
+                description or None,
+                parent=parent,
+            )
+            self.setIconSize(18, 18)
+            self._icon_label = getattr(self, "iconLabel", None)
+            self._title_label = getattr(self, "titleLabel", None)
+            self._desc_label = getattr(self, "contentLabel", None)
+            layout = getattr(self, "hBoxLayout", None)
+        else:
+            super().__init__(parent)
+            layout = QHBoxLayout(self)
+            layout.setContentsMargins(0, 6, 0, 6)
+            layout.setSpacing(12)
 
-        self._icon_label = QLabel()
-        self._icon_label.setFixedSize(22, 22)
-        layout.addWidget(self._icon_label)
-        self._refresh_icon(initial_tokens)
+            self._icon_label = QLabel()
+            self._icon_label.setFixedSize(22, 22)
+            layout.addWidget(self._icon_label)
+            self._refresh_icon(initial_tokens)
 
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(1)
-        text_layout.setContentsMargins(0, 0, 0, 0)
+            text_layout = QVBoxLayout()
+            text_layout.setSpacing(1)
+            text_layout.setContentsMargins(0, 0, 0, 0)
 
-        title_label = _BodyLabel(title)
-        self._title_label = title_label
-        text_layout.addWidget(title_label)
+            title_label = _BodyLabel(title)
+            self._title_label = title_label
+            text_layout.addWidget(title_label)
 
-        if description:
-            desc_label = _CaptionLabel(description)
-            desc_label.setWordWrap(True)
-            self._desc_label = desc_label
-            text_layout.addWidget(desc_label)
+            if description:
+                desc_label = _CaptionLabel(description)
+                desc_label.setWordWrap(True)
+                self._desc_label = desc_label
+                text_layout.addWidget(desc_label)
 
-        layout.addLayout(text_layout, 1)
+            layout.addLayout(text_layout, 1)
 
         self.spinbox = SpinBox()
         self.spinbox.setMinimum(min_val)
@@ -572,11 +587,15 @@ class Win11NumberRow(QWidget):
         self.spinbox.setValue(default_val)
         self.spinbox.setSuffix(suffix)
         self.spinbox.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        if not _HAS_FLUENT:
+        if _HAS_FLUENT:
+            self.spinbox.setFixedWidth(160)
+        else:
             self.spinbox.setFixedHeight(28)
             self._apply_theme_styles(initial_tokens)
         self.spinbox.valueChanged.connect(self.valueChanged.emit)
         layout.addWidget(self.spinbox)
+        if _HAS_FLUENT:
+            layout.addSpacing(16)
         self._theme_refresh = ThemeRefreshController(
             self,
             self._apply_theme_refresh,
@@ -594,10 +613,23 @@ class Win11NumberRow(QWidget):
 
     def _refresh_icon(self, tokens=None) -> None:
         theme_tokens = tokens or get_theme_tokens()
-        try:
-            self._icon_label.setPixmap(qta.icon(self._icon_name, color=self._resolved_icon_color(theme_tokens)).pixmap(18, 18))
-        except Exception:
+        icon_label = self._icon_label
+        if icon_label is None:
             return
+        try:
+            icon_label.setIcon(self._build_icon(theme_tokens))
+        except Exception:
+            try:
+                icon_label.setPixmap(qta.icon(self._icon_name, color=self._resolved_icon_color(theme_tokens)).pixmap(18, 18))
+            except Exception:
+                return
+
+    def _build_icon(self, tokens=None) -> QIcon:
+        theme_tokens = tokens or get_theme_tokens()
+        try:
+            return qta.icon(self._icon_name, color=self._resolved_icon_color(theme_tokens))
+        except Exception:
+            return QIcon()
 
     def _apply_theme_styles(self, tokens=None) -> None:
         if _HAS_FLUENT:
@@ -655,15 +687,19 @@ class Win11NumberRow(QWidget):
 
     def set_texts(self, title: str, description: str = "") -> None:
         try:
-            if self._title_label is not None:
-                self._title_label.setText(title)
-            if self._desc_label is not None:
-                self._desc_label.setText(description)
+            if _HAS_FLUENT:
+                self.setTitle(title)
+                self.setContent(description)
+            else:
+                if self._title_label is not None:
+                    self._title_label.setText(title)
+                if self._desc_label is not None:
+                    self._desc_label.setText(description)
         except Exception:
             pass
 
 
-class Win11ComboRow(QWidget):
+class Win11ComboRow(FluentSettingCard if _HAS_FLUENT else QWidget):
     """Строка с выпадающим списком в стиле Windows 11."""
 
     currentIndexChanged = pyqtSignal(int)
@@ -678,39 +714,52 @@ class Win11ComboRow(QWidget):
         items: list | None = None,
         parent=None,
     ):
-        super().__init__(parent)
-
         self._icon_name = icon_name
         self._icon_color = icon_color
         self._title_label = None
         self._desc_label = None
+        self._icon_label = None
         self._applying_theme_styles = False
         initial_tokens = get_theme_tokens()
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 6, 0, 6)
-        layout.setSpacing(12)
+        if _HAS_FLUENT:
+            super().__init__(
+                self._build_icon(initial_tokens),
+                title,
+                description or None,
+                parent=parent,
+            )
+            self.setIconSize(18, 18)
+            self._icon_label = getattr(self, "iconLabel", None)
+            self._title_label = getattr(self, "titleLabel", None)
+            self._desc_label = getattr(self, "contentLabel", None)
+            layout = getattr(self, "hBoxLayout", None)
+        else:
+            super().__init__(parent)
+            layout = QHBoxLayout(self)
+            layout.setContentsMargins(0, 6, 0, 6)
+            layout.setSpacing(12)
 
-        self._icon_label = QLabel()
-        self._icon_label.setFixedSize(22, 22)
-        layout.addWidget(self._icon_label)
-        self._refresh_icon(initial_tokens)
+            self._icon_label = QLabel()
+            self._icon_label.setFixedSize(22, 22)
+            layout.addWidget(self._icon_label)
+            self._refresh_icon(initial_tokens)
 
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(1)
-        text_layout.setContentsMargins(0, 0, 0, 0)
+            text_layout = QVBoxLayout()
+            text_layout.setSpacing(1)
+            text_layout.setContentsMargins(0, 0, 0, 0)
 
-        title_label = _BodyLabel(title)
-        self._title_label = title_label
-        text_layout.addWidget(title_label)
+            title_label = _BodyLabel(title)
+            self._title_label = title_label
+            text_layout.addWidget(title_label)
 
-        if description:
-            desc_label = _CaptionLabel(description)
-            desc_label.setWordWrap(True)
-            self._desc_label = desc_label
-            text_layout.addWidget(desc_label)
+            if description:
+                desc_label = _CaptionLabel(description)
+                desc_label.setWordWrap(True)
+                self._desc_label = desc_label
+                text_layout.addWidget(desc_label)
 
-        layout.addLayout(text_layout, 1)
+            layout.addLayout(text_layout, 1)
 
         self.combo = ComboBox()
         self.combo.setFixedWidth(160)
@@ -725,6 +774,8 @@ class Win11ComboRow(QWidget):
         self.combo.currentIndexChanged.connect(self.currentIndexChanged.emit)
         self.combo.currentTextChanged.connect(self.currentTextChanged.emit)
         layout.addWidget(self.combo)
+        if _HAS_FLUENT:
+            layout.addSpacing(16)
         self._theme_refresh = ThemeRefreshController(
             self,
             self._apply_theme_refresh,
@@ -742,10 +793,23 @@ class Win11ComboRow(QWidget):
 
     def _refresh_icon(self, tokens=None) -> None:
         theme_tokens = tokens or get_theme_tokens()
-        try:
-            self._icon_label.setPixmap(qta.icon(self._icon_name, color=self._resolved_icon_color(theme_tokens)).pixmap(18, 18))
-        except Exception:
+        icon_label = self._icon_label
+        if icon_label is None:
             return
+        try:
+            icon_label.setIcon(self._build_icon(theme_tokens))
+        except Exception:
+            try:
+                icon_label.setPixmap(qta.icon(self._icon_name, color=self._resolved_icon_color(theme_tokens)).pixmap(18, 18))
+            except Exception:
+                return
+
+    def _build_icon(self, tokens=None) -> QIcon:
+        theme_tokens = tokens or get_theme_tokens()
+        try:
+            return qta.icon(self._icon_name, color=self._resolved_icon_color(theme_tokens))
+        except Exception:
+            return QIcon()
 
     def _apply_theme_styles(self, tokens=None) -> None:
         if _HAS_FLUENT:
@@ -845,10 +909,14 @@ class Win11ComboRow(QWidget):
 
     def set_texts(self, title: str, description: str = "") -> None:
         try:
-            if self._title_label is not None:
-                self._title_label.setText(title)
-            if self._desc_label is not None:
-                self._desc_label.setText(description)
+            if _HAS_FLUENT:
+                self.setTitle(title)
+                self.setContent(description)
+            else:
+                if self._title_label is not None:
+                    self._title_label.setText(title)
+                if self._desc_label is not None:
+                    self._desc_label.setText(description)
         except Exception:
             pass
 
