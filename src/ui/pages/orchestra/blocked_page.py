@@ -250,10 +250,9 @@ class OrchestraBlockedPage(BasePage):
         qconfig.themeChanged.connect(lambda _: self._apply_theme())
         qconfig.themeColorChanged.connect(lambda _: self._apply_theme())
 
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+        self.enable_deferred_ui_build(build=self._setup_ui, after_build=self._after_ui_built)
 
     def _after_ui_built(self) -> None:
-        self._setup_ui()
         self._apply_theme()
 
     def _tr(self, key: str, default: str, **kwargs) -> str:

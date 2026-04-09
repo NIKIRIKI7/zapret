@@ -4,19 +4,19 @@
 import os
 import re
 from string import Template
-from PyQt6.QtCore import Qt, QThread, QObject, QTimer, QEvent, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, QEvent
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QScrollArea, QFrame, QLayout, QCheckBox
 )
 import qtawesome as qta
 
+from hosts.page_controller import HostsPageController
 from .base_page import BasePage
 from ui.compat_widgets import SettingsCard
 from ui.text_catalog import tr as tr_catalog
 
 from log import log
-from utils import get_system32_path
 from ui.theme import get_theme_tokens
 from ui.theme_semantic import get_semantic_palette
 
@@ -145,59 +145,6 @@ except ImportError:
     def save_user_hosts_selection(selected_profiles: dict[str, str]) -> bool:
         return False
 
-
-
-class HostsWorker(QObject):
-    """Воркер для асинхронных операций с hosts файлом"""
-    finished = pyqtSignal(bool, str)
-
-    def __init__(self, hosts_manager, operation, payload=None):
-        super().__init__()
-        self.hosts_manager = hosts_manager
-        self.operation = operation
-        self.payload = payload
-
-    def run(self):
-        try:
-            success = False
-            message = ""
-
-            if self.operation == 'apply_selection':
-                service_dns = self.payload or {}
-                success = self.hosts_manager.apply_service_dns_selections(service_dns)
-                if success:
-                    message = "Применено"
-                else:
-                    message = getattr(self.hosts_manager, "last_status", None) or "Ошибка"
-
-            elif self.operation == 'clear_all':
-                success = self.hosts_manager.clear_hosts_file()
-                if success:
-                    message = "Hosts очищен"
-                else:
-                    message = getattr(self.hosts_manager, "last_status", None) or "Ошибка"
-
-            elif self.operation == 'adobe_add':
-                success = self.hosts_manager.add_adobe_domains()
-                if success:
-                    message = "Adobe заблокирован"
-                else:
-                    message = getattr(self.hosts_manager, "last_status", None) or "Ошибка"
-
-            elif self.operation == 'adobe_remove':
-                success = self.hosts_manager.remove_adobe_domains()
-                if success:
-                    message = "Adobe разблокирован"
-                else:
-                    message = getattr(self.hosts_manager, "last_status", None) or "Ошибка"
-
-            self.finished.emit(success, message)
-
-        except Exception as e:
-            log(f"Ошибка в HostsWorker: {e}", "ERROR")
-            self.finished.emit(False, str(e))
-
-
 def _is_fluent_combo(obj) -> bool:
     """Проверяет, является ли объект qfluentwidgets ComboBox."""
     if ComboBox is not None and isinstance(obj, ComboBox):
@@ -217,6 +164,7 @@ class HostsPage(BasePage):
             subtitle_key="page.hosts.subtitle",
         )
 
+        self._controller = HostsPageController()
         self.hosts_manager = None
         self.service_combos = {}
         self.service_icon_labels = {}
@@ -243,6 +191,7 @@ class HostsPage(BasePage):
         self._thread = None
         self._applying = False
         self._active_domains_cache = None  # Кеш активных доменов
+        self._runtime_state_cache = None
         self._last_error = None  # Последняя ошибка
         self._current_operation = None
         self._startup_initialized = False
@@ -458,16 +407,18 @@ class HostsPage(BasePage):
     def _invalidate_cache(self):
         """Сбрасывает кеш активных доменов"""
         self._active_domains_cache = None
+        self._runtime_state_cache = None
+
+    def _get_hosts_runtime_state(self):
+        if self._runtime_state_cache is not None:
+            return self._runtime_state_cache
+
+        state = self._controller.read_runtime_state(self.hosts_manager)
+        self._runtime_state_cache = state
+        return state
 
     def _get_hosts_path_str(self) -> str:
-        try:
-            if os.name == "nt":
-                sys_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
-                if sys_root:
-                    return os.path.join(sys_root, "System32", "drivers", "etc", "hosts")
-            return os.path.join(get_system32_path(), "drivers", "etc", "hosts")
-        except Exception:
-            return os.path.join(get_system32_path(), "drivers", "etc", "hosts")
+        return self._controller.get_hosts_path_str()
 
     def _sync_selections_from_hosts(self) -> None:
         """
@@ -601,29 +552,27 @@ class HostsPage(BasePage):
         """Возвращает активные домены с кешированием (чтобы не читать hosts 28 раз)"""
         if self._active_domains_cache is not None:
             return self._active_domains_cache
-        if self.hosts_manager:
-            try:
-                writable = self.hosts_manager.is_hosts_file_accessible()
-                if not writable:
-                    hosts_path = self._get_hosts_path_str()
-                    self._show_error(
-                        self._tr(
-                            "page.hosts.error.no_access.long",
-                            "Нет доступа для изменения файла hosts.\nЕсли файл редактируется вручную, возможно защитник/антивирус блокирует запись.\nПуть: {path}",
-                            path=hosts_path,
-                        )
-                    )
-                else:
-                    self._hide_error()
+        state = self._get_hosts_runtime_state()
+        if state.error_message:
+            self._show_error(
+                self._tr("page.hosts.error.read_hosts", "Ошибка чтения hosts: {error}", error=state.error_message)
+            )
+            return set()
 
-                # Даже если запись запрещена — чтение может работать: показываем реальное состояние.
-                self._active_domains_cache = self.hosts_manager.get_active_domains()
-                return self._active_domains_cache
-            except Exception as e:
-                self._show_error(
-                    self._tr("page.hosts.error.read_hosts", "Ошибка чтения hosts: {error}", error=e)
+        if not state.accessible:
+            hosts_path = self._get_hosts_path_str()
+            self._show_error(
+                self._tr(
+                    "page.hosts.error.no_access.long",
+                    "Нет доступа для изменения файла hosts.\nЕсли файл редактируется вручную, возможно защитник/антивирус блокирует запись.\nПуть: {path}",
+                    path=hosts_path,
                 )
-                return set()
+            )
+        else:
+            self._hide_error()
+
+        self._active_domains_cache = set(state.active_domains)
+        return self._active_domains_cache
         return set()
 
     def _build_ui(self):
@@ -820,8 +769,9 @@ class HostsPage(BasePage):
     def _restore_hosts_permissions(self, bar=None, btn=None):
         """Восстанавливает стандартные права доступа к файлу hosts."""
         try:
-            from hosts.hosts import restore_hosts_permissions
-            success, message = restore_hosts_permissions()
+            result = self._controller.restore_hosts_permissions()
+            success = result.success
+            message = result.message
 
             if success:
                 self._dismiss_hosts_error_bar()
@@ -863,20 +813,23 @@ class HostsPage(BasePage):
 
     def _check_hosts_access(self):
         """Проверяет доступ к hosts файлу при загрузке страницы"""
-        try:
-            if self.hosts_manager and self.hosts_manager.is_hosts_file_accessible():
-                self._hide_error()
-            else:
-                hosts_path = self._get_hosts_path_str()
-                self._show_error(
-                    self._tr(
-                        "page.hosts.error.no_access.short",
-                        "Нет доступа для изменения файла hosts. Скорее всего защитник/антивирус заблокировал запись.\nПуть: {path}",
-                        path=hosts_path,
-                    )
-                )
-        except Exception as e:
-            self._show_error(self._tr("page.hosts.error.read_hosts", "Ошибка чтения hosts: {error}", error=e))
+        state = self._get_hosts_runtime_state()
+        if state.error_message:
+            self._show_error(self._tr("page.hosts.error.read_hosts", "Ошибка чтения hosts: {error}", error=state.error_message))
+            return
+
+        if state.accessible:
+            self._hide_error()
+            return
+
+        hosts_path = self._get_hosts_path_str()
+        self._show_error(
+            self._tr(
+                "page.hosts.error.no_access.short",
+                "Нет доступа для изменения файла hosts. Скорее всего защитник/антивирус заблокировал запись.\nПуть: {path}",
+                path=hosts_path,
+            )
+        )
 
     def _build_info_note(self):
         """Информационная заметка о том, зачем нужен hosts"""
@@ -1586,7 +1539,7 @@ class HostsPage(BasePage):
         self._applying = True
         self._current_operation = operation
 
-        self._worker = HostsWorker(self.hosts_manager, operation, payload)
+        self._worker = self._controller.create_operation_worker(self.hosts_manager, operation, payload)
         self._thread = QThread()
 
         self._worker.moveToThread(self._thread)
@@ -1602,22 +1555,25 @@ class HostsPage(BasePage):
         operation = self._current_operation
         self._current_operation = None
         self._applying = False
+        completion_plan = self._controller.build_operation_completion_plan(
+            operation=operation,
+            success=success,
+            message=message,
+            hosts_path=self._get_hosts_path_str(),
+        )
 
         # Сбрасываем кеш и обновляем UI
         self._invalidate_cache()
         self._update_ui()
         self._sync_selections_from_hosts()
 
-        if success and operation == "clear_all":
+        if completion_plan.reset_profiles:
             self._reset_all_service_profiles()
 
-        if success:
+        if completion_plan.clear_error:
             self._hide_error()
         else:
-            hosts_path = self._get_hosts_path_str()
-            self._show_error(
-                self._tr("page.hosts.error.operation_with_path", "{message}\nПуть: {path}", message=message, path=hosts_path)
-            )
+            self._show_error(completion_plan.error_message)
 
     def _reset_all_service_profiles(self) -> None:
         """Сбрасывает выбор профилей в UI и user_hosts.ini (после очистки hosts)."""
@@ -1642,6 +1598,7 @@ class HostsPage(BasePage):
 
     def _update_ui(self):
         """Обновляет весь UI"""
+        runtime_state = self._get_hosts_runtime_state()
         active = self._get_active_domains()
         tokens = get_theme_tokens()
         semantic = get_semantic_palette()
@@ -1661,7 +1618,7 @@ class HostsPage(BasePage):
             self._update_profile_row_visual(name)
 
         # Adobe
-        is_adobe = self.hosts_manager.is_adobe_domains_active() if self.hosts_manager else False
+        is_adobe = runtime_state.adobe_active
         self.adobe_switch.blockSignals(True)
         self.adobe_switch.setChecked(is_adobe)
         self.adobe_switch.blockSignals(False)

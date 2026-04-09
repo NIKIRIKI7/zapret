@@ -109,7 +109,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
         self._max_check_attempts = 30
 
         self._setup_breadcrumb()
-        self.enable_deferred_ui_build(after_build=self._rebuild_current_view)
+        self.enable_deferred_ui_build(build=self._rebuild_current_view)
 
     # ------------------------------------------------------------------
     # Lifecycle

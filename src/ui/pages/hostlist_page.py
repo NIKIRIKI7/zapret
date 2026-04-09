@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from core.hostlist_page_controller import HostlistPageController
+
 try:
     from qfluentwidgets import (
         BodyLabel, CaptionLabel, InfoBar, LineEdit, MessageBox, SegmentedWidget,
@@ -124,6 +126,7 @@ class HostlistPage(BasePage):
         self._ipru_status_timer.timeout.connect(self._ipru_update_status)
 
         self._action_rows: list[dict] = []
+        self._controller = HostlistPageController()
 
         from qfluentwidgets import qconfig
         qconfig.themeChanged.connect(lambda _: self._apply_editor_styles())
@@ -647,30 +650,9 @@ class HostlistPage(BasePage):
     # Hostlist / IPset folder info
     # ──────────────────────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _is_ipset_file_name(file_name: str) -> bool:
-        lower = (file_name or "").lower()
-        return lower.startswith("ipset-") or "ipset" in lower or "subnet" in lower
-
-    @staticmethod
-    def _count_lines(folder: str, file_names: list, *, max_files: int, skip_comments: bool) -> int:
-        total = 0
-        for file_name in file_names[:max_files]:
-            try:
-                path = os.path.join(folder, file_name)
-                with open(path, "r", encoding="utf-8", errors="ignore") as fh:
-                    if skip_comments:
-                        total += sum(1 for ln in fh if ln.strip() and not ln.startswith("#"))
-                    else:
-                        total += sum(1 for _ in fh)
-            except Exception:
-                continue
-        return total
-
     def _open_lists_folder(self):
         try:
-            from config import LISTS_FOLDER
-            os.startfile(LISTS_FOLDER)
+            self._controller.open_lists_folder()
         except Exception as e:
             log(f"Ошибка открытия папки: {e}", "ERROR")
             if InfoBar:
@@ -682,8 +664,7 @@ class HostlistPage(BasePage):
 
     def _rebuild_hostlists(self):
         try:
-            from utils.hostlists_manager import startup_hostlists_check
-            startup_hostlists_check()
+            self._controller.rebuild_hostlists()
             if InfoBar:
                 InfoBar.success(
                     title=self._tr("page.hostlist.infobar.done", "Готово"),
@@ -702,33 +683,28 @@ class HostlistPage(BasePage):
 
     def _load_info(self):
         try:
-            from config import LISTS_FOLDER
-            if not os.path.exists(LISTS_FOLDER):
+            state = self._controller.load_folder_info()
+            if not state.folder_exists:
                 not_found = self._tr("page.hostlist.info.folder_not_found", "Папка листов не найдена")
                 self.hostlist_info_label.setText(not_found)
                 self.ipset_info_label.setText(not_found)
                 return
-            txt_files = [f for f in os.listdir(LISTS_FOLDER) if f.endswith(".txt")]
-            ipset_files = [f for f in txt_files if self._is_ipset_file_name(f)]
-            hostlist_files = [f for f in txt_files if f not in ipset_files]
-            hl_lines = self._count_lines(LISTS_FOLDER, hostlist_files, max_files=12, skip_comments=False)
-            ip_lines = self._count_lines(LISTS_FOLDER, ipset_files, max_files=12, skip_comments=True)
             self.hostlist_info_label.setText(
                 self._tr(
                     "page.hostlist.info.hostlist.summary",
                     "📁 Папка: {folder}\n📄 Файлов: {files_count}\n📝 Примерно строк: {lines_count}",
-                    folder=LISTS_FOLDER,
-                    files_count=len(hostlist_files),
-                    lines_count=f"{hl_lines:,}",
+                    folder=state.folder,
+                    files_count=state.hostlist_files_count,
+                    lines_count=f"{state.hostlist_lines:,}",
                 )
             )
             self.ipset_info_label.setText(
                 self._tr(
                     "page.hostlist.info.ipset.summary",
                     "📁 Папка: {folder}\n📄 IP-файлов: {files_count}\n🌐 Примерно IP/подсетей: {lines_count}",
-                    folder=LISTS_FOLDER,
-                    files_count=len(ipset_files),
-                    lines_count=f"{ip_lines:,}",
+                    folder=state.folder,
+                    files_count=state.ipset_files_count,
+                    lines_count=f"{state.ipset_lines:,}",
                 )
             )
         except Exception as e:
@@ -746,13 +722,8 @@ class HostlistPage(BasePage):
 
     def _load_domains(self):
         try:
-            from config import OTHER_USER_PATH
-            from utils.hostlists_manager import ensure_hostlists_exist
-            ensure_hostlists_exist()
-            domains: list[str] = []
-            if os.path.exists(OTHER_USER_PATH):
-                with open(OTHER_USER_PATH, "r", encoding="utf-8") as fh:
-                    domains = [ln.strip() for ln in fh if ln.strip()]
+            state = self._controller.load_domains_entries()
+            domains = state.entries
             self._d_editor.blockSignals(True)
             self._d_editor.setPlainText("\n".join(domains))
             self._d_editor.blockSignals(False)
@@ -778,8 +749,6 @@ class HostlistPage(BasePage):
 
     def _domains_save(self):
         try:
-            from config import OTHER_USER_PATH
-            os.makedirs(os.path.dirname(OTHER_USER_PATH), exist_ok=True)
             text = self._d_editor.toPlainText()
             domains: list[str] = []
             for line in text.split("\n"):
@@ -792,13 +761,7 @@ class HostlistPage(BasePage):
                 domain = self._extract_domain(line)
                 if domain and domain not in domains:
                     domains.append(domain)
-            with open(OTHER_USER_PATH, "w", encoding="utf-8") as fh:
-                fh.write("\n".join(domains) + ("\n" if domains else ""))
-            try:
-                from utils.hostlists_manager import rebuild_other_files
-                rebuild_other_files()
-            except Exception:
-                pass
+            self._controller.save_domains_entries(domains)
             log(f"Сохранено {len(domains)} строк в other.user.txt", "SUCCESS")
             self.domains_changed.emit()
         except Exception as e:
@@ -848,16 +811,8 @@ class HostlistPage(BasePage):
 
     def _domains_open_file(self):
         try:
-            from config import OTHER_USER_PATH
-            import subprocess
-            from utils.hostlists_manager import ensure_hostlists_exist
             self._domains_save()
-            ensure_hostlists_exist()
-            if os.path.exists(OTHER_USER_PATH):
-                subprocess.run(["explorer", "/select,", OTHER_USER_PATH])
-            else:
-                os.makedirs(os.path.dirname(OTHER_USER_PATH), exist_ok=True)
-                subprocess.run(["explorer", os.path.dirname(OTHER_USER_PATH)])
+            self._controller.open_domains_user_file()
         except Exception as e:
             log(f"Ошибка открытия файла: {e}", "ERROR")
             if InfoBar:
@@ -869,8 +824,7 @@ class HostlistPage(BasePage):
 
     def _domains_reset_file(self):
         try:
-            from utils.hostlists_manager import reset_other_file_from_template
-            if reset_other_file_from_template():
+            if self._controller.reset_domains_file():
                 self._load_domains()
                 if hasattr(self, "_d_status"):
                     self._d_status.setText(
@@ -938,18 +892,9 @@ class HostlistPage(BasePage):
 
     def _load_ips(self):
         try:
-            from utils.ipsets_manager import (
-                IPSET_ALL_USER_PATH,
-                ensure_ipset_all_user_file,
-                get_ipset_all_base_set,
-            )
-
-            ensure_ipset_all_user_file()
-            self._ip_base_set_cache = get_ipset_all_base_set()
-            entries: list[str] = []
-            if os.path.exists(IPSET_ALL_USER_PATH):
-                with open(IPSET_ALL_USER_PATH, "r", encoding="utf-8") as fh:
-                    entries = [ln.strip() for ln in fh if ln.strip()]
+            state = self._controller.load_ipset_all_entries()
+            self._ip_base_set_cache = state.base_set
+            entries = state.entries
             self._i_editor.blockSignals(True)
             self._i_editor.setPlainText("\n".join(entries))
             self._i_editor.blockSignals(False)
@@ -975,9 +920,6 @@ class HostlistPage(BasePage):
 
     def _ips_save(self):
         try:
-            from utils.ipsets_manager import IPSET_ALL_USER_PATH, sync_ipset_all_after_user_change
-
-            os.makedirs(os.path.dirname(IPSET_ALL_USER_PATH), exist_ok=True)
             text = self._i_editor.toPlainText()
             entries: list[str] = []
             invalid: list[str] = []
@@ -998,10 +940,7 @@ class HostlistPage(BasePage):
                             entries.append(norm)
                     else:
                         invalid.append(item)
-            with open(IPSET_ALL_USER_PATH, "w", encoding="utf-8") as fh:
-                fh.write("\n".join(entries) + ("\n" if entries else ""))
-
-            if not sync_ipset_all_after_user_change():
+            if not self._controller.save_ipset_all_entries(entries):
                 log("Не удалось быстро синхронизировать ipset-all после сохранения", "WARNING")
 
             # Show/hide error label
@@ -1100,15 +1039,8 @@ class HostlistPage(BasePage):
 
     def _ips_open_file(self):
         try:
-            from utils.ipsets_manager import IPSET_ALL_USER_PATH, ensure_ipset_all_user_file
-            import subprocess
             self._ips_save()
-            ensure_ipset_all_user_file()
-            if os.path.exists(IPSET_ALL_USER_PATH):
-                subprocess.run(["explorer", "/select,", IPSET_ALL_USER_PATH])
-            else:
-                os.makedirs(os.path.dirname(IPSET_ALL_USER_PATH), exist_ok=True)
-                subprocess.run(["explorer", os.path.dirname(IPSET_ALL_USER_PATH)])
+            self._controller.open_ipset_all_user_file()
         except Exception as e:
             log(f"Ошибка открытия ipset-all.user.txt: {e}", "ERROR")
             if InfoBar:
@@ -1355,15 +1287,9 @@ class HostlistPage(BasePage):
 
     def _load_exclusions(self):
         try:
-            from utils.netrogat_manager import (
-                ensure_netrogat_user_file,
-                get_netrogat_base_set,
-                load_netrogat,
-            )
-
-            ensure_netrogat_user_file()
-            self._excl_base_set_cache = get_netrogat_base_set()
-            domains = load_netrogat()
+            state = self._controller.load_netrogat_entries()
+            self._excl_base_set_cache = state.base_set
+            domains = state.entries
             self._excl_editor.blockSignals(True)
             self._excl_editor.setPlainText("\n".join(domains))
             self._excl_editor.blockSignals(False)
@@ -1380,19 +1306,9 @@ class HostlistPage(BasePage):
 
     def _load_ipru_exclusions(self):
         try:
-            from utils.ipsets_manager import (
-                IPSET_RU_USER_PATH,
-                ensure_ipset_ru_user_file,
-                get_ipset_ru_base_set,
-            )
-
-            ensure_ipset_ru_user_file()
-            self._ipru_base_set_cache = get_ipset_ru_base_set()
-
-            entries: list[str] = []
-            if os.path.exists(IPSET_RU_USER_PATH):
-                with open(IPSET_RU_USER_PATH, "r", encoding="utf-8") as fh:
-                    entries = [ln.strip() for ln in fh if ln.strip()]
+            state = self._controller.load_ipset_ru_entries()
+            self._ipru_base_set_cache = state.base_set
+            entries = state.entries
 
             self._ipru_editor.blockSignals(True)
             self._ipru_editor.setPlainText("\n".join(entries))
@@ -1440,7 +1356,7 @@ class HostlistPage(BasePage):
                             normalized_lines.append(norm)
                     else:
                         normalized_lines.append(item)
-            if save_netrogat(domains):
+            if self._controller.save_netrogat_entries(domains):
                 new_text = "\n".join(normalized_lines)
                 if new_text != text:
                     cursor = self._excl_editor.textCursor()
@@ -1577,16 +1493,8 @@ class HostlistPage(BasePage):
 
     def _excl_open_file(self):
         try:
-            from utils.netrogat_manager import NETROGAT_USER_PATH, ensure_netrogat_user_file
-            import subprocess
-
             self._excl_save()
-            ensure_netrogat_user_file()
-            if NETROGAT_USER_PATH and os.path.exists(NETROGAT_USER_PATH):
-                subprocess.run(["explorer", "/select,", NETROGAT_USER_PATH])
-            else:
-                from config import LISTS_FOLDER
-                subprocess.run(["explorer", LISTS_FOLDER])
+            self._controller.open_netrogat_user_file()
         except Exception as e:
             log(f"Ошибка открытия netrogat.user.txt: {e}", "ERROR")
             if InfoBar:
@@ -1598,16 +1506,8 @@ class HostlistPage(BasePage):
 
     def _excl_open_final_file(self):
         try:
-            from config import LISTS_FOLDER, NETROGAT_PATH
-            from utils.netrogat_manager import ensure_netrogat_exists
-            import subprocess
-
             self._excl_save()
-            ensure_netrogat_exists()
-            if NETROGAT_PATH and os.path.exists(NETROGAT_PATH):
-                subprocess.run(["explorer", "/select,", NETROGAT_PATH])
-            else:
-                subprocess.run(["explorer", LISTS_FOLDER])
+            self._controller.open_netrogat_final_file()
         except Exception as e:
             log(f"Ошибка открытия итогового netrogat.txt: {e}", "ERROR")
             if InfoBar:
@@ -1637,13 +1537,8 @@ class HostlistPage(BasePage):
             self._excl_editor.clear()
 
     def _excl_add_missing_defaults(self):
-        try:
-            from utils.netrogat_manager import ensure_netrogat_base_defaults
-        except ImportError:
-            return
-
         self._excl_save()
-        added = ensure_netrogat_base_defaults()
+        added = self._controller.add_missing_netrogat_defaults()
         self._excl_base_set_cache = None
         if added == 0:
             if InfoBar:
@@ -1682,9 +1577,6 @@ class HostlistPage(BasePage):
 
     def _ipru_save(self):
         try:
-            from utils.ipsets_manager import IPSET_RU_USER_PATH, sync_ipset_ru_after_user_change
-
-            os.makedirs(os.path.dirname(IPSET_RU_USER_PATH), exist_ok=True)
             text = self._ipru_editor.toPlainText()
             entries: list[str] = []
             invalid: list[str] = []
@@ -1707,10 +1599,7 @@ class HostlistPage(BasePage):
                     else:
                         invalid.append(item)
 
-            with open(IPSET_RU_USER_PATH, "w", encoding="utf-8") as fh:
-                fh.write("\n".join(entries) + ("\n" if entries else ""))
-
-            if not sync_ipset_ru_after_user_change():
+            if not self._controller.save_ipset_ru_entries(entries):
                 log("Не удалось быстро синхронизировать ipset-ru после сохранения", "WARNING")
 
             if hasattr(self, "_ipru_error_label"):
@@ -1844,16 +1733,8 @@ class HostlistPage(BasePage):
 
     def _ipru_open_file(self):
         try:
-            from config import LISTS_FOLDER
-            from utils.ipsets_manager import IPSET_RU_USER_PATH, ensure_ipset_ru_user_file
-            import subprocess
-
             self._ipru_save()
-            ensure_ipset_ru_user_file()
-            if IPSET_RU_USER_PATH and os.path.exists(IPSET_RU_USER_PATH):
-                subprocess.run(["explorer", "/select,", IPSET_RU_USER_PATH])
-            else:
-                subprocess.run(["explorer", LISTS_FOLDER])
+            self._controller.open_ipset_ru_user_file()
         except Exception as e:
             log(f"Ошибка открытия ipset-ru.user.txt: {e}", "ERROR")
             if InfoBar:
@@ -1865,16 +1746,8 @@ class HostlistPage(BasePage):
 
     def _ipru_open_final_file(self):
         try:
-            from config import LISTS_FOLDER
-            from utils.ipsets_manager import IPSET_RU_PATH, rebuild_ipset_ru_files
-            import subprocess
-
             self._ipru_save()
-            rebuild_ipset_ru_files()
-            if IPSET_RU_PATH and os.path.exists(IPSET_RU_PATH):
-                subprocess.run(["explorer", "/select,", IPSET_RU_PATH])
-            else:
-                subprocess.run(["explorer", LISTS_FOLDER])
+            self._controller.open_ipset_ru_final_file()
         except Exception as e:
             log(f"Ошибка открытия итогового ipset-ru.txt: {e}", "ERROR")
             if InfoBar:
