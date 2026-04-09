@@ -398,6 +398,8 @@ class NetworkPage(BasePage):
             self.custom_label.setText(self._tr("page.network.custom.label", "Свой:"))
         if hasattr(self, "custom_apply_btn"):
             self.custom_apply_btn.setText(self._tr("page.network.custom.apply", "OK"))
+        if hasattr(self, "ipv6_label"):
+            self.ipv6_label.setText(self._tr("page.network.custom.ipv6.label", "IPv6:"))
 
         if hasattr(self, "test_btn"):
             if self._test_in_progress:
@@ -533,14 +535,53 @@ class NetworkPage(BasePage):
         self.custom_secondary.setFixedWidth(110)
         self.custom_secondary.returnPressed.connect(self._apply_custom_dns_quick)
         custom_layout.addWidget(self.custom_secondary)
-        
+
+        # Разделитель между IPv4 и IPv6
+        ipv6_label_text = "IPv6:"
+        if _HAS_FLUENT_LABELS:
+            self.ipv6_label = BodyLabel(ipv6_label_text)
+        else:
+            self.ipv6_label = QLabel(ipv6_label_text)
+            self.ipv6_label.setStyleSheet(f"color: {tokens.fg_muted}; font-size: 12px; margin-left: 8px;")
+        custom_layout.addWidget(self.ipv6_label)
+
+        self.custom_primary_v6 = LineEdit()
+        self.custom_primary_v6.setPlaceholderText("2001:4860:4860::8888")
+        self.custom_primary_v6.setFixedWidth(180)
+        self.custom_primary_v6.returnPressed.connect(self._apply_custom_dns_quick)
+        custom_layout.addWidget(self.custom_primary_v6)
+
+        self.custom_secondary_v6 = LineEdit()
+        self.custom_secondary_v6.setPlaceholderText("2620:119:35::35")
+        self.custom_secondary_v6.setFixedWidth(180)
+        self.custom_secondary_v6.returnPressed.connect(self._apply_custom_dns_quick)
+        custom_layout.addWidget(self.custom_secondary_v6)
+
         self.custom_apply_btn = ActionButton(self._tr("page.network.custom.apply", "OK"), "fa5s.check")
         self.custom_apply_btn.setFixedSize(70, 26)
         self.custom_apply_btn.clicked.connect(self._apply_custom_dns_quick)
         custom_layout.addWidget(self.custom_apply_btn)
-        
+
+        # IPv6 connectivity status indicator
+        self.ipv6_status_icon = QLabel()
+        self.ipv6_status_icon.setFixedSize(16, 16)
+        self.ipv6_status_icon.setToolTip(self._tr(
+            "page.network.ipv6.status.tooltip",
+            "Индикатор доступности IPv6"
+        ))
+        custom_layout.addSpacing(8)
+        custom_layout.addWidget(self.ipv6_status_icon)
+
+        self.ipv6_status_label = CaptionLabel("") if _HAS_FLUENT_LABELS else QLabel("")
+        self.ipv6_status_label.setStyleSheet(f"color: {tokens.fg_muted}; font-size: 10px;")
+        self.ipv6_status_label.setToolTip(self._tr(
+            "page.network.ipv6.status.tooltip",
+            "Показывает, доступен ли IPv6 от вашего провайдера"
+        ))
+        custom_layout.addWidget(self.ipv6_status_label)
+
         custom_layout.addStretch()
-        
+
         self.custom_card.add_layout(custom_layout)
         self.custom_card.hide()
         self.add_widget(self.custom_card)
@@ -606,6 +647,38 @@ class NetworkPage(BasePage):
         except Exception as e:
             log(f"Ошибка проверки IPv6 у провайдера: {e}", "DEBUG")
             return False
+
+    def _update_ipv6_status_indicator(self):
+        """Обновляет индикатор статуса IPv6"""
+        if not hasattr(self, 'ipv6_status_icon') or not hasattr(self, 'ipv6_status_label'):
+            return
+
+        tokens = get_theme_tokens()
+        
+        if self._ipv6_available:
+            # IPv6 доступен - зелёная иконка
+            self.ipv6_status_icon.setPixmap(
+                qta.icon('fa5s.check-circle', color='#4caf50').pixmap(16, 16)
+            )
+            self.ipv6_status_icon.setToolTip(self._tr(
+                "page.network.ipv6.status.available",
+                "IPv6 доступен"
+            ))
+            self.ipv6_status_label.setText(self._tr(
+                "page.network.ipv6.status.available.label",
+                "IPv6"
+            ))
+        else:
+            # IPv6 недоступен - серая иконка
+            self.ipv6_status_icon.setPixmap(
+                qta.icon('fa5s.times-circle', color=tokens.fg_faint).pixmap(16, 16)
+            )
+            self.ipv6_status_icon.setToolTip(self._tr(
+                "page.network.ipv6.status.unavailable",
+                "IPv6 недоступен от провайдера"
+            ))
+            self.ipv6_status_label.setText("")
+
     
     def _load_data(self):
         """Загружает данные в фоне"""
@@ -613,7 +686,8 @@ class NetworkPage(BasePage):
             from dns.dns_core import DNSManager, _normalize_alias, refresh_exclusion_cache
 
             self._ipv6_available = self._detect_ipv6_availability()
-            
+            self._update_ipv6_status_indicator()
+
             refresh_exclusion_cache()
             self._dns_manager = DNSManager()
             
@@ -805,6 +879,10 @@ class NetworkPage(BasePage):
             self.custom_primary.setText(current_dns_v4[0] if current_dns_v4 else "")
         if hasattr(self, 'custom_secondary'):
             self.custom_secondary.setText(current_dns_v4[1] if len(current_dns_v4) > 1 else "")
+        if hasattr(self, 'custom_primary_v6'):
+            self.custom_primary_v6.setText(current_dns_v6[0] if current_dns_v6 else "")
+        if hasattr(self, 'custom_secondary_v6'):
+            self.custom_secondary_v6.setText(current_dns_v6[1] if len(current_dns_v6) > 1 else "")
 
         self._selected_provider = None
     
@@ -941,39 +1019,69 @@ class NetworkPage(BasePage):
         self._refresh_adapters_dns()
     
     def _apply_custom_dns_quick(self):
-        """Быстрое применение пользовательского DNS"""
+        """Быстрое применение пользовательского DNS (IPv4 + IPv6)"""
+        from utils import IPValidator
+        
         # Если Force DNS активен - подсвечиваем карточку Force DNS
         if self._force_dns_active:
             self._highlight_force_dns()
             return
-        
+
         if not self._dns_manager:
             return
-        
-        primary = self.custom_primary.text().strip()
-        if not primary:
+
+        primary_v4 = self.custom_primary.text().strip()
+        if not primary_v4:
             return
-        
-        secondary = self.custom_secondary.text().strip() or None
-        
+
+        # Валидация IPv4
+        if not IPValidator.is_valid_ipv4(primary_v4):
+            log(f"DNS: Неверный формат IPv4: {primary_v4}", "WARNING")
+            return
+
+        secondary_v4 = self.custom_secondary.text().strip() or None
+        if secondary_v4 and not IPValidator.is_valid_ipv4(secondary_v4):
+            log(f"DNS: Неверный формат IPv4 (вторичный): {secondary_v4}", "WARNING")
+            return
+
         self._clear_selection()
         self.custom_indicator.setStyleSheet(DNSProviderCard._indicator_on())
         self._set_dns_card_selected(self.custom_card, True)
-        
+
         adapters = self._get_selected_adapters()
         if not adapters:
             return
-        
+
         success = 0
         for adapter in adapters:
-            ok, _ = self._dns_manager.set_custom_dns(adapter, primary, secondary, "IPv4")
-            if ok:
+            # Применяем IPv4
+            ok_v4, _ = self._dns_manager.set_custom_dns(adapter, primary_v4, secondary_v4, "IPv4")
+
+            # Применяем IPv6 (если введены адреса)
+            ok_v6 = True
+            primary_v6 = self.custom_primary_v6.text().strip()
+            if primary_v6:
+                # Валидация IPv6
+                if not IPValidator.is_valid_ipv6(primary_v6):
+                    log(f"DNS: Неверный формат IPv6: {primary_v6}", "WARNING")
+                    ok_v6 = False
+                else:
+                    secondary_v6 = self.custom_secondary_v6.text().strip() or None
+                    if secondary_v6 and not IPValidator.is_valid_ipv6(secondary_v6):
+                        log(f"DNS: Неверный формат IPv6 (вторичный): {secondary_v6}", "WARNING")
+                        ok_v6 = False
+                    else:
+                        ok_v6, _ = self._dns_manager.set_custom_dns(
+                            adapter, primary_v6, secondary_v6, "IPv6"
+                        )
+
+            if ok_v4 and ok_v6:
                 success += 1
         
         self._dns_manager.flush_dns_cache()
         
         if success == len(adapters):
-            log(f"DNS: {primary} применён к {success} адаптерам", "INFO")
+            log(f"DNS: {primary_v4} (IPv4+IPv6) применён к {success} адаптерам", "INFO")
         
         # Обновляем отображение DNS у адаптеров
         self._refresh_adapters_dns()
