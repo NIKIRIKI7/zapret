@@ -22,7 +22,6 @@ except ImportError:
 from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QPixmap, QPainter, QTransform, QIcon
 import qtawesome as qta
 import os
-import glob
 import re
 import threading
 import queue
@@ -32,11 +31,9 @@ from .base_page import BasePage, ScrollBlockingTextEdit
 from ui.compat_widgets import SettingsCard, ActionButton, set_tooltip
 from ui.text_catalog import tr as tr_catalog
 from ui.theme import get_theme_tokens
-from log import log, global_logger, LOG_FILE, cleanup_old_logs
+from log import log
+from log.logs_page_controller import LogsPageController
 from log_tail import LogTailWorker
-from config import LOGS_FOLDER, MAX_LOG_FILES, MAX_DEBUG_LOG_FILES, get_winws_exe_for_method
-from launcher_common import get_current_runner
-from support_request_bundle import prepare_support_request
 
 # Паттерны для определения РЕАЛЬНЫХ ошибок (строгие)
 ERROR_PATTERNS = [
@@ -188,7 +185,8 @@ class LogsPage(BasePage):
         
         self._thread = None
         self._worker = None
-        self.current_log_file = getattr(global_logger, "log_file", LOG_FILE)
+        self._controller = LogsPageController()
+        self.current_log_file = self._controller.get_current_log_file()
         self._error_pattern = re.compile('|'.join(ERROR_PATTERNS))
         self._exclude_pattern = re.compile('|'.join(EXCLUDE_PATTERNS), re.IGNORECASE)
 
@@ -210,6 +208,8 @@ class LogsPage(BasePage):
         self._info_icon_label = None
         self._orchestra_icon_label = None
         self._orchestra_text_label = None
+        self._send_status_text = ""
+        self._send_status_tone = "neutral"
 
         # Winws output worker
         self._winws_thread = None
@@ -370,24 +370,55 @@ class LogsPage(BasePage):
         # Orchestra mode indicator (Send tab, lazy-init)
         if self._orchestra_icon_label is not None:
             try:
-                _orch_purple = "#7c3aed" if tokens.is_light else "#a855f7"
-                self._orchestra_icon_label.setPixmap(
-                    qta.icon('fa5s.brain', color=_orch_purple).pixmap(16, 16)
-                )
-                if self._orchestra_text_label is not None:
-                    self._orchestra_text_label.setStyleSheet(
-                        f"color: {_orch_purple}; font-size: 12px; font-weight: 600; background: transparent;"
-                    )
-                self.orchestra_mode_container.setStyleSheet(
-                    "QWidget {"
-                    f" background-color: {'rgba(124, 58, 237, 0.12)' if tokens.is_light else 'rgba(168, 85, 247, 0.15)'};"
-                    " border-radius: 8px;"
-                    " }"
-                )
+                self._render_orchestra_banner_style(tokens)
             except Exception:
                 pass
 
         # send_status_label shows the result of opening support links/folders
+        try:
+            self._render_send_status_label(tokens)
+        except Exception:
+            pass
+
+    def _render_orchestra_banner_style(self, tokens=None) -> None:
+        theme_tokens = tokens or get_theme_tokens()
+        if getattr(self, "orchestra_mode_container", None) is None:
+            return
+
+        accent = "#7c3aed" if theme_tokens.is_light else "#a855f7"
+        bg = "rgba(124, 58, 237, 0.12)" if theme_tokens.is_light else "rgba(168, 85, 247, 0.15)"
+
+        if self._orchestra_icon_label is not None:
+            self._orchestra_icon_label.setPixmap(qta.icon('fa5s.brain', color=accent).pixmap(16, 16))
+        if self._orchestra_text_label is not None:
+            self._orchestra_text_label.setStyleSheet(
+                f"color: {accent}; font-size: 12px; font-weight: 600; background: transparent;"
+            )
+        self.orchestra_mode_container.setStyleSheet(
+            "QWidget {"
+            f" background-color: {bg};"
+            " border-radius: 8px;"
+            " }"
+        )
+
+    def _render_send_status_label(self, tokens=None) -> None:
+        label = getattr(self, "send_status_label", None)
+        if label is None:
+            return
+
+        theme_tokens = tokens or get_theme_tokens()
+        text = str(getattr(self, "_send_status_text", "") or "")
+        tone = str(getattr(self, "_send_status_tone", "neutral") or "neutral").strip().lower()
+
+        label.setText(text)
+        if not text:
+            label.setStyleSheet("")
+            return
+
+        color = theme_tokens.accent_hex
+        if tone == "error":
+            color = "#f87171" if not theme_tokens.is_light else "#dc2626"
+        label.setStyleSheet(f"color: {color}; font-size: 11px;")
 
     def _update_tab_styles(self) -> None:
         """No-op — Pivot manages its own indicator."""
@@ -537,6 +568,7 @@ class LogsPage(BasePage):
         self._retranslate_logs_tab()
         if self._send_tab_initialized:
             self._retranslate_send_tab()
+            self._render_send_status_label()
 
     def _set_card_title(self, card: SettingsCard, text: str) -> None:
         try:
@@ -1003,7 +1035,7 @@ class LogsPage(BasePage):
             return
 
         try:
-            exe_name = os.path.basename(get_winws_exe_for_method(self._get_launch_method())) or "winws.exe"
+            exe_name = self._controller.resolve_winws_exe_name(self._get_launch_method())
         except Exception:
             exe_name = "winws.exe"
 
@@ -1025,63 +1057,14 @@ class LogsPage(BasePage):
             - "direct" для StrategyRunner
             - None если процесс не запущен
         """
-        launch_method = self._get_launch_method()
-
-        orchestra_runner = self._get_orchestra_runner()
-        direct_runner = get_current_runner()
-
-        orchestra_running = bool(orchestra_runner and orchestra_runner.is_running())
-        direct_running = bool(direct_runner and direct_runner.is_running())
-
-        # В режиме оркестратора отдаём приоритет orchestra_runner
-        if launch_method == "orchestra":
-            if orchestra_running:
-                return "orchestra", orchestra_runner
-            if direct_running:
-                return "direct", direct_runner
-            return None, None
-
-        # В остальных режимах приоритет у direct runner,
-        # но оставляем fallback на orchestra_runner для редких переходных состояний.
-        if direct_running:
-            return "direct", direct_runner
-        if orchestra_running:
-            return "orchestra", orchestra_runner
-        return None, None
+        return self._controller.get_running_runner_source(
+            self._get_launch_method(),
+            self._get_orchestra_runner(),
+        )
 
     def _get_runner_pid(self, runner):
         """Возвращает PID для любого типа runner'а"""
-        if not runner:
-            return '?'
-
-        try:
-            get_pid = getattr(runner, 'get_pid', None)
-            if callable(get_pid):
-                pid = get_pid()
-                if pid:
-                    return pid
-        except Exception:
-            pass
-
-        try:
-            get_info = getattr(runner, 'get_current_strategy_info', None)
-            if callable(get_info):
-                info = get_info()
-                pid = info.get('pid') if isinstance(info, dict) else None
-                if pid:
-                    return pid
-        except Exception:
-            pass
-
-        try:
-            process = getattr(runner, 'running_process', None)
-            pid = getattr(process, 'pid', None)
-            if pid:
-                return pid
-        except Exception:
-            pass
-
-        return '?'
+        return self._controller.get_runner_pid(runner)
 
     def _get_orchestra_log_path(self) -> str:
         """
@@ -1091,41 +1074,7 @@ class LogsPage(BasePage):
         1. Текущий активный лог (если оркестратор запущен)
         2. Последний сохранённый лог из истории
         """
-        try:
-            runner = self._get_orchestra_runner()
-            if runner:
-                # 1. Пробуем текущий активный лог
-                if runner.current_log_id and runner.debug_log_path:
-                    if os.path.exists(runner.debug_log_path):
-                        return runner.debug_log_path
-
-                # 2. Если текущего нет - берём последний из истории
-                logs = runner.get_log_history()
-                if logs:
-                    # Логи отсортированы по дате (новые первые)
-                    latest_log = logs[0]
-                    log_path = os.path.join(LOGS_FOLDER, latest_log['filename'])
-                    if os.path.exists(log_path):
-                        return log_path
-
-        except Exception as e:
-            log(f"Ошибка получения пути лога оркестратора: {e}", "DEBUG")
-
-        # 3. Fallback: ищем любой orchestra_*.log в папке логов
-        try:
-            import glob as glob_module
-            pattern = os.path.join(LOGS_FOLDER, "orchestra_*.log")
-            log(f"Поиск лога оркестратора (fallback): {pattern}", "DEBUG")
-            files = sorted(glob_module.glob(pattern), key=os.path.getmtime, reverse=True)
-            log(f"Найдено файлов: {len(files)}", "DEBUG")
-            if files:
-                log(f"Найден лог оркестратора (fallback): {os.path.basename(files[0])}", "DEBUG")
-                return files[0]
-        except Exception as e:
-            log(f"Ошибка fallback поиска лога: {e}", "DEBUG")
-
-        log("Лог оркестратора не найден для отправки", "WARNING")
-        return None
+        return self._controller.get_orchestra_log_path(self._get_orchestra_runner())
 
     def _update_orchestra_indicator(self):
         """Обновляет видимость индикатора режима оркестратора"""
@@ -1134,20 +1083,9 @@ class LogsPage(BasePage):
 
     def _prepare_support_from_logs(self):
         try:
-            candidate_paths = [
-                self.current_log_file,
-                getattr(global_logger, "log_file", LOG_FILE),
-                self._get_orchestra_log_path(),
-                os.path.join(LOGS_FOLDER, "commands_full.log"),
-                os.path.join(LOGS_FOLDER, "last_command.txt"),
-            ]
-
-            result = prepare_support_request(
-                bundle_prefix="support_logs",
-                context_label="Логи приложения",
-                candidate_paths=candidate_paths,
-                recent_patterns=("zapret_winws2_debug_*.log", "blockcheck_run_*.log"),
-                extra_note="Если проблема связана с оркестратором, в архив по возможности добавлен и его свежий лог.",
+            result = self._controller.prepare_support_bundle(
+                current_log_file=self.current_log_file,
+                orchestra_runner=self._get_orchestra_runner(),
             )
 
             if result.zip_path:
@@ -1164,12 +1102,12 @@ class LogsPage(BasePage):
                 status_parts.append("папка открыта")
 
             if status_parts:
-                self.send_status_label.setText(" • ".join(status_parts))
-                self.send_status_label.setStyleSheet(
-                    f"color: {get_theme_tokens().accent_hex}; font-size: 11px;"
-                )
+                self._send_status_text = " • ".join(status_parts)
+                self._send_status_tone = "success"
             else:
-                self.send_status_label.setText("Подготовка завершена")
+                self._send_status_text = "Подготовка завершена"
+                self._send_status_tone = "success"
+            self._render_send_status_label()
 
             if InfoBar:
                 archive_name = os.path.basename(result.zip_path) if result.zip_path else "архив не создан"
@@ -1183,8 +1121,9 @@ class LogsPage(BasePage):
                 )
         except Exception as e:
             log(f"Ошибка подготовки обращения из логов: {e}", "ERROR")
-            self.send_status_label.setText("Ошибка подготовки")
-            self.send_status_label.setStyleSheet("color: #f87171; font-size: 11px;")
+            self._send_status_text = "Ошибка подготовки"
+            self._send_status_tone = "error"
+            self._render_send_status_label()
             if InfoBar:
                 InfoBar.warning(
                     title="Ошибка",
@@ -1232,36 +1171,18 @@ class LogsPage(BasePage):
         self.log_combo.clear()
         
         try:
-            if run_cleanup:
-                # Очищаем старые логи перед обновлением списка
-                deleted, errors, total = cleanup_old_logs(LOGS_FOLDER, MAX_LOG_FILES)
-                if deleted > 0:
-                    log(f"🗑️ Удалено старых логов: {deleted} из {total}", "INFO")
-                if errors:
-                    log(f"⚠️ Ошибки при удалении логов: {errors[:3]}", "DEBUG")
-            
-            # Получаем оба формата логов
-            log_files = []
-            log_files.extend(glob.glob(os.path.join(LOGS_FOLDER, "zapret_log_*.txt")))
-            log_files.extend(glob.glob(os.path.join(LOGS_FOLDER, "zapret_[0-9]*.log")))
-            log_files.extend(glob.glob(os.path.join(LOGS_FOLDER, "blockcheck_run_*.log")))
-            log_files.sort(key=os.path.getmtime, reverse=True)
-            
-            current_log = getattr(global_logger, "log_file", LOG_FILE)
+            state = self._controller.list_logs(run_cleanup=run_cleanup)
+            if run_cleanup and state.cleanup_deleted > 0:
+                log(f"🗑️ Удалено старых логов: {state.cleanup_deleted} из {state.cleanup_total}", "INFO")
+            if run_cleanup and state.cleanup_errors:
+                log(f"⚠️ Ошибки при удалении логов: {state.cleanup_errors[:3]}", "DEBUG")
+
             current_index = 0
-            
-            for i, log_path in enumerate(log_files):
-                filename = os.path.basename(log_path)
-                size_kb = os.path.getsize(log_path) / 1024
-                
-                # Помечаем текущий лог
-                if log_path == current_log:
-                    display = f"📍 {filename} ({size_kb:.1f} KB) - ТЕКУЩИЙ"
-                    current_index = i
-                else:
-                    display = f"{filename} ({size_kb:.1f} KB)"
-                
-                self.log_combo.addItem(display, userData=log_path)
+
+            for entry in state.entries:
+                if entry["is_current"]:
+                    current_index = entry["index"]
+                self.log_combo.addItem(entry["display"], userData=entry["path"])
             
             self.log_combo.setCurrentIndex(current_index)
             
@@ -1622,24 +1543,14 @@ class LogsPage(BasePage):
     def _open_folder(self):
         """Открывает папку с логами"""
         try:
-            import subprocess
-            subprocess.run(['explorer', LOGS_FOLDER], check=False)
+            self._controller.open_logs_folder()
         except Exception as e:
             log(f"Ошибка открытия папки: {e}", "ERROR")
             
     def _update_stats(self):
         """Обновляет статистику"""
         try:
-            # Считаем оба формата логов
-            # Основные логи приложения
-            app_logs = glob.glob(os.path.join(LOGS_FOLDER, "zapret_log_*.txt"))
-            app_logs.extend(glob.glob(os.path.join(LOGS_FOLDER, "zapret_[0-9]*.log")))
-            app_logs.extend(glob.glob(os.path.join(LOGS_FOLDER, "blockcheck_run_*.log")))
-            # Debug логи winws2
-            debug_logs = glob.glob(os.path.join(LOGS_FOLDER, "zapret_winws2_debug_*.log"))
-
-            all_files = app_logs + debug_logs
-            total_size = sum(os.path.getsize(f) for f in all_files) / 1024 / 1024
+            stats = self._controller.build_stats()
 
             self.stats_label.setText(
                 tr_catalog(
@@ -1647,11 +1558,11 @@ class LogsPage(BasePage):
                     language=self._ui_language,
                     default="📊 Логи: {logs} (макс {max_logs}) | 🔧 Debug: {debug} (макс {max_debug}) | 💾 Размер: {size:.2f} MB",
                 ).format(
-                    logs=len(app_logs),
-                    max_logs=MAX_LOG_FILES,
-                    debug=len(debug_logs),
-                    max_debug=MAX_DEBUG_LOG_FILES,
-                    size=total_size,
+                    logs=stats.app_logs,
+                    max_logs=stats.max_logs,
+                    debug=stats.debug_logs,
+                    max_debug=stats.max_debug_logs,
+                    size=stats.total_size_mb,
                 )
             )
         except Exception as e:

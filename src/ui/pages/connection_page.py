@@ -92,9 +92,9 @@ class ConnectionTestPage(BasePage):
         self.container_layout.setSpacing(14)
         self.container_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+        self.enable_deferred_ui_build(build=self._build_page_ui)
 
-    def _after_ui_built(self) -> None:
+    def _build_page_ui(self) -> None:
         self._build_header()
         self._build_controls()
         self._build_log_viewer()

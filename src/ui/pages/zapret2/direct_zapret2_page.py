@@ -139,7 +139,7 @@ class Zapret2StrategiesPageNew(BasePage):
         self.current_strategy_label = BodyLabel(
             tr_catalog("page.z2_direct.current.not_selected", language=self._ui_language, default="Не выбрана")
         )
-        self.enable_deferred_ui_build(after_build=self._build_content)
+        self.enable_deferred_ui_build(build=self._build_content)
 
     def _rebuild_breadcrumb(self) -> None:
         """Restore full breadcrumb path (BreadcrumbBar deletes items on back-click)."""

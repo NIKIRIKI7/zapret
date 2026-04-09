@@ -676,13 +676,12 @@ class StrategyDetailPage(BasePage):
         self._syndata_save_timer = QTimer(self)
         self._syndata_save_timer.setSingleShot(True)
         self._syndata_save_timer.timeout.connect(self._flush_syndata_settings_save)
-        self.enable_deferred_ui_build(after_build=self._after_content_built)
+        self.enable_deferred_ui_build(build=self._build_content, after_build=self._after_content_built)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         return _tr_text(self._ui_language, key, default, **kwargs)
 
     def _after_content_built(self) -> None:
-        self._build_content()
         self._content_built = True
 
         # Close hover/pinned preview when the main window hides/deactivates (e.g. tray).

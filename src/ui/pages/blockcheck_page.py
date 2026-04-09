@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
-from datetime import datetime
-from typing import Any
 
 import threading
 
@@ -13,8 +10,8 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QObject, QSize
 from PyQt6.QtGui import QFont, QColor
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy, QFrame
 
+from blockcheck.page_controller import BlockcheckPageController
 from ui.pages.base_page import BasePage, ScrollBlockingTextEdit
-from ui.support_request_actions import prepare_blockcheck_support_request
 from ui.text_catalog import tr as tr_catalog
 
 try:
@@ -237,6 +234,7 @@ class BlockcheckPage(BasePage):
         self.setObjectName("BlockcheckPage")
 
         self._worker: BlockcheckWorker | None = None
+        self._controller = BlockcheckPageController()
         self._last_report = None
         self._run_log_file: str | None = None
         self._tab_widgets: list[QWidget] = []
@@ -737,56 +735,16 @@ class BlockcheckPage(BasePage):
     # Start / Stop
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _make_run_log_path(mode: str) -> str:
-        """Build per-run blockcheck log path in logs folder."""
-        from config import LOGS_FOLDER
-
-        log_dir = LOGS_FOLDER
-        try:
-            from log import global_logger
-            active_log = getattr(global_logger, "log_file", None)
-            if isinstance(active_log, str) and active_log.strip():
-                resolved_dir = os.path.dirname(active_log)
-                if resolved_dir:
-                    log_dir = resolved_dir
-        except Exception:
-            pass
-
-        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        raw_mode = str(mode or "full").strip().lower()
-        safe_mode = "".join(ch if (ch.isalnum() or ch in ("_", "-")) else "_" for ch in raw_mode) or "full"
-        return os.path.join(log_dir, f"blockcheck_run_{ts}_{safe_mode}.log")
-
     def _start_run_log(self, mode: str, extra_domains: list[str]) -> None:
         """Create a dedicated history log for current blockcheck run."""
-        self._run_log_file = self._make_run_log_path(mode)
-        try:
-            log_dir = os.path.dirname(self._run_log_file)
-            os.makedirs(log_dir, exist_ok=True)
-            with open(self._run_log_file, "w", encoding="utf-8-sig") as f:
-                f.write(f"=== Blockcheck Run Log ({datetime.now():%Y-%m-%d %H:%M:%S}) ===\n")
-                f.write(f"Mode: {mode}\n")
-                f.write(f"Extra domains: {len(extra_domains)}\n")
-                if extra_domains:
-                    f.write(f"Domains: {', '.join(extra_domains)}\n")
-                f.write("=" * 60 + "\n\n")
-        except Exception as e:
-            logger.warning("Failed to create blockcheck run log: %s", e)
-            self._run_log_file = None
+        state = self._controller.start_run_log(mode, extra_domains)
+        self._run_log_file = state.path
+        if not state.created:
+            logger.warning("Failed to create blockcheck run log")
 
     def _append_run_log(self, message: str) -> None:
         """Append line(s) to current blockcheck run log."""
-        if not self._run_log_file:
-            return
-        try:
-            text = str(message or "")
-            if not text.endswith("\n"):
-                text += "\n"
-            with open(self._run_log_file, "a", encoding="utf-8-sig") as f:
-                f.write(text)
-        except Exception:
-            pass
+        self._controller.append_run_log(self._run_log_file, message)
 
     def _on_start(self):
         if self._worker and self._worker.is_running:
@@ -1040,7 +998,7 @@ class BlockcheckPage(BasePage):
         extra_domains = self._get_extra_domains()
 
         try:
-            feedback = prepare_blockcheck_support_request(
+            feedback = self._controller.prepare_support(
                 run_log_file=self._run_log_file,
                 mode_label=mode_label,
                 extra_domains=extra_domains,
@@ -1532,8 +1490,7 @@ class BlockcheckPage(BasePage):
     def _load_domain_chips(self):
         """Load persisted user domains and create chips."""
         try:
-            from blockcheck.targets import load_user_domains
-            for domain in load_user_domains():
+            for domain in self._controller.load_user_domains():
                 self._add_chip(domain)
         except Exception:
             pass
@@ -1544,11 +1501,8 @@ class BlockcheckPage(BasePage):
         if not text:
             return
         try:
-            from blockcheck.targets import add_user_domain
-            if add_user_domain(text):
-                # Normalize for display
-                from blockcheck.targets import _normalize_domain
-                normalized = _normalize_domain(text)
+            normalized = self._controller.add_user_domain(text)
+            if normalized:
                 self._add_chip(normalized)
                 self._domain_input.clear()
             else:
@@ -1568,8 +1522,7 @@ class BlockcheckPage(BasePage):
     def _on_remove_domain(self, domain: str):
         """Remove a domain chip and delete from persistence."""
         try:
-            from blockcheck.targets import remove_user_domain
-            remove_user_domain(domain)
+            self._controller.remove_user_domain(domain)
         except Exception:
             pass
         # Remove chip widget

@@ -82,7 +82,7 @@ class Zapret1StrategiesPage(BasePage):
         self._selected_preset_file_name = ""
 
         self._setup_breadcrumb()
-        self.enable_deferred_ui_build(after_build=self._build_content)
+        self.enable_deferred_ui_build(build=self._build_content)
 
     # ------------------------------------------------------------------
     # Breadcrumb

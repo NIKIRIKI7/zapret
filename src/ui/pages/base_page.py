@@ -155,6 +155,7 @@ class BasePage(_FluentScrollArea):
         self._section_title_bindings: list[tuple[object, str, str]] = []
         self._deferred_ui_build_enabled = False
         self._deferred_ui_build_done = True
+        self._deferred_ui_build_callable = None
         self._deferred_ui_after_build = None
 
         # Ensure objectName is set (required by FluentWindow.addSubInterface)
@@ -226,7 +227,7 @@ class BasePage(_FluentScrollArea):
         else:
             self.subtitle_label = None
 
-    def enable_deferred_ui_build(self, *, after_build=None) -> None:
+    def enable_deferred_ui_build(self, *, build=None, after_build=None) -> None:
         """Переводит страницу на канонический deferred-build путь.
 
         После этого основной UI страницы должен собираться не в `__init__`,
@@ -235,6 +236,7 @@ class BasePage(_FluentScrollArea):
         """
         self._deferred_ui_build_enabled = True
         self._deferred_ui_build_done = False
+        self._deferred_ui_build_callable = build
         self._deferred_ui_after_build = after_build
 
     def is_deferred_ui_build_pending(self) -> bool:
@@ -244,7 +246,11 @@ class BasePage(_FluentScrollArea):
         if not self.is_deferred_ui_build_pending():
             return False
 
-        builder = getattr(self, "_build_ui", None)
+        builder = getattr(self, "_deferred_ui_build_callable", None)
+        if not callable(builder):
+            builder = getattr(self, "_build_ui", None)
+        after_build = getattr(self, "_deferred_ui_after_build", None)
+
         if not callable(builder):
             self._deferred_ui_build_done = True
             return False
@@ -252,7 +258,6 @@ class BasePage(_FluentScrollArea):
         builder()
         self._deferred_ui_build_done = True
 
-        after_build = getattr(self, "_deferred_ui_after_build", None)
         if callable(after_build):
             after_build()
 
@@ -278,15 +283,6 @@ class BasePage(_FluentScrollArea):
             content = getattr(self, "content", None)
             if content is not None:
                 content.ensurePolished()
-        except Exception:
-            pass
-
-        try:
-            for child in self.findChildren(QWidget):
-                try:
-                    child.ensurePolished()
-                except Exception:
-                    pass
         except Exception:
             pass
 
@@ -333,30 +329,12 @@ class BasePage(_FluentScrollArea):
             pass
 
         try:
-            for child in self.findChildren(QWidget):
-                try:
-                    style = child.style()
-                    if style is not None:
-                        style.unpolish(child)
-                        style.polish(child)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        try:
             self.updateGeometry()
             self.update()
             content = getattr(self, "content", None)
             if content is not None:
                 content.updateGeometry()
                 content.update()
-            for child in self.findChildren(QWidget):
-                try:
-                    child.updateGeometry()
-                    child.update()
-                except Exception:
-                    pass
         except Exception:
             pass
 
