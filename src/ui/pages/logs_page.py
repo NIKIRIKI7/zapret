@@ -1092,14 +1092,8 @@ class LogsPage(BasePage):
                     parent=self.window(),
                 )
         
-    def showEvent(self, event):
-        """При показе страницы запускаем мониторинг"""
-        super().showEvent(event)
-
-        # Spontaneous showEvent = система восстановила окно (из трея/свёрнутого).
-        # Не перезапускаем workers/таймеры при простом восстановлении окна.
-        if event.spontaneous():
-            return
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         if not self._logs_tab_initialized:
             self._logs_tab_initialized = True
             # Делаем тяжелые операции после первого показа страницы, чтобы UI не "подвисал" при переходе.
@@ -1110,9 +1104,7 @@ class LogsPage(BasePage):
         # Таймер для проверки статуса каждые 3 секунды
         self._winws_status_timer.start(3000)
 
-    def hideEvent(self, event):
-        """При скрытии страницы останавливаем мониторинг"""
-        super().hideEvent(event)
+    def on_page_hidden(self) -> None:
         self._stop_tail_worker()
         self._stop_winws_output_worker()
         self._winws_status_timer.stop()

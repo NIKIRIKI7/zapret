@@ -199,12 +199,9 @@ class HostsPage(BasePage):
         except Exception:
             pass
 
-    def showEvent(self, event):  # noqa: N802 (Qt naming)
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         self._install_main_window_event_filter()
-        # Не запускаем тяжёлые операции при системном восстановлении окна (из трея/свёрнутого).
-        if event.spontaneous():
-            return
 
         ipv6_catalog_changed, _ = self._ensure_ipv6_catalog_sections()
         show_plan = self._controller.build_show_event_plan(
@@ -234,10 +231,9 @@ class HostsPage(BasePage):
         if show_plan.update_ui:
             self._update_ui()
 
-    def hideEvent(self, event):  # noqa: N802 (Qt naming)
+    def on_page_hidden(self) -> None:
         self._close_service_combo_popups()
         self._stop_catalog_watcher()
-        super().hideEvent(event)
 
     def _install_main_window_event_filter(self) -> None:
         try:

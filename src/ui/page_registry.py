@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Iterable
 
 from ui.page_names import PageName
@@ -122,6 +123,72 @@ EAGER_MODE_ENTRY_PAGE: dict[str, PageName] = {
     "direct_zapret1": PageName.ZAPRET1_DIRECT_CONTROL,
     "orchestra": PageName.ORCHESTRA,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class PagePerformanceProfile:
+    page_kind: str
+    warmup_policy: str
+    first_show_budget_ms: int
+    repeat_show_budget_ms: int
+
+
+def _profile(kind: str, warmup_policy: str, first_show_budget_ms: int, repeat_show_budget_ms: int = 40) -> PagePerformanceProfile:
+    return PagePerformanceProfile(
+        page_kind=kind,
+        warmup_policy=warmup_policy,
+        first_show_budget_ms=int(first_show_budget_ms),
+        repeat_show_budget_ms=int(repeat_show_budget_ms),
+    )
+
+
+PAGE_PERFORMANCE_PROFILES: dict[PageName, PagePerformanceProfile] = {
+    PageName.HOME: _profile("heavy_list", "module", 200),
+    PageName.CONTROL: _profile("heavy_list", "module", 200),
+    PageName.ZAPRET2_DIRECT_CONTROL: _profile("heavy_list", "module", 200),
+    PageName.ZAPRET2_DIRECT: _profile("heavy_list", "module", 200),
+    PageName.ZAPRET2_STRATEGY_DETAIL: _profile("heavy_list", "none", 200),
+    PageName.ZAPRET2_PRESET_DETAIL: _profile("heavy_list", "none", 200),
+    PageName.ZAPRET2_ORCHESTRA: _profile("heavy_list", "module", 200),
+    PageName.ZAPRET2_ORCHESTRA_CONTROL: _profile("heavy_list", "module", 200),
+    PageName.ZAPRET2_ORCHESTRA_USER_PRESETS: _profile("heavy_list", "module", 200),
+    PageName.ZAPRET2_ORCHESTRA_STRATEGY_DETAIL: _profile("heavy_list", "none", 200),
+    PageName.ZAPRET2_ORCHESTRA_PRESET_DETAIL: _profile("heavy_list", "none", 200),
+    PageName.ZAPRET1_DIRECT_CONTROL: _profile("heavy_list", "module", 200),
+    PageName.ZAPRET1_DIRECT: _profile("heavy_list", "module", 200),
+    PageName.ZAPRET1_USER_PRESETS: _profile("heavy_list", "module", 200),
+    PageName.ZAPRET1_STRATEGY_DETAIL: _profile("heavy_list", "none", 200),
+    PageName.ZAPRET1_PRESET_DETAIL: _profile("heavy_list", "none", 200),
+    PageName.HOSTLIST: _profile("data", "module", 120),
+    PageName.BLOBS: _profile("data", "ui", 120),
+    PageName.DPI_SETTINGS: _profile("static", "ui", 120),
+    PageName.ZAPRET2_USER_PRESETS: _profile("heavy_list", "module", 200),
+    PageName.NETROGAT: _profile("data", "ui", 120),
+    PageName.CUSTOM_DOMAINS: _profile("data", "ui", 120),
+    PageName.CUSTOM_IPSET: _profile("data", "ui", 120),
+    PageName.AUTOSTART: _profile("live", "module", 160),
+    PageName.NETWORK: _profile("data", "module", 120),
+    PageName.HOSTS: _profile("live", "module", 160),
+    PageName.BLOCKCHECK: _profile("live", "module", 160),
+    PageName.APPEARANCE: _profile("static", "ui", 120),
+    PageName.PREMIUM: _profile("data", "ui", 120),
+    PageName.LOGS: _profile("live", "module", 160),
+    PageName.SERVERS: _profile("live", "ui", 160),
+    PageName.ABOUT: _profile("static", "ui", 120),
+    PageName.SUPPORT: _profile("static", "ui", 120),
+    PageName.ORCHESTRA: _profile("live", "module", 160),
+    PageName.ORCHESTRA_SETTINGS: _profile("static", "ui", 120),
+    PageName.TELEGRAM_PROXY: _profile("live", "module", 160),
+}
+
+
+def get_page_performance_profile(page_name: PageName) -> PagePerformanceProfile:
+    return PAGE_PERFORMANCE_PROFILES[page_name]
+
+
+_MISSING_PAGE_PROFILES = tuple(name for name in PAGE_CLASS_SPECS if name not in PAGE_PERFORMANCE_PROFILES)
+if _MISSING_PAGE_PROFILES:
+    raise RuntimeError(f"Missing page performance profiles: {_MISSING_PAGE_PROFILES!r}")
 
 
 def iter_lazy_page_modules() -> tuple[str, ...]:

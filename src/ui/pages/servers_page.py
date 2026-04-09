@@ -1151,12 +1151,8 @@ class ServersPage(BasePage):
 
         self._apply_theme()
 
-    def showEvent(self, event):
-        super().showEvent(event)
-
-        if event.spontaneous():
-            return
-
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         self._update_controller.on_page_shown()
 
     def get_ui_language(self) -> str:

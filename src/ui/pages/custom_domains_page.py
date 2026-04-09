@@ -112,10 +112,18 @@ class CustomDomainsPage(BasePage):
             title_key="page.custom_domains.title",
             subtitle_key="page.custom_domains.subtitle",
         )
+        self._initial_domains_load_requested = False
         self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
     def _after_ui_built(self) -> None:
-        QTimer.singleShot(100, self._load_domains)
+        self._apply_page_theme(force=True)
+
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
+        if self._initial_domains_load_requested:
+            return
+        self._initial_domains_load_requested = True
+        QTimer.singleShot(0, self._load_domains)
 
     def _tr(self, key: str, default: str) -> str:
         return tr_catalog(key, language=self._ui_language, default=default)

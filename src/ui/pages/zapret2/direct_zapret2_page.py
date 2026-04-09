@@ -165,9 +165,9 @@ class Zapret2StrategiesPageNew(BasePage):
         if key == "control":
             self.back_clicked.emit()
 
-    def showEvent(self, event):
-        """При показе страницы загружаем/обновляем контент"""
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        """При активации страницы загружаем/обновляем контент."""
+        _ = first_show
         self._rebuild_breadcrumb()  # Fix state if user navigated away via breadcrumb
 
         # Если режим direct_zapret2 (basic/advanced) переключился в другом месте,

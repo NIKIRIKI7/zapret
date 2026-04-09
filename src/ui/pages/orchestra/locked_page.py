@@ -398,9 +398,9 @@ class OrchestraLockedPage(BasePage):
 
         self._refresh_data()
 
-    def showEvent(self, event):
-        """При показе страницы загружаем данные один раз (без авто-обновления)"""
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        """При активации страницы загружаем данные один раз."""
+        _ = first_show
         # Загружаем данные только при первом показе
         if not self._initial_load_done:
             self._initial_load_done = True

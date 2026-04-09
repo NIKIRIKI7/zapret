@@ -44,11 +44,19 @@ class IpsetPage(BasePage):
             "default": "Загрузка информации...",
             "kwargs": {},
         }
+        self._info_load_requested = False
 
         self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
     def _after_ui_built(self) -> None:
         self._apply_page_theme(force=True)
+
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
+        if self._info_load_requested:
+            return
+        self._info_load_requested = True
+        QTimer.singleShot(0, self._load_info)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         text = tr_catalog(key, language=self._ui_language, default=default)
@@ -157,9 +165,6 @@ class IpsetPage(BasePage):
         
         info_card.add_layout(info_layout)
         self.layout.addWidget(info_card)
-        
-        # Загружаем информацию
-        QTimer.singleShot(100, self._load_info)
         
         self.layout.addStretch()
 

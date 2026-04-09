@@ -425,51 +425,21 @@ class OrchestraPage(BasePage):
         """Обновляет статус на основе состояния"""
         self._current_state = state
         tokens = get_theme_tokens()
-
-        if state == self.STATE_RUNNING:
-            self.status_icon.setPixmap(
-                qta.icon("mdi.brain", color="#4CAF50").pixmap(24, 24)  # Зелёный
-            )
-            self.status_label.setText(
-                self._tr(
-                    "page.orchestra.status.running",
-                    "✅ RUNNING - работает на лучших стратегиях",
-                )
-            )
-            self.status_label.setStyleSheet("color: #4CAF50; font-size: 14px;")
-        elif state == self.STATE_LEARNING:
-            self.status_icon.setPixmap(
-                qta.icon("mdi.brain", color="#FF9800").pixmap(24, 24)  # Оранжевый
-            )
-            self.status_label.setText(
-                self._tr(
-                    "page.orchestra.status.learning",
-                    "🔄 LEARNING - перебирает стратегии",
-                )
-            )
-            self.status_label.setStyleSheet("color: #FF9800; font-size: 14px;")
-        elif state == self.STATE_UNLOCKED:
-            self.status_icon.setPixmap(
-                qta.icon("mdi.brain", color="#F44336").pixmap(24, 24)  # Красный
-            )
-            self.status_label.setText(
-                self._tr(
-                    "page.orchestra.status.unlocked",
-                    "🔓 UNLOCKED - переобучение (RST блокировка)",
-                )
-            )
-            self.status_label.setStyleSheet("color: #F44336; font-size: 14px;")
-        else:  # STATE_IDLE
-            self.status_icon.setPixmap(
-                qta.icon("mdi.brain", color=tokens.fg_faint).pixmap(24, 24)
-            )
-            self.status_label.setText(
-                self._tr(
-                    "page.orchestra.status.idle",
-                    "⏸ IDLE - ожидание соединений",
-                )
-            )
-            self.status_label.setStyleSheet(f"color: {tokens.fg_faint}; font-size: 14px;")
+        plan = self._controller.build_status_display_plan(
+            state=state,
+            idle_state=self.STATE_IDLE,
+            learning_state=self.STATE_LEARNING,
+            running_state=self.STATE_RUNNING,
+            unlocked_state=self.STATE_UNLOCKED,
+            idle_text=self._tr("page.orchestra.status.idle", "⏸ IDLE - ожидание соединений"),
+            learning_text=self._tr("page.orchestra.status.learning", "🔄 LEARNING - перебирает стратегии"),
+            running_text=self._tr("page.orchestra.status.running", "✅ RUNNING - работает на лучших стратегиях"),
+            unlocked_text=self._tr("page.orchestra.status.unlocked", "🔓 UNLOCKED - переобучение (RST блокировка)"),
+            idle_color=tokens.fg_faint,
+        )
+        self.status_icon.setPixmap(qta.icon("mdi.brain", color=plan.icon_color).pixmap(24, 24))
+        self.status_label.setText(plan.label_text)
+        self.status_label.setStyleSheet(f"color: {plan.label_color}; font-size: 14px;")
 
     def _clear_log(self):
         """Очищает лог"""
@@ -482,37 +452,57 @@ class OrchestraPage(BasePage):
         if self.clear_learned_btn is None:
             return
         tokens = get_theme_tokens()
-        color = "#ff6b6b" if self._clear_learned_pending else tokens.fg
-        icon_name = "fa5s.trash-alt" if self._clear_learned_pending else "fa5s.redo-alt"
-        self.clear_learned_btn.setIcon(qta.icon(icon_name, color=color))
+        plan = self._controller.build_clear_learned_button_plan(
+            pending=self._clear_learned_pending,
+            default_text=self._tr("page.orchestra.button.clear_learning", "Сбросить обучение"),
+            pending_text=self._tr("page.orchestra.button.clear_learning.pending", "Это всё сотрёт!"),
+            done_text="",
+            fg_color=tokens.fg,
+        )
+        self.clear_learned_btn.setIcon(qta.icon(plan.icon_name, color=plan.icon_color))
 
     def _reset_clear_learned_button(self) -> None:
         self._clear_learned_pending = False
         if self.clear_learned_btn is not None:
-            self.clear_learned_btn.setText(
-                self._tr("page.orchestra.button.clear_learning", "Сбросить обучение")
+            plan = self._controller.build_clear_learned_button_plan(
+                pending=False,
+                default_text=self._tr("page.orchestra.button.clear_learning", "Сбросить обучение"),
+                pending_text=self._tr("page.orchestra.button.clear_learning.pending", "Это всё сотрёт!"),
+                done_text="",
+                fg_color=get_theme_tokens().fg,
             )
-            self._update_clear_learned_button_icon()
+            self.clear_learned_btn.setText(plan.text)
+            self.clear_learned_btn.setIcon(qta.icon(plan.icon_name, color=plan.icon_color))
 
     def _on_clear_learned_clicked(self) -> None:
         if self._clear_learned_pending:
             self._clear_learned_reset_timer.stop()
             self._clear_learned_pending = False
             if self.clear_learned_btn is not None:
-                self.clear_learned_btn.setText(
-                    self._tr("page.orchestra.button.clear_learning.done", "✓ Сброшено")
+                plan = self._controller.build_clear_learned_button_plan(
+                    pending=False,
+                    default_text=self._tr("page.orchestra.button.clear_learning", "Сбросить обучение"),
+                    pending_text=self._tr("page.orchestra.button.clear_learning.pending", "Это всё сотрёт!"),
+                    done_text=self._tr("page.orchestra.button.clear_learning.done", "✓ Сброшено"),
+                    fg_color=get_theme_tokens().fg,
                 )
-                self._update_clear_learned_button_icon()
+                self.clear_learned_btn.setText(plan.text)
+                self.clear_learned_btn.setIcon(qta.icon(plan.icon_name, color=plan.icon_color))
             self._clear_learned()
             QTimer.singleShot(1500, self._reset_clear_learned_button)
             return
 
         self._clear_learned_pending = True
         if self.clear_learned_btn is not None:
-            self.clear_learned_btn.setText(
-                self._tr("page.orchestra.button.clear_learning.pending", "Это всё сотрёт!")
+            plan = self._controller.build_clear_learned_button_plan(
+                pending=True,
+                default_text=self._tr("page.orchestra.button.clear_learning", "Сбросить обучение"),
+                pending_text=self._tr("page.orchestra.button.clear_learning.pending", "Это всё сотрёт!"),
+                done_text="",
+                fg_color=get_theme_tokens().fg,
             )
-            self._update_clear_learned_button_icon()
+            self.clear_learned_btn.setText(plan.text)
+            self.clear_learned_btn.setIcon(qta.icon(plan.icon_name, color=plan.icon_color))
         self._clear_learned_reset_timer.start(3000)
 
     def _clear_learned(self):
@@ -727,14 +717,13 @@ class OrchestraPage(BasePage):
         if plan.update_timer_interval_ms is None:
             self.update_timer.stop()
 
-    def showEvent(self, event):
-        """Автозапуск мониторинга при показе страницы"""
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        """Автозапуск мониторинга при активации страницы."""
+        _ = first_show
         self.start_monitoring()
 
-    def hideEvent(self, event):
-        """Остановка мониторинга при скрытии страницы"""
-        super().hideEvent(event)
+    def on_page_hidden(self) -> None:
+        """Остановка мониторинга при скрытии страницы."""
         self.stop_monitoring()
 
     def set_learned_data(self, data: dict):
@@ -951,19 +940,9 @@ class OrchestraPage(BasePage):
             from PyQt6.QtWidgets import QMenu
             menu = QMenu(self)
 
-        # Стандартные действия
-        copy_action = QAction(
-            self._tr("page.orchestra.context.copy_line", "📋 Копировать строку"),
-            self,
-        )
-        copy_action.triggered.connect(lambda: self._copy_line_to_clipboard(line_text))
-        menu.addAction(copy_action)
-
+        context_plan = None
         if parsed:
             domain, strategy, protocol = parsed
-            menu.addSeparator()
-
-            # Проверяем, заблокирована ли уже эта стратегия
             is_blocked = False
             try:
                 app = self.window()
@@ -972,58 +951,68 @@ class OrchestraPage(BasePage):
             except Exception:
                 pass
 
-            if strategy > 0:
-                # Действие залочивания стратегии (сайт работает)
-                lock_action = QAction(
-                    self._tr(
-                        "page.orchestra.context.lock_strategy",
-                        "🔒 Залочить стратегию #{strategy} для {domain}",
-                        strategy=strategy,
-                        domain=domain,
-                    ),
-                    self,
-                )
-                lock_action.triggered.connect(lambda: self._lock_strategy_from_log(domain, strategy, protocol))
-                menu.addAction(lock_action)
-
-                if is_blocked:
-                    # Действие разблокировки стратегии
-                    unblock_action = QAction(
-                        self._tr(
-                            "page.orchestra.context.unblock_strategy",
-                            "✅ Разблокировать стратегию #{strategy} для {domain}",
-                            strategy=strategy,
-                            domain=domain,
-                        ),
-                        self,
-                    )
-                    unblock_action.triggered.connect(lambda: self._unblock_strategy_from_log(domain, strategy, protocol))
-                    menu.addAction(unblock_action)
-                else:
-                    # Действие блокировки стратегии
-                    block_action = QAction(
-                        self._tr(
-                            "page.orchestra.context.block_strategy",
-                            "🚫 Заблокировать стратегию #{strategy} для {domain}",
-                            strategy=strategy,
-                            domain=domain,
-                        ),
-                        self,
-                    )
-                    block_action.triggered.connect(lambda: self._block_strategy_from_log(domain, strategy, protocol))
-                    menu.addAction(block_action)
-
-            # Действие добавления в whitelist (если сайт работает)
-            whitelist_action = QAction(
-                self._tr(
+            context_plan = self._controller.build_context_menu_plan(
+                domain=domain,
+                strategy=strategy,
+                is_blocked=is_blocked,
+                copy_label=self._tr("page.orchestra.context.copy_line", "📋 Копировать строку"),
+                lock_label=self._tr(
+                    "page.orchestra.context.lock_strategy",
+                    "🔒 Залочить стратегию #{strategy} для {domain}",
+                    strategy=strategy,
+                    domain=domain,
+                ) if strategy > 0 else None,
+                block_label=self._tr(
+                    "page.orchestra.context.block_strategy",
+                    "🚫 Заблокировать стратегию #{strategy} для {domain}",
+                    strategy=strategy,
+                    domain=domain,
+                ) if strategy > 0 else None,
+                unblock_label=self._tr(
+                    "page.orchestra.context.unblock_strategy",
+                    "✅ Разблокировать стратегию #{strategy} для {domain}",
+                    strategy=strategy,
+                    domain=domain,
+                ) if strategy > 0 else None,
+                whitelist_label=self._tr(
                     "page.orchestra.context.add_whitelist",
                     "⬚ Добавить {domain} в белый список",
                     domain=domain,
                 ),
-                self,
             )
-            whitelist_action.triggered.connect(lambda: self._add_to_whitelist_from_log(domain))
-            menu.addAction(whitelist_action)
+        else:
+            context_plan = self._controller.build_context_menu_plan(
+                domain=None,
+                strategy=None,
+                is_blocked=False,
+                copy_label=self._tr("page.orchestra.context.copy_line", "📋 Копировать строку"),
+                lock_label=None,
+                block_label=None,
+                unblock_label=None,
+                whitelist_label=None,
+            )
+
+        actions_by_id: dict[str, QAction] = {}
+        for action_plan in context_plan.actions:
+            action = QAction(action_plan.label, self)
+            actions_by_id[action_plan.action_id] = action
+            menu.addAction(action)
+
+        copy_action = actions_by_id.get("copy")
+        if copy_action is not None:
+            copy_action.triggered.connect(lambda: self._copy_line_to_clipboard(line_text))
+
+        if parsed and context_plan.has_strategy_actions:
+            domain, strategy, protocol = parsed
+            menu.insertSeparator(actions_by_id.get("copy"))
+            if "lock" in actions_by_id:
+                actions_by_id["lock"].triggered.connect(lambda: self._lock_strategy_from_log(domain, strategy, protocol))
+            if "block" in actions_by_id:
+                actions_by_id["block"].triggered.connect(lambda: self._block_strategy_from_log(domain, strategy, protocol))
+            if "unblock" in actions_by_id:
+                actions_by_id["unblock"].triggered.connect(lambda: self._unblock_strategy_from_log(domain, strategy, protocol))
+            if "whitelist" in actions_by_id:
+                actions_by_id["whitelist"].triggered.connect(lambda: self._add_to_whitelist_from_log(domain))
 
         exec_popup_menu(menu, self.log_text.mapToGlobal(pos), owner=self)
 

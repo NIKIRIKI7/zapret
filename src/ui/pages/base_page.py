@@ -2,6 +2,7 @@
 """Базовый класс для страниц — использует qfluentwidgets ScrollArea."""
 
 import sys
+import time as _time
 from PyQt6.QtCore import Qt, QEvent, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QScrollArea, QFrame,
@@ -20,6 +21,8 @@ except ImportError:
     _USE_FLUENT = False
 
 from ui.text_catalog import tr as tr_catalog, normalize_language
+from ui.page_performance import log_page_metric
+from ui.page_runtime import PageLoadController
 from ui.theme_refresh import ThemeRefreshController
 
 
@@ -158,6 +161,10 @@ class BasePage(_FluentScrollArea):
         self._deferred_ui_build_done = True
         self._deferred_ui_build_callable = None
         self._deferred_ui_after_build = None
+        self._page_registry_name = None
+        self._page_first_activation_done = False
+        self._page_activation_controller = PageLoadController()
+        self._page_load_controller = PageLoadController()
         self._page_theme_refresh = ThemeRefreshController(
             self,
             self._apply_page_theme,
@@ -244,6 +251,56 @@ class BasePage(_FluentScrollArea):
         self._deferred_ui_build_done = False
         self._deferred_ui_build_callable = build
         self._deferred_ui_after_build = after_build
+
+    def _set_page_registry_name(self, page_name) -> None:
+        self._page_registry_name = page_name
+
+    def _page_label(self):
+        return self._page_registry_name or self.__class__.__name__
+
+    def _resolve_page_repeat_budget(self) -> int | None:
+        page_name = getattr(self, "_page_registry_name", None)
+        if page_name is None:
+            return None
+        try:
+            from ui.page_registry import get_page_performance_profile
+
+            return int(get_page_performance_profile(page_name).repeat_show_budget_ms)
+        except Exception:
+            return None
+
+    def _resolve_page_first_budget(self) -> int | None:
+        page_name = getattr(self, "_page_registry_name", None)
+        if page_name is None:
+            return None
+        try:
+            from ui.page_registry import get_page_performance_profile
+
+            return int(get_page_performance_profile(page_name).first_show_budget_ms)
+        except Exception:
+            return None
+
+    def prime_for_open(self) -> bool:
+        """Лёгкий прогрев страницы до реального открытия."""
+        return bool(self.ensure_deferred_ui_built())
+
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
+
+    def on_page_hidden(self) -> None:
+        pass
+
+    def invalidate_page_cache(self, reason: str) -> None:
+        self.cancel_page_loads(reason=reason)
+
+    def issue_page_load_token(self, *, reason: str = "") -> int:
+        return self._page_load_controller.issue(reason=reason)
+
+    def is_page_load_token_current(self, token: int) -> bool:
+        return self._page_load_controller.is_current(token)
+
+    def cancel_page_loads(self, *, reason: str = "") -> None:
+        self._page_load_controller.cancel(reason=reason)
 
     def is_deferred_ui_build_pending(self) -> bool:
         return bool(self._deferred_ui_build_enabled) and not bool(self._deferred_ui_build_done)
@@ -395,23 +452,71 @@ class BasePage(_FluentScrollArea):
 
     def showEvent(self, event):  # noqa: N802 (Qt override)
         super().showEvent(event)
+        is_spontaneous = bool(event is not None and event.spontaneous())
         if not bool(getattr(self, "_deferred_ui_build_enabled", False)):
+            if not is_spontaneous:
+                self._schedule_page_activation()
             try:
                 self._page_theme_refresh.flush_pending()
             except Exception:
                 pass
             return
-        if event is not None and event.spontaneous():
+        if is_spontaneous:
             try:
                 self._page_theme_refresh.flush_pending()
             except Exception:
                 pass
             return
-        self.ensure_deferred_ui_built()
+        started_at = _time.perf_counter()
+        built_now = self.ensure_deferred_ui_built()
+        if built_now:
+            log_page_metric(
+                self._page_label(),
+                "deferred_build",
+                (_time.perf_counter() - started_at) * 1000,
+                budget_ms=self._resolve_page_first_budget(),
+            )
+        self._schedule_page_activation()
         try:
             self._page_theme_refresh.flush_pending()
         except Exception:
             pass
+
+    def hideEvent(self, event):  # noqa: N802 (Qt override)
+        self._page_activation_controller.cancel(reason="hidden")
+        self.cancel_page_loads(reason="hidden")
+        try:
+            self.on_page_hidden()
+        except Exception:
+            pass
+        super().hideEvent(event)
+
+    def _schedule_page_activation(self) -> None:
+        token = self._page_activation_controller.issue(reason="show")
+        QTimer.singleShot(0, lambda t=token: self._run_page_activation(t))
+
+    def _run_page_activation(self, token: int) -> None:
+        if not self._page_activation_controller.is_current(token):
+            return
+        if not self.isVisible():
+            return
+
+        first_show = not bool(self._page_first_activation_done)
+        if first_show:
+            self._page_first_activation_done = True
+
+        started_at = _time.perf_counter()
+        try:
+            self.on_page_activated(first_show=first_show)
+        except Exception:
+            pass
+        finally:
+            log_page_metric(
+                self._page_label(),
+                "activation.first" if first_show else "activation.repeat",
+                (_time.perf_counter() - started_at) * 1000,
+                budget_ms=self._resolve_page_first_budget() if first_show else self._resolve_page_repeat_budget(),
+            )
 
     def _retranslate_base_texts(self) -> None:
         if self._title_key and hasattr(self, "title_label") and self.title_label is not None:

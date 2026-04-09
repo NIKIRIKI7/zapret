@@ -1628,8 +1628,8 @@ class BaseZapret2UserPresetsPage(BasePage):
     def _get_hierarchy_store(self) -> PresetHierarchyStore:
         return PresetHierarchyStore(self._hierarchy_scope_key())
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         self._rebuild_breadcrumb()
         self._apply_mode_labels()
         self._start_watching_presets()
@@ -1645,11 +1645,10 @@ class BaseZapret2UserPresetsPage(BasePage):
         self._resync_layout_metrics()
         self._schedule_layout_resync()
 
-    def hideEvent(self, event):
+    def on_page_hidden(self) -> None:
         self._layout_resync_timer.stop()
         self._layout_resync_delayed_timer.stop()
         self._stop_watching_presets()
-        super().hideEvent(event)
 
     def _after_ui_built(self) -> None:
         started_at = time.perf_counter()

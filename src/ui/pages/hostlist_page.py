@@ -143,10 +143,8 @@ class HostlistPage(BasePage):
     # Qt event overrides
     # ──────────────────────────────────────────────────────────────────────────
 
-    def showEvent(self, event):  # noqa: N802
-        super().showEvent(event)
-        if event.spontaneous():
-            return
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         if not self._info_loaded_once:
             self._info_loaded_once = True
             QTimer.singleShot(0, self._load_info)

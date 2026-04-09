@@ -392,11 +392,19 @@ class BlobsPage(BasePage):
 
         self._desc_label = None
         self._filter_icon_label = None
+        self._initial_blobs_load_requested = False
 
         self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
     def _after_ui_built(self) -> None:
         self._apply_page_theme(force=True)
+
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
+        if self._initial_blobs_load_requested:
+            return
+        self._initial_blobs_load_requested = True
+        QTimer.singleShot(0, self._load_blobs)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         text = tr_catalog(key, language=self._ui_language, default=default)
@@ -501,9 +509,6 @@ class BlobsPage(BasePage):
         
         self.layout.addWidget(self.blobs_container)
         
-        # Загружаем блобы
-        QTimer.singleShot(100, self._load_blobs)
-
     def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
         _ = force
         tokens = tokens or get_theme_tokens()

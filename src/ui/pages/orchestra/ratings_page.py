@@ -182,9 +182,9 @@ class OrchestraRatingsPage(BasePage):
             icon_color = tokens.fg_faint if self._refresh_loading else tokens.fg
             self.refresh_btn.setIcon(qta.icon(icon_name, color=icon_color))
 
-    def showEvent(self, event):
-        """При показе страницы загружаем данные"""
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        """При активации страницы загружаем данные."""
+        _ = first_show
         self._refresh_data()
 
     def _get_runner(self):

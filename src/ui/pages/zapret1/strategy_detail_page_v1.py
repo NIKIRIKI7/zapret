@@ -498,8 +498,8 @@ class Zapret1StrategyDetailPage(BasePage):
         self._rebuild_breadcrumb()
         self._reload_target()
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         self._rebuild_breadcrumb()
         if self._target_key:
             QTimer.singleShot(0, self._reload_target)

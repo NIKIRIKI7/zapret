@@ -307,9 +307,9 @@ class Zapret2DirectControlPage(BasePage):
     def _open_folder(self) -> None:
         open_folder(self)
 
-    def showEvent(self, a0):
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         _t_show = _time.perf_counter()
-        super().showEvent(a0)
         _t_sync = _time.perf_counter()
         try:
             self._sync_program_settings()
@@ -319,7 +319,7 @@ class Zapret2DirectControlPage(BasePage):
         self.deferred_show_requested.emit()
         if not self._startup_showevent_profile_logged:
             self._startup_showevent_profile_logged = True
-            _log_startup_z2_control_metric("showEvent.total", (_time.perf_counter() - _t_show) * 1000)
+            _log_startup_z2_control_metric("activation.total", (_time.perf_counter() - _t_show) * 1000)
 
     def _run_deferred_show_work(self) -> None:
         if not self.isVisible():
@@ -641,7 +641,8 @@ class Zapret2DirectControlPage(BasePage):
 
         self.advanced_card = SettingsCard(tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"))
         advanced_layout = QVBoxLayout()
-        advanced_layout.setSpacing(6)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_layout.setSpacing(4)
 
         self.advanced_desc = CaptionLabel(tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="⚠ Изменяйте только если знаете что делаете")) if _HAS_FLUENT_LABELS else QLabel(tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="⚠ Изменяйте только если знаете что делаете"))
         advanced_layout.addWidget(self.advanced_desc)

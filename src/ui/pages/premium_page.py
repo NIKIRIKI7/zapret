@@ -367,8 +367,7 @@ class PremiumPage(BasePage):
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
         if not self._initialized:
             self._initialized = True
             self._init_checker()
@@ -379,9 +378,8 @@ class PremiumPage(BasePage):
             self._render_server_status()
         self._sync_pairing_status_autopoll()
 
-    def hideEvent(self, event):
+    def on_page_hidden(self) -> None:
         self._stop_pairing_status_autopoll()
-        super().hideEvent(event)
 
     def closeEvent(self, event):
         self._stop_pairing_status_autopoll()

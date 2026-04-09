@@ -813,8 +813,8 @@ class StrategyDetailPage(BasePage):
             pass
         return super().hideEvent(event)
 
-    def showEvent(self, event):  # noqa: N802 (Qt override)
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         if getattr(self, "_preset_refresh_pending", False):
             self._preset_refresh_pending = False
             self.refresh_from_preset_switch()

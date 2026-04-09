@@ -135,8 +135,8 @@ class Zapret1StrategiesPage(BasePage):
     # Build lifecycle
     # ------------------------------------------------------------------
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         if self._breadcrumb is not None:
             self._rebuild_breadcrumb()
         if self._built and self._preset_refresh_pending:

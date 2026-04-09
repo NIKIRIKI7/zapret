@@ -3,19 +3,15 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
-import webbrowser
-
 import qtawesome as qta
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QStackedWidget,
     QFrame, QSizePolicy, QLayout,
 )
 
 from .base_page import BasePage
+from ui.about_page_controller import AboutPageController
 from ui.compat_widgets import SettingsCard, ActionButton, SettingsRow
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
@@ -57,6 +53,7 @@ class AboutPage(BasePage):
             subtitle_key="page.about.subtitle",
         )
 
+        self._controller = AboutPageController()
         # UI refs (support tab)
         self._support_icon_label: QLabel | None = None
 
@@ -152,41 +149,46 @@ class AboutPage(BasePage):
         self.add_widget(self.stacked_widget)
 
     def _switch_tab(self, index: int):
-        if index == 1 and not self._support_tab_initialized:
+        plan = self._controller.build_tab_switch_plan(
+            index=index,
+            support_initialized=self._support_tab_initialized,
+            help_initialized=self._help_tab_initialized,
+            kvn_initialized=self._kvn_tab_initialized,
+        )
+        if plan.init_support:
             self._support_tab_initialized = True
             try:
                 self._build_support_content(self._support_layout)
             except Exception as e:
                 log(f"Ошибка построения вкладки поддержки: {e}", "ERROR")
 
-        if index == 2 and not self._help_tab_initialized:
+        if plan.init_help:
             self._help_tab_initialized = True
             try:
                 self._build_help_content(self._help_layout)
             except Exception as e:
                 log(f"Ошибка построения вкладки справки: {e}", "ERROR")
 
-        if index == 3 and not self._kvn_tab_initialized:
+        if plan.init_kvn:
             self._kvn_tab_initialized = True
             try:
                 self._build_kvn_content(self._kvn_layout)
             except Exception as e:
                 log(f"Ошибка построения вкладки KVN: {e}", "ERROR")
 
-        self.stacked_widget.setCurrentIndex(index)
+        self.stacked_widget.setCurrentIndex(plan.current_index)
 
         if _HAS_FLUENT and hasattr(self, "tabs_pivot"):
-            keys = ["about", "support", "help", "kvn"]
             try:
-                self.tabs_pivot.setCurrentItem(keys[index])
+                self.tabs_pivot.setCurrentItem(plan.route_key)
             except Exception:
                 pass
 
     def switch_to_tab(self, key: str) -> None:
         """External API: switch to About/Support/Help tab by key."""
-        normalized = str(key or "").strip().lower()
-        if normalized in {"about", "support", "help", "kvn"}:
-            self._switch_tab({"about": 0, "support": 1, "help": 2, "kvn": 3}[normalized])
+        index = self._controller.resolve_tab_index(key)
+        if index is not None:
+            self._switch_tab(index)
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
@@ -370,11 +372,7 @@ class AboutPage(BasePage):
         device_icon.setFixedSize(24, 24)
         device_layout.addWidget(device_icon)
 
-        try:
-            from tgram import get_client_id
-            client_id = get_client_id()
-        except Exception:
-            client_id = ""
+        client_id = self._controller.get_client_id()
 
         device_text_layout = QVBoxLayout()
         device_text_layout.setSpacing(2)
@@ -473,13 +471,8 @@ class AboutPage(BasePage):
         layout.addStretch()
 
     def _copy_client_id(self) -> None:
-        try:
-            cid = self.client_id_label.text().strip() if hasattr(self, "client_id_label") else ""
-            if not cid or cid == "—":
-                return
-            QGuiApplication.clipboard().setText(cid)
-        except Exception as e:
-            log(f"Ошибка копирования ID: {e}", "DEBUG")
+        cid = self.client_id_label.text().strip() if hasattr(self, "client_id_label") else ""
+        self._controller.copy_client_id(cid)
 
     def update_subscription_status(self, is_premium: bool, days: int | None = None):
         """Обновляет отображение статуса подписки"""
@@ -487,29 +480,25 @@ class AboutPage(BasePage):
         self._sub_days_left = days
 
         tokens = get_theme_tokens()
-        if is_premium:
-            self.sub_status_icon.setPixmap(qta.icon('fa5s.star', color='#ffc107').pixmap(18, 18))
-            if days:
-                self.sub_status_label.setText(
-                    tr_catalog(
-                        "page.about.subscription.premium_days",
-                        language=self._ui_language,
-                        default="Premium (осталось {days} дней)",
-                    ).format(days=days)
-                )
-            else:
-                self.sub_status_label.setText(
-                    tr_catalog(
-                        "page.about.subscription.premium_active",
-                        language=self._ui_language,
-                        default="Premium активен",
-                    )
-                )
-        else:
-            self.sub_status_icon.setPixmap(qta.icon('fa5s.user', color=tokens.fg_faint).pixmap(18, 18))
-            self.sub_status_label.setText(
-                tr_catalog("page.about.subscription.free", language=self._ui_language, default="Free версия")
-            )
+        plan = self._controller.build_subscription_status_plan(
+            is_premium=is_premium,
+            days=days,
+            free_text=tr_catalog("page.about.subscription.free", language=self._ui_language, default="Free версия"),
+            premium_active_text=tr_catalog(
+                "page.about.subscription.premium_active",
+                language=self._ui_language,
+                default="Premium активен",
+            ),
+            premium_days_template=tr_catalog(
+                "page.about.subscription.premium_days",
+                language=self._ui_language,
+                default="Premium (осталось {days} дней)",
+            ),
+            free_icon_color=tokens.fg_faint,
+            premium_icon_color="#ffc107",
+        )
+        self.sub_status_icon.setPixmap(qta.icon(plan.icon_name, color=plan.icon_color).pixmap(18, 18))
+        self.sub_status_label.setText(plan.label_text)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Tab 1: Поддержка
@@ -654,35 +643,22 @@ class AboutPage(BasePage):
         layout.addStretch()
 
     def _open_support_discussions(self) -> None:
-        try:
-            from config.urls import SUPPORT_DISCUSSIONS_URL
-
-            webbrowser.open(SUPPORT_DISCUSSIONS_URL)
-            log(f"Открыт GitHub Discussions: {SUPPORT_DISCUSSIONS_URL}", "INFO")
-        except Exception as e:
-            if InfoBar:
-                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть GitHub Discussions:\n{e}",
-                                parent=self.window())
+        result = self._controller.open_support_discussions()
+        if (not result.ok) and InfoBar:
+            InfoBar.warning(title="Ошибка", content=f"Не удалось открыть GitHub Discussions:\n{result.message}",
+                            parent=self.window())
 
     def _open_telegram_support(self) -> None:
-        try:
-            from config.telegram_links import open_telegram_link
-            open_telegram_link("zaprethelp")
-            log("Открыт Telegram: zaprethelp", "INFO")
-        except Exception as e:
-            if InfoBar:
-                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{e}",
-                                parent=self.window())
+        result = self._controller.open_telegram("zaprethelp")
+        if (not result.ok) and InfoBar:
+            InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{result.message}",
+                            parent=self.window())
 
     def _open_discord(self) -> None:
-        try:
-            url = "https://discord.gg/kkcBDG2uws"
-            webbrowser.open(url)
-            log(f"Открыт Discord: {url}", "INFO")
-        except Exception as e:
-            if InfoBar:
-                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Discord:\n{e}",
-                                parent=self.window())
+        result = self._controller.open_discord("https://discord.gg/kkcBDG2uws")
+        if (not result.ok) and InfoBar:
+            InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Discord:\n{result.message}",
+                            parent=self.window())
 
     # ─────────────────────────────────────────────────────────────────────────
     # Tab 2: Справка
@@ -866,39 +842,25 @@ class AboutPage(BasePage):
         layout.addWidget(motto_wrap)
 
     def _open_forum_for_beginners(self):
-        try:
-            from config.telegram_links import open_telegram_link
-            open_telegram_link("bypassblock", post=1359)
-            log("Открыт пост: bypassblock/1359", "INFO")
-        except Exception as e:
-            if InfoBar:
-                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{e}",
-                                parent=self.window())
+        result = self._controller.open_telegram("bypassblock", post=1359)
+        if (not result.ok) and InfoBar:
+            InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{result.message}",
+                            parent=self.window())
 
     def _open_help_folder(self):
-        try:
-            from config import HELP_FOLDER
-            if os.path.exists(HELP_FOLDER):
-                subprocess.Popen(f'explorer "{HELP_FOLDER}"')
-                log(f"Открыта папка: {HELP_FOLDER}", "INFO")
+        result = self._controller.open_help_folder()
+        if (not result.ok) and InfoBar:
+            if result.message == "Папка с инструкциями не найдена":
+                InfoBar.warning(title="Ошибка", content=result.message, parent=self.window())
             else:
-                if InfoBar:
-                    InfoBar.warning(title="Ошибка", content="Папка с инструкциями не найдена",
-                                    parent=self.window())
-        except Exception as e:
-            if InfoBar:
-                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть папку:\n{e}",
+                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть папку:\n{result.message}",
                                 parent=self.window())
 
     def _open_telegram_news(self):
-        try:
-            from config.telegram_links import open_telegram_link
-            open_telegram_link("bypassblock")
-            log("Открыт Telegram: bypassblock", "INFO")
-        except Exception as e:
-            if InfoBar:
-                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{e}",
-                                parent=self.window())
+        result = self._controller.open_telegram("bypassblock")
+        if (not result.ok) and InfoBar:
+            InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{result.message}",
+                            parent=self.window())
 
     # ─────────────────────────────────────────────────────────────────────────
     # Tab 3: Zapret KVN
@@ -1032,43 +994,28 @@ class AboutPage(BasePage):
         layout.addStretch()
 
     def _open_kvn_channel(self):
-        try:
-            from config.telegram_links import open_telegram_link
-            open_telegram_link("vpndiscordyooutube")
-            log("Открыт Telegram: vpndiscordyooutube", "INFO")
-        except Exception as e:
-            if InfoBar:
-                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{e}",
-                                parent=self.window())
+        result = self._controller.open_telegram("vpndiscordyooutube")
+        if (not result.ok) and InfoBar:
+            InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{result.message}",
+                            parent=self.window())
 
     def _open_kvn_bot(self):
-        try:
-            from config.telegram_links import open_telegram_link
-            open_telegram_link("zapretvpns_bot")
-            log("Открыт Telegram: zapretvpns_bot", "INFO")
-        except Exception as e:
-            if InfoBar:
-                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{e}",
-                                parent=self.window())
+        result = self._controller.open_telegram("zapretvpns_bot")
+        if (not result.ok) and InfoBar:
+            InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{result.message}",
+                            parent=self.window())
 
     def _open_kvn_bypass(self):
-        try:
-            from config.telegram_links import open_telegram_link
-            open_telegram_link("bypassblock")
-            log("Открыт Telegram: bypassblock", "INFO")
-        except Exception as e:
-            if InfoBar:
-                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{e}",
-                                parent=self.window())
+        result = self._controller.open_telegram("bypassblock")
+        if (not result.ok) and InfoBar:
+            InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{result.message}",
+                            parent=self.window())
 
     def _open_kvn_github(self):
-        try:
-            webbrowser.open("https://github.com/youtubediscord/zapret-kvn")
-            log("Открыт GitHub: zapret-kvn", "INFO")
-        except Exception as e:
-            if InfoBar:
-                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть GitHub:\n{e}",
-                                parent=self.window())
+        result = self._controller.open_github("https://github.com/youtubediscord/zapret-kvn")
+        if (not result.ok) and InfoBar:
+            InfoBar.warning(title="Ошибка", content=f"Не удалось открыть GitHub:\n{result.message}",
+                            parent=self.window())
 
     # ─────────────────────────────────────────────────────────────────────────
     # Theme

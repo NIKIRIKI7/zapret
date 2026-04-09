@@ -29,6 +29,7 @@ from .base_page import BasePage
 from ui.widgets.win11_controls import Win11ToggleRow
 from ui.compat_widgets import SettingsCard, ActionButton
 from ui.compat_widgets import ResetActionButton
+from ui.page_runtime import PageSnapshotCache
 from ui.theme import get_theme_tokens
 from ui.theme_refresh import ThemeRefreshController
 from ui.text_catalog import tr as tr_catalog
@@ -435,6 +436,8 @@ class NetworkPage(BasePage):
         self._force_dns_status_details_key: str | None = None
         self._force_dns_status_details_kwargs: dict = {}
         self._force_dns_status_details_fallback = ""
+        self._page_snapshot_cache = PageSnapshotCache()
+        self._initial_load_requested = False
         
         self.dns_cards = {}
         self.adapter_cards = []
@@ -468,6 +471,12 @@ class NetworkPage(BasePage):
 
     def _after_ui_built(self) -> None:
         self._apply_page_theme(force=True)
+
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
+        if self._initial_load_requested:
+            return
+        self._initial_load_requested = True
         self._start_loading()
 
     def set_ui_language(self, language: str) -> None:
@@ -686,6 +695,15 @@ class NetworkPage(BasePage):
         """Загружает данные в фоне"""
         try:
             state = self._controller.load_page_data()
+            self._page_snapshot_cache.store(
+                state,
+                revision=(
+                    len(state.adapters),
+                    len(state.dns_info),
+                    bool(state.ipv6_available),
+                    bool(state.force_dns_active),
+                ),
+            )
             self._ipv6_available = state.ipv6_available
             self._force_dns_active = state.force_dns_active
             self._adapters = state.adapters

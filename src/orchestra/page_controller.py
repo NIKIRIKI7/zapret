@@ -49,6 +49,33 @@ class OrchestraRunnerActionPlan:
 
 
 @dataclass(slots=True)
+class OrchestraStatusDisplayPlan:
+    icon_color: str
+    label_text: str
+    label_color: str
+
+
+@dataclass(slots=True)
+class OrchestraClearLearnedButtonPlan:
+    action: str
+    text: str
+    icon_name: str
+    icon_color: str
+
+
+@dataclass(slots=True)
+class OrchestraContextActionPlan:
+    action_id: str
+    label: str
+
+
+@dataclass(slots=True)
+class OrchestraContextMenuPlan:
+    actions: list[OrchestraContextActionPlan]
+    has_strategy_actions: bool
+
+
+@dataclass(slots=True)
 class OrchestraUpdateCyclePlan:
     next_state: str | None
     refresh_learned: bool
@@ -61,6 +88,106 @@ class OrchestraLearnedDataPlan:
 
 
 class OrchestraPageController:
+    @staticmethod
+    def build_status_display_plan(
+        *,
+        state: str,
+        idle_state: str,
+        learning_state: str,
+        running_state: str,
+        unlocked_state: str,
+        idle_text: str,
+        learning_text: str,
+        running_text: str,
+        unlocked_text: str,
+        idle_color: str,
+    ) -> OrchestraStatusDisplayPlan:
+        if state == running_state:
+            return OrchestraStatusDisplayPlan(
+                icon_color="#4CAF50",
+                label_text=running_text,
+                label_color="#4CAF50",
+            )
+        if state == learning_state:
+            return OrchestraStatusDisplayPlan(
+                icon_color="#FF9800",
+                label_text=learning_text,
+                label_color="#FF9800",
+            )
+        if state == unlocked_state:
+            return OrchestraStatusDisplayPlan(
+                icon_color="#F44336",
+                label_text=unlocked_text,
+                label_color="#F44336",
+            )
+        return OrchestraStatusDisplayPlan(
+            icon_color=idle_color,
+            label_text=idle_text,
+            label_color=idle_color,
+        )
+
+    @staticmethod
+    def build_clear_learned_button_plan(
+        *,
+        pending: bool,
+        default_text: str,
+        pending_text: str,
+        done_text: str,
+        fg_color: str,
+    ) -> OrchestraClearLearnedButtonPlan:
+        if pending:
+            return OrchestraClearLearnedButtonPlan(
+                action="confirm",
+                text=pending_text,
+                icon_name="fa5s.trash-alt",
+                icon_color="#ff6b6b",
+            )
+        if done_text:
+            return OrchestraClearLearnedButtonPlan(
+                action="done",
+                text=done_text,
+                icon_name="fa5s.trash-alt",
+                icon_color="#ff6b6b",
+            )
+        return OrchestraClearLearnedButtonPlan(
+            action="arm",
+            text=default_text,
+            icon_name="fa5s.redo-alt",
+            icon_color=fg_color,
+        )
+
+    @staticmethod
+    def build_context_menu_plan(
+        *,
+        domain: str | None,
+        strategy: int | None,
+        is_blocked: bool,
+        copy_label: str,
+        lock_label: str | None,
+        block_label: str | None,
+        unblock_label: str | None,
+        whitelist_label: str | None,
+    ) -> OrchestraContextMenuPlan:
+        actions = [OrchestraContextActionPlan(action_id="copy", label=copy_label)]
+        has_strategy_actions = False
+
+        if domain:
+            if strategy is not None and strategy > 0 and lock_label:
+                actions.append(OrchestraContextActionPlan(action_id="lock", label=lock_label))
+                has_strategy_actions = True
+                if is_blocked and unblock_label:
+                    actions.append(OrchestraContextActionPlan(action_id="unblock", label=unblock_label))
+                elif (not is_blocked) and block_label:
+                    actions.append(OrchestraContextActionPlan(action_id="block", label=block_label))
+
+            if whitelist_label:
+                actions.append(OrchestraContextActionPlan(action_id="whitelist", label=whitelist_label))
+                has_strategy_actions = True
+
+        return OrchestraContextMenuPlan(
+            actions=actions,
+            has_strategy_actions=has_strategy_actions,
+        )
     @staticmethod
     def build_start_monitoring_plan() -> OrchestraMonitoringPlan:
         return OrchestraMonitoringPlan(

@@ -389,9 +389,9 @@ class OrchestraWhitelistPage(BasePage):
 
         self._refresh_data()
 
-    def showEvent(self, event):
-        """При показе страницы обновляем данные"""
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        """При активации страницы обновляем данные."""
+        _ = first_show
         self._refresh_data()
 
     def _get_runner(self):

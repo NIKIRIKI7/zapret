@@ -5,8 +5,9 @@ from importlib import import_module
 from PyQt6.QtWidgets import QWidget
 
 from log import log
+from ui.page_performance import log_page_metric
 from ui.page_names import PageName
-from ui.page_registry import iter_lazy_page_specs
+from ui.page_registry import get_page_performance_profile, iter_lazy_page_specs
 from ui.window_action_controller import (
     open_connection_test,
     open_folder,
@@ -29,15 +30,6 @@ _IDLE_PRELOAD_PAGE_PRIORITY: tuple[PageName, ...] = (
     PageName.ABOUT,
     PageName.AUTOSTART,
 )
-_IDLE_WARM_PAGE_ACTIONS: tuple[tuple[PageName, str], ...] = (
-    (PageName.DPI_SETTINGS, ""),
-    (PageName.BLOCKCHECK, ""),
-    (PageName.LOGS, ""),
-    (PageName.APPEARANCE, ""),
-    (PageName.SERVERS, ""),
-)
-
-
 def get_eager_page_names(window) -> tuple[PageName, ...]:
     method = window._get_launch_method()
 
@@ -83,6 +75,17 @@ def _build_idle_page_preload_plan(window) -> tuple[tuple[str, object, str], ...]
     page_class_specs = getattr(window, "_page_class_specs", {}) or {}
     tasks: list[tuple[str, object, str]] = []
     seen_modules: set[str] = set()
+    queued_pages: set[PageName] = set()
+
+    ordered_page_names: list[PageName] = []
+
+    def _append_ordered_page(page_name: PageName) -> None:
+        if page_name in queued_pages:
+            return
+        if page_name not in page_class_specs:
+            return
+        queued_pages.add(page_name)
+        ordered_page_names.append(page_name)
 
     def _append_module_for_page(page_name: PageName) -> None:
         resolved_name = resolve_page_name(window, page_name)
@@ -96,22 +99,20 @@ def _build_idle_page_preload_plan(window) -> tuple[tuple[str, object, str], ...]
         tasks.append(("module", module_name, ""))
 
     for page_name in _IDLE_PRELOAD_PAGE_PRIORITY:
-        _append_module_for_page(page_name)
+        _append_ordered_page(page_name)
 
-    for page_name, spec in iter_lazy_page_specs():
-        if page_name not in page_class_specs:
-            continue
-        module_name = str(spec[1] or "").strip()
-        if not module_name or module_name in seen_modules:
-            continue
-        seen_modules.add(module_name)
-        tasks.append(("module", module_name, ""))
+    for page_name, _spec in iter_lazy_page_specs():
+        _append_ordered_page(page_name)
 
-    for page_name, action_name in _IDLE_WARM_PAGE_ACTIONS:
+    for page_name in ordered_page_names:
         resolved_name = resolve_page_name(window, page_name)
-        if resolved_name not in page_class_specs:
+        profile = get_page_performance_profile(resolved_name)
+        if profile.warmup_policy == "none":
             continue
-        tasks.append(("page", resolved_name, action_name))
+
+        _append_module_for_page(resolved_name)
+        if profile.warmup_policy == "ui":
+            tasks.append(("page", resolved_name, "prime_for_open"))
 
     return tuple(tasks)
 
@@ -165,15 +166,16 @@ def _run_next_idle_page_preload(window) -> None:
                     if callable(action):
                         action()
                 else:
-                    ensure_built = getattr(page, "ensure_deferred_ui_built", None)
-                    if callable(ensure_built):
-                        ensure_built()
+                    warm = getattr(page, "prime_for_open", None)
+                    if callable(warm):
+                        warm()
         else:
             return
     except Exception as e:
         log(f"Idle page preload failed for {label}: {e}", "DEBUG")
     finally:
         elapsed_ms = int((_time.perf_counter() - started_at) * 1000)
+        log_page_metric(label, f"idle_preload.{task_kind}", elapsed_ms)
         if elapsed_ms >= 80:
             log(f"⏱ Idle page preload: {label} {elapsed_ms}ms", "DEBUG")
 
@@ -816,6 +818,12 @@ def ensure_page(window, name: PageName) -> QWidget | None:
     elif not page.objectName():
         page.setObjectName(page.__class__.__name__)
 
+    setter = getattr(page, "_set_page_registry_name", None)
+    if callable(setter):
+        setter(resolved_name)
+    else:
+        setattr(page, "_page_registry_name", resolved_name)
+
     window.pages[resolved_name] = page
     setattr(window, attr_name, page)
     window._apply_ui_language_to_page(page)
@@ -836,5 +844,6 @@ def ensure_page(window, name: PageName) -> QWidget | None:
 
     elapsed_ms = int((_time.perf_counter() - _t_page) * 1000)
     window._record_startup_page_init_metric(resolved_name, elapsed_ms)
+    log_page_metric(resolved_name, "constructor", elapsed_ms, budget_ms=get_page_performance_profile(resolved_name).first_show_budget_ms)
 
     return page

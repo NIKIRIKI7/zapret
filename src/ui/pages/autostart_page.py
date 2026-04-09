@@ -314,11 +314,10 @@ class AutostartPage(BasePage):
                 return text
         return text
 
-    def showEvent(self, event):
-        """Вызывается при показе страницы - запускаем определение в фоне"""
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         plan = self._controller.build_show_event_plan(
-            spontaneous=event.spontaneous(),
+            spontaneous=False,
         )
         if not plan.should_schedule_detection:
             return
@@ -326,6 +325,8 @@ class AutostartPage(BasePage):
 
     def _start_autostart_detection(self):
         """Запускает определение типа автозапуска в фоновом потоке"""
+        if not self.isVisible():
+            return
         plan = self._controller.build_detection_start_plan(
             detection_pending=self._detection_pending,
             worker_running=bool(self._detector_worker is not None and self._detector_worker.isRunning()),

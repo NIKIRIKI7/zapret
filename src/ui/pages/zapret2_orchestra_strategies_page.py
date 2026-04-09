@@ -115,9 +115,8 @@ class Zapret2OrchestraStrategiesPage(BasePage):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def showEvent(self, event):
-        super().showEvent(event)
-
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         method = self._get_launch_method()
         if method != self._current_mode:
             self._current_mode = method
@@ -133,9 +132,8 @@ class Zapret2OrchestraStrategiesPage(BasePage):
                 self._preset_refresh_pending = False
                 self._refresh_runtime_state()
 
-    def hideEvent(self, event):
+    def on_page_hidden(self) -> None:
         self._stop_process_monitoring()
-        super().hideEvent(event)
 
     # ------------------------------------------------------------------
     # Navigation / breadcrumb

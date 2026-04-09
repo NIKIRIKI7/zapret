@@ -312,15 +312,15 @@ class HomePage(BasePage):
         self._connect_card_signals()
         _log_startup_home_metric("__init__.connect_card_signals", (_time.perf_counter() - _t_build) * 1000)
 
-    def showEvent(self, event):  # type: ignore[override]
-        """При показе страницы обновляем статус автозапуска"""
+    def on_page_activated(self, first_show: bool) -> None:
+        """При активации страницы обновляем лёгкое runtime-состояние."""
+        _ = first_show
         _t_show = _time.perf_counter()
-        super().showEvent(event)
         self._check_autostart_status()
         self._refresh_strategy_card()
         if not self._startup_showevent_profile_logged:
             self._startup_showevent_profile_logged = True
-            _log_startup_home_metric("showEvent.schedule_deferred", (_time.perf_counter() - _t_show) * 1000)
+            _log_startup_home_metric("activation.schedule_deferred", (_time.perf_counter() - _t_show) * 1000)
 
     def _get_launch_method_display_name(self) -> str:
         """Возвращает человекочитаемое название текущего метода запуска."""

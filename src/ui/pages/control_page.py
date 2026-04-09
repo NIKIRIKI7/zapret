@@ -93,16 +93,6 @@ class ControlPage(BasePage):
     def _open_folder(self) -> None:
         open_folder(self)
 
-    def showEvent(self, event):  # noqa: N802 (Qt naming)
-        super().showEvent(event)
-        if event.spontaneous():
-            return
-        if self._program_settings_synced:
-            return
-
-        self._program_settings_synced = True
-        QTimer.singleShot(0, self._sync_program_settings)
-
     def _build_ui(self):
         # Статус работы
         self.add_section_title(text_key="page.control.section.status")
@@ -362,8 +352,8 @@ class ControlPage(BasePage):
         
         self.add_widget(extra_card)
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         # Обновляем состояние тогглов при каждом показе страницы
         try:
             self._sync_program_settings()

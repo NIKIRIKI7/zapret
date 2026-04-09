@@ -1376,8 +1376,8 @@ class TelegramProxyPage(BasePage):
 
     # -- Hosts auto-management on tab show --
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         self._ensure_telegram_hosts()
 
     def _ensure_telegram_hosts(self):

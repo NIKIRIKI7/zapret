@@ -73,8 +73,8 @@ class Zapret1DirectControlPage(BasePage):
     def _stop_and_exit(self) -> None:
         stop_and_exit(self)
 
-    def showEvent(self, a0):
-        super().showEvent(a0)
+    def on_page_activated(self, first_show: bool) -> None:
+        _ = first_show
         try:
             self._sync_program_settings()
         except Exception:
