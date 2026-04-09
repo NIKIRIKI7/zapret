@@ -34,6 +34,7 @@ from ui.compat_widgets import (
     SettingsCard,
     ActionButton,
     QuickActionsBar,
+    ResetActionButton,
     enable_setting_card_group_auto_height,
     insert_widget_into_setting_card_group,
     set_tooltip,

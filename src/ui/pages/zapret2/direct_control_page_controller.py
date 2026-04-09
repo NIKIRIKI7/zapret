@@ -165,6 +165,19 @@ class DirectUiStateChangePlan:
 
 class Zapret2DirectControlPageController(ControlPageController):
     @staticmethod
+    def load_advanced_settings_state() -> dict:
+        try:
+            from core.presets.direct_facade import DirectPresetFacade
+
+            return DirectPresetFacade.from_launch_method("direct_zapret2").get_advanced_settings_state() or {}
+        except Exception:
+            return {}
+
+    @staticmethod
+    def load_preset_summary_payload() -> dict:
+        return load_direct_zapret2_preset_summary_payload()
+
+    @staticmethod
     def create_advanced_settings_worker(request_id: int, parent=None) -> AdvancedSettingsLoadWorker:
         return AdvancedSettingsLoadWorker(request_id, parent)
 
@@ -215,7 +228,7 @@ class Zapret2DirectControlPageController(ControlPageController):
     def build_ui_state_change_plan(*, state, changed_fields: frozenset[str], page_visible: bool) -> DirectUiStateChangePlan:
         changed = set(changed_fields or ())
         refresh_mode_label = "mode_revision" in changed
-        presets_changed = "active_preset_revision" in changed or not changed
+        presets_changed = "active_preset_revision" in changed
 
         return DirectUiStateChangePlan(
             refresh_mode_label=refresh_mode_label,

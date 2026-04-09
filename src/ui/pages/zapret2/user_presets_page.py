@@ -46,7 +46,7 @@ import qtawesome as qta
 from ui.pages.base_page import BasePage
 from ui.pages.preset_actions_menu import show_preset_actions_menu
 from ui.pages.preset_rating_menu import show_preset_rating_menu
-from ui.pages import user_presets_runtime as shared_runtime
+from ui.pages.user_presets_runtime_controller import UserPresetsRuntimeController
 from ui.pages.user_presets_toolbar import UserPresetsToolbarLayout
 from .user_presets_page_controller import Zapret2UserPresetsPageController
 from ui.compat_widgets import (
@@ -1341,6 +1341,7 @@ class BaseZapret2UserPresetsPage(BasePage):
         self._ui_state_store: Optional[MainWindowStateStore] = None
         self._ui_state_unsubscribe = None
         self._controller = Zapret2UserPresetsPageController()
+        self._runtime_controller = UserPresetsRuntimeController()
         self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
@@ -1407,19 +1408,19 @@ class BaseZapret2UserPresetsPage(BasePage):
         return self._controller.resolve_display_name(reference)
 
     def _on_store_changed(self):
-        shared_runtime.on_store_changed(self)
+        self._runtime_controller.on_store_changed(self)
 
     def _on_store_updated(self, file_name_or_name: str):
-        shared_runtime.on_store_updated(self, file_name_or_name)
+        self._runtime_controller.on_store_updated(self, file_name_or_name)
 
     def _current_search_query(self) -> str:
-        return shared_runtime.current_search_query(self)
+        return self._runtime_controller.current_search_query(self)
 
     def _capture_presets_view_state(self) -> dict[str, object]:
-        return shared_runtime.capture_presets_view_state(self)
+        return self._runtime_controller.capture_presets_view_state(self)
 
     def _restore_presets_view_state(self, state: dict[str, object]) -> None:
-        shared_runtime.restore_presets_view_state(self, state)
+        self._runtime_controller.restore_presets_view_state(self, state)
 
     def _try_apply_single_preset_metadata_update(
         self,
@@ -1428,7 +1429,7 @@ class BaseZapret2UserPresetsPage(BasePage):
         previous_metadata: dict[str, object],
         next_metadata: dict[str, object],
     ) -> bool:
-        return shared_runtime.try_apply_single_preset_metadata_update(
+        return self._runtime_controller.try_apply_single_preset_metadata_update(
             self,
             normalized_file_name,
             previous_metadata=previous_metadata,
@@ -1436,60 +1437,10 @@ class BaseZapret2UserPresetsPage(BasePage):
         )
 
     def _on_store_switched(self, _name: str):
-        shared_runtime.on_store_switched(self, _name)
+        self._runtime_controller.on_store_switched(self, _name)
 
     def _on_ui_state_changed(self, state: AppUiState, changed_fields: frozenset[str]) -> None:
-        shared_runtime.on_ui_state_changed(self, state, changed_fields)
-
-    def _apply_active_preset_marker(self) -> bool:
-        active_file_name = self._get_selected_source_preset_file_name_light()
-        return self._apply_active_preset_marker_for_target(active_file_name)
-
-    def _apply_active_preset_marker_for_target(
-        self,
-        file_name: str,
-        *,
-        display_name: str = "",
-        use_display_name_fallback: bool = False,
-    ) -> bool:
-        if self._presets_model is None:
-            return False
-        changed = self._presets_model.set_active_preset(
-            str(file_name or "").strip(),
-            display_name=str(display_name or "").strip(),
-            use_display_name_fallback=bool(use_display_name_fallback),
-        )
-        if changed and hasattr(self, "presets_list"):
-            self._set_current_preset_index(file_name, display_name=display_name, use_display_name_fallback=use_display_name_fallback)
-            self.presets_list.viewport().update()
-            self.presets_list.viewport().repaint()
-        return changed
-
-    def _set_current_preset_index(
-        self,
-        file_name: str,
-        *,
-        display_name: str = "",
-        use_display_name_fallback: bool = False,
-    ) -> None:
-        if self._presets_model is None or not hasattr(self, "presets_list"):
-            return
-
-        target_file_name = str(file_name or "").strip()
-        target_display_name = str(display_name or "").strip()
-        if not target_file_name and not (use_display_name_fallback and target_display_name):
-            return
-
-        for row in range(self._presets_model.rowCount()):
-            index = self._presets_model.index(row, 0)
-            if str(index.data(_PresetListModel.KindRole) or "") != "preset":
-                continue
-            if target_file_name and str(index.data(_PresetListModel.FileNameRole) or "") == target_file_name:
-                self.presets_list.setCurrentIndex(index)
-                return
-            if use_display_name_fallback and target_display_name and str(index.data(_PresetListModel.NameRole) or "") == target_display_name:
-                self.presets_list.setCurrentIndex(index)
-                return
+        self._runtime_controller.on_ui_state_changed(self, state, changed_fields)
 
     def _get_direct_facade(self):
         return self._controller._get_direct_facade()
@@ -1601,25 +1552,25 @@ class BaseZapret2UserPresetsPage(BasePage):
             pass
 
     def _start_watching_presets(self):
-        shared_runtime.start_watching_presets(self)
+        self._runtime_controller.start_watching_presets(self)
 
     def _stop_watching_presets(self):
-        shared_runtime.stop_watching_presets(self)
+        self._runtime_controller.stop_watching_presets(self)
 
     def _on_presets_dir_changed(self, path: str):
-        shared_runtime.on_presets_dir_changed(self, path)
+        self._runtime_controller.on_presets_dir_changed(self, path)
 
     def _on_preset_file_changed(self, path: str):
-        shared_runtime.on_preset_file_changed(self, path)
+        self._runtime_controller.on_preset_file_changed(self, path)
 
     def _schedule_presets_reload(self, delay_ms: int = 500):
-        shared_runtime.schedule_presets_reload(self, delay_ms)
+        self._runtime_controller.schedule_presets_reload(self, delay_ms)
 
     def _reload_presets_from_watcher(self):
-        shared_runtime.reload_presets_from_watcher(self)
+        self._runtime_controller.reload_presets_from_watcher(self)
 
     def _sync_watched_preset_files(self, file_names: set[str] | None = None) -> None:
-        shared_runtime.sync_watched_preset_files(self, file_names)
+        self._runtime_controller.sync_watched_preset_files(self, file_names)
 
     def _build_ui(self):
         tokens = get_theme_tokens()
@@ -1875,7 +1826,7 @@ class BaseZapret2UserPresetsPage(BasePage):
         try:
             result = self._controller.create_preset(name=name, from_current=from_current)
             if result.structure_changed:
-                shared_runtime.mark_presets_structure_changed(self)
+                self._runtime_controller.mark_presets_structure_changed(self)
             log(result.log_message, result.log_level)
         except Exception as e:
             log(f"Ошибка создания пресета: {e}", "ERROR")
@@ -1905,7 +1856,7 @@ class BaseZapret2UserPresetsPage(BasePage):
         try:
             result = self._controller.rename_preset(current_name=current_name, new_name=new_name)
             if result.structure_changed:
-                shared_runtime.mark_presets_structure_changed(self)
+                self._runtime_controller.mark_presets_structure_changed(self)
             log(result.log_message, result.log_level)
         except Exception as e:
             log(f"Ошибка переименования пресета: {e}", "ERROR")
@@ -1932,7 +1883,7 @@ class BaseZapret2UserPresetsPage(BasePage):
         try:
             result = self._controller.import_preset_from_file(file_path=file_path)
             if result.structure_changed:
-                shared_runtime.mark_presets_structure_changed(self)
+                self._runtime_controller.mark_presets_structure_changed(self)
             log(result.log_message, result.log_level)
             if result.infobar_level == "warning":
                 InfoBar.warning(title=result.infobar_title, content=result.infobar_content, parent=self.window())
@@ -1956,7 +1907,7 @@ class BaseZapret2UserPresetsPage(BasePage):
         try:
             result = self._controller.reset_all_presets()
             if result.structure_changed:
-                shared_runtime.mark_presets_structure_changed(self)
+                self._runtime_controller.mark_presets_structure_changed(self)
             log(result.log_message, result.log_level)
             self._show_reset_all_result(result.success_count, result.total_count)
 
@@ -1997,13 +1948,13 @@ class BaseZapret2UserPresetsPage(BasePage):
             pass
 
     def _load_presets(self):
-        shared_runtime.load_presets(self)
+        self._runtime_controller.load_presets(self)
 
     def refresh_presets_view_if_possible(self) -> None:
-        shared_runtime.refresh_presets_view_if_possible(self)
+        self._runtime_controller.refresh_presets_view_if_possible(self)
 
     def _refresh_presets_view_from_cache(self) -> None:
-        shared_runtime.refresh_presets_view_from_cache(self)
+        self._runtime_controller.refresh_presets_view_from_cache(self)
 
     def _rebuild_presets_rows(self, all_presets: dict[str, dict[str, object]], *, started_at: float | None = None) -> None:
         try:
@@ -2020,7 +1971,7 @@ class BaseZapret2UserPresetsPage(BasePage):
                 self._presets_delegate.reset_interaction_state()
             if self._presets_model:
                 self._presets_model.set_rows(plan.rows)
-            self._ensure_preset_list_current_index()
+            self._runtime_controller.ensure_preset_list_current_index(self)
             if view_state:
                 self._restore_presets_view_state(view_state)
 
@@ -2108,7 +2059,7 @@ class BaseZapret2UserPresetsPage(BasePage):
         result = self._controller.activate_preset(file_name=name, display_name=display_name)
         log(result.log_message, result.log_level)
         if result.ok and result.activated_file_name:
-            self._apply_active_preset_marker_for_target(result.activated_file_name)
+            self._runtime_controller.apply_active_preset_marker_for_target(self, result.activated_file_name)
             return
 
         if result.infobar_level == "error":
@@ -2154,18 +2105,6 @@ class BaseZapret2UserPresetsPage(BasePage):
             global_pos=global_pos,
         )
 
-    def _ensure_preset_list_current_index(self) -> None:
-        if self._presets_model is None:
-            return
-        current = self.presets_list.currentIndex()
-        if current.isValid() and str(current.data(_PresetListModel.KindRole) or "") == "preset":
-            return
-        for row in range(self._presets_model.rowCount()):
-            index = self._presets_model.index(row, 0)
-            if str(index.data(_PresetListModel.KindRole) or "") == "preset":
-                self.presets_list.setCurrentIndex(index)
-                break
-
     def _on_rename_preset(self, name: str):
         if self._is_builtin_preset_file(name):
             InfoBar.warning(
@@ -2181,7 +2120,7 @@ class BaseZapret2UserPresetsPage(BasePage):
             display_name = self._resolve_display_name(name)
             result = self._controller.duplicate_preset(file_name=name, display_name=display_name)
             if result.structure_changed:
-                shared_runtime.mark_presets_structure_changed(self)
+                self._runtime_controller.mark_presets_structure_changed(self)
             log(result.log_message, result.log_level)
 
         except Exception as e:
@@ -2263,7 +2202,7 @@ class BaseZapret2UserPresetsPage(BasePage):
 
             result = self._controller.delete_preset(file_name=name, display_name=display_name)
             if result.structure_changed:
-                shared_runtime.mark_presets_structure_changed(self)
+                self._runtime_controller.mark_presets_structure_changed(self)
             log(result.log_message, result.log_level)
 
         except Exception as e:
@@ -2323,7 +2262,7 @@ class BaseZapret2UserPresetsPage(BasePage):
         try:
             result = self._controller.restore_deleted_presets()
             if result.structure_changed:
-                shared_runtime.mark_presets_structure_changed(self)
+                self._runtime_controller.mark_presets_structure_changed(self)
             log(result.log_message, result.log_level)
         except Exception as e:
             log(f"Ошибка восстановления удалённых пресетов: {e}", "ERROR")

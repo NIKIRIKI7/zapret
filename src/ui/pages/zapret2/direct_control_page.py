@@ -217,10 +217,26 @@ class Zapret2DirectControlPage(BasePage):
 
     def _after_ui_built(self) -> None:
         try:
+            self._sync_program_settings()
+        except Exception:
+            pass
+        try:
+            self._sync_direct_launch_mode_from_settings()
+        except Exception:
+            pass
+        try:
+            self._hydrate_initial_advanced_settings()
+        except Exception:
+            pass
+        try:
+            self._hydrate_initial_preset_summary()
+        except Exception:
+            pass
+        try:
             plan = self._controller.build_optimistic_startup_plan()
             if plan.should_mark_running:
                 self.update_status("running")
-            if plan.preset_name_text:
+            if plan.preset_name_text and not str(self.preset_name_label.text() or "").strip():
                 self.preset_name_label.setText(plan.preset_name_text)
                 set_tooltip(self.preset_name_label, plan.preset_name_tooltip)
         except Exception:
@@ -278,6 +294,21 @@ class Zapret2DirectControlPage(BasePage):
         except Exception:
             pass
         _log_startup_z2_control_metric("showEvent.refresh_mode_label", (_time.perf_counter() - _t_mode) * 1000)
+
+    def _hydrate_initial_advanced_settings(self) -> None:
+        state = self._controller.load_advanced_settings_state()
+        plan = self._controller.build_advanced_settings_apply_plan(state if isinstance(state, dict) else {})
+        self._advanced_settings_dirty = False
+        self._apply_advanced_settings_plan(plan)
+
+    def _hydrate_initial_preset_summary(self) -> None:
+        payload = self._controller.load_preset_summary_payload()
+        plan = self._controller.build_preset_summary_plan(payload, language=self._ui_language)
+        self._preset_summary_dirty = False
+        self.preset_name_label.setText(plan.preset_name_text)
+        set_tooltip(self.preset_name_label, plan.preset_name_tooltip)
+        self.strategy_label.setText(plan.strategy_text)
+        set_tooltip(self.strategy_label, plan.strategy_tooltip)
 
     def _prewarm_direct_payload(self) -> None:
         try:
@@ -665,7 +696,7 @@ class Zapret2DirectControlPage(BasePage):
 
         self.advanced_card, self.advanced_notice = build_advanced_settings_section(
             title=tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"),
-            warning_text=tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="⚠ Изменяйте только если знаете что делаете"),
+            warning_text=tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="Изменяйте только если знаете что делаете"),
             parent=self.content,
             toggle_rows=[
                 self.discord_restart_toggle,
@@ -1094,7 +1125,7 @@ class Zapret2DirectControlPage(BasePage):
         self.direct_mode_caption.setText(tr_catalog("page.z2_control.direct_mode.caption", language=self._ui_language, default="Режим прямого запуска"))
         if getattr(self, "advanced_notice", None) is not None:
             self.advanced_notice.setText(
-                tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="⚠ Изменяйте только если знаете что делаете")
+                tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="Изменяйте только если знаете что делаете")
             )
         try:
             title_label = getattr(self.program_settings_card, "titleLabel", None)

@@ -9,6 +9,11 @@ class OrchestraZapret2DirectControlPage(Zapret2DirectControlPage):
         self._apply_orchestra_labels()
         self._refresh_direct_mode_label()
 
+    def _after_ui_built(self) -> None:
+        super()._after_ui_built()
+        self._apply_orchestra_labels(language=self._ui_language)
+        self._refresh_direct_mode_label()
+
     def _apply_orchestra_labels(self, language: str | None = None) -> None:
         try:
             self.title_label.setText(
@@ -116,6 +121,75 @@ class OrchestraZapret2DirectControlPage(Zapret2DirectControlPage):
             )
         except Exception:
             pass
+
+    def _sync_direct_launch_mode_from_settings(self) -> None:
+        self._refresh_direct_mode_label()
+
+    def _build_orchestra_preset_summary(self) -> tuple[str, str, str, str]:
+        preset_name = ""
+        category_names: list[str] = []
+
+        try:
+            from preset_orchestra_zapret2 import PresetManager
+
+            manager = PresetManager()
+            preset_name = str(manager.get_active_preset_name() or "").strip()
+            selections = manager.get_strategy_selections() or {}
+            category_names = [str(key or "").strip() for key in selections.keys() if str(key or "").strip()]
+        except Exception:
+            preset_name = ""
+            category_names = []
+
+        if not preset_name:
+            preset_name = tr_catalog(
+                "page.z2_control.preset.not_selected",
+                language=self._ui_language,
+                default="Не выбран",
+            )
+            preset_tooltip = ""
+        else:
+            preset_tooltip = preset_name
+
+        if category_names:
+            strategy_text = " • ".join(category_names)
+            strategy_tooltip = "\n".join(category_names)
+        else:
+            strategy_text = tr_catalog(
+                "page.z2_orchestra_control.strategy.no_active_categories",
+                language=self._ui_language,
+                default="Нет активных категорий",
+            )
+            strategy_tooltip = ""
+
+        return preset_name, preset_tooltip, strategy_text, strategy_tooltip
+
+    def _hydrate_initial_advanced_settings(self) -> None:
+        self._advanced_settings_dirty = False
+        self._load_advanced_settings()
+
+    def _hydrate_initial_preset_summary(self) -> None:
+        self._preset_summary_dirty = False
+        preset_name, preset_tooltip, strategy_text, strategy_tooltip = self._build_orchestra_preset_summary()
+        self.preset_name_label.setText(preset_name)
+        set_tooltip(self.preset_name_label, preset_tooltip)
+        self.strategy_label.setText(strategy_text)
+        set_tooltip(self.strategy_label, strategy_tooltip)
+
+    def _schedule_advanced_settings_reload(self, *, force: bool = False) -> None:
+        if not force and not getattr(self, "_advanced_settings_dirty", True):
+            return
+        self._advanced_settings_dirty = False
+        self._load_advanced_settings()
+
+    def _schedule_preset_summary_reload(self, *, force: bool = False) -> None:
+        if not force and not getattr(self, "_preset_summary_dirty", True):
+            return
+        self._preset_summary_dirty = False
+        preset_name, preset_tooltip, strategy_text, strategy_tooltip = self._build_orchestra_preset_summary()
+        self.preset_name_label.setText(preset_name)
+        set_tooltip(self.preset_name_label, preset_tooltip)
+        self.strategy_label.setText(strategy_text)
+        set_tooltip(self.strategy_label, strategy_tooltip)
 
     def _on_debug_log_toggled(self, enabled: bool) -> None:
         try:

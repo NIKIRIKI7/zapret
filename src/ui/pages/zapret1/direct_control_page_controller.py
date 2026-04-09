@@ -47,6 +47,13 @@ class Zapret1StrategyUpdatePlan:
         self.strategy_name = strategy_name
 
 
+class Zapret1OptimisticStartupPlan:
+    def __init__(self, *, should_mark_running: bool, preset_name_text: str, preset_name_tooltip: str):
+        self.should_mark_running = bool(should_mark_running)
+        self.preset_name_text = preset_name_text
+        self.preset_name_tooltip = preset_name_tooltip
+
+
 class Zapret1DirectControlPageController(ControlPageController):
     @staticmethod
     def build_activation_plan() -> Zapret1ActivationPlan:
@@ -168,6 +175,22 @@ class Zapret1DirectControlPageController(ControlPageController):
         return DirectPresetNamePlan(
             text=tr_catalog("page.z1_control.preset.not_selected", language=language, default="Не выбран"),
             tooltip="",
+        )
+
+    @staticmethod
+    def build_optimistic_startup_plan(*, language: str) -> Zapret1OptimisticStartupPlan:
+        try:
+            from strategy_menu import get_strategy_launch_method
+
+            method = str(get_strategy_launch_method() or "").strip().lower()
+        except Exception:
+            method = ""
+
+        preset_plan = Zapret1DirectControlPageController.build_preset_name_plan(language=language)
+        return Zapret1OptimisticStartupPlan(
+            should_mark_running=(method == "direct_zapret1"),
+            preset_name_text=preset_plan.text,
+            preset_name_tooltip=preset_plan.tooltip,
         )
 
     @staticmethod

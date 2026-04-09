@@ -31,7 +31,14 @@ _IDLE_PRELOAD_PAGE_PRIORITY: tuple[PageName, ...] = (
     PageName.AUTOSTART,
 )
 def get_eager_page_names(window) -> tuple[PageName, ...]:
-    method = window._get_launch_method()
+    getter = getattr(window, "_get_launch_method", None)
+    if callable(getter):
+        try:
+            method = getter()
+        except Exception:
+            method = ""
+    else:
+        method = ""
 
     names: list[PageName] = []
     eager_mode_entry_page = getattr(window, "_eager_mode_entry_page", {}) or {}
@@ -58,7 +65,16 @@ def create_pages(window) -> None:
     _t_pages_total = _time.perf_counter()
 
     for page_name in get_eager_page_names(window):
-        ensure_page(window, page_name)
+        page = ensure_page(window, page_name)
+        if page is not None:
+            try:
+                profile = get_page_performance_profile(resolve_page_name(window, page_name))
+                if str(profile.warmup_policy or "").strip().lower() == "ui":
+                    warm = getattr(page, "prime_for_open", None)
+                    if callable(warm):
+                        warm()
+            except Exception:
+                pass
         window._pump_startup_ui()
 
     log(
@@ -73,6 +89,7 @@ def _build_idle_page_preload_plan(window) -> tuple[tuple[str, object, str], ...]
     tasks: list[tuple[str, object, str]] = []
     seen_modules: set[str] = set()
     queued_pages: set[PageName] = set()
+    eager_pages = set(get_eager_page_names(window))
 
     ordered_page_names: list[PageName] = []
 
@@ -109,6 +126,12 @@ def _build_idle_page_preload_plan(window) -> tuple[tuple[str, object, str], ...]
 
         _append_module_for_page(resolved_name)
         if profile.warmup_policy == "ui":
+            if resolved_name in {
+                PageName.ZAPRET2_DIRECT_CONTROL,
+                PageName.ZAPRET2_ORCHESTRA_CONTROL,
+                PageName.ZAPRET1_DIRECT_CONTROL,
+            } and resolved_name not in eager_pages:
+                continue
             tasks.append(("page", resolved_name, "prime_for_open"))
 
     return tuple(tasks)

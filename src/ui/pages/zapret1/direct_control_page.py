@@ -66,7 +66,24 @@ class Zapret1DirectControlPage(BasePage):
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
         self._last_known_dpi_running = False
-        self.enable_deferred_ui_build()
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+
+    def _after_ui_built(self) -> None:
+        try:
+            self._sync_program_settings()
+        except Exception:
+            pass
+        try:
+            plan = self._controller.build_optimistic_startup_plan(language=self._ui_language)
+            if plan.preset_name_text:
+                self.preset_name_label.setText(plan.preset_name_text)
+                set_tooltip(self.preset_name_label, plan.preset_name_tooltip)
+            if plan.should_mark_running:
+                self.update_status("running")
+            else:
+                self.update_status("stopped")
+        except Exception:
+            pass
 
     def _start_dpi(self) -> None:
         start_dpi(self)

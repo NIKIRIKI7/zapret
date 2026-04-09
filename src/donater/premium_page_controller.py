@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import importlib.util
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 
 
 @dataclass(slots=True)
@@ -175,17 +172,8 @@ class PremiumPageController:
 
     @staticmethod
     def create_worker_thread(target, args=None):
-        worker_path = Path(__file__).with_name("premium_worker.py")
-        spec = importlib.util.spec_from_file_location(
-            "_premium_worker_runtime",
-            worker_path,
-        )
-        if spec is None or spec.loader is None:
-            raise RuntimeError("premium worker module load failed")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules.setdefault(spec.name, module)
-        spec.loader.exec_module(module)
-        return module.PremiumWorkerThread(target, args=args)
+        from donater.premium_worker import PremiumWorkerThread
+        return PremiumWorkerThread(target, args=args)
 
     @staticmethod
     def build_subscription_snapshot_plan(is_premium: bool, days_remaining: int | None) -> tuple[PremiumStatusBadgePlan, PremiumDaysPlan, int]:

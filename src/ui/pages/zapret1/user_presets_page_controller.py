@@ -65,8 +65,10 @@ class UserPresetActivationResult:
     activated_file_name: str | None
 
 
-class Zapret2UserPresetsPageController:
-    LAUNCH_METHOD = "direct_zapret2"
+class Zapret1UserPresetsPageController:
+    LAUNCH_METHOD = "direct_zapret1"
+    SELECTION_KEY = "winws1"
+    HIERARCHY_SCOPE = "preset_zapret1"
 
     @classmethod
     def _get_direct_facade(cls):
@@ -75,16 +77,10 @@ class Zapret2UserPresetsPageController:
         return DirectPresetFacade.from_launch_method(cls.LAUNCH_METHOD)
 
     @staticmethod
-    def _generic_error_result(error, *, title: str = "Ошибка") -> UserPresetActionResult:
-        return UserPresetActionResult(
-            ok=False,
-            log_level="ERROR",
-            log_message=f"Ошибка: {error}",
-            infobar_level="error",
-            infobar_title=title,
-            infobar_content=f"Ошибка: {error}",
-            structure_changed=False,
-        )
+    def get_preset_store():
+        from core.services import get_preset_store_v1
+
+        return get_preset_store_v1()
 
     def create_preset(self, *, name: str, from_current: bool) -> UserPresetActionResult:
         facade = self._get_direct_facade()
@@ -184,6 +180,10 @@ class Zapret2UserPresetsPageController:
         new_name = f"{display_name} (копия)"
         facade = self._get_direct_facade()
         facade.duplicate_by_file_name(file_name, new_name)
+        try:
+            self.get_hierarchy_store().copy_preset_meta_to_new(file_name, new_name, source_display_name=display_name)
+        except Exception:
+            pass
         return UserPresetActionResult(
             ok=True,
             log_level="INFO",
@@ -226,22 +226,7 @@ class Zapret2UserPresetsPageController:
             )
 
         facade = self._get_direct_facade()
-        try:
-            facade.delete_by_file_name(file_name)
-        except Exception as e:
-            if "Preset not found" in str(e):
-                return UserPresetActionResult(
-                    ok=False,
-                    log_level="ERROR",
-                    log_message=f"Ошибка удаления пресета: {e}",
-                    infobar_level=None,
-                    infobar_title="",
-                    infobar_content="",
-                    structure_changed=False,
-                    error_code="not_found",
-                )
-            raise
-
+        facade.delete_by_file_name(file_name)
         return UserPresetActionResult(
             ok=True,
             log_level="INFO",
@@ -284,14 +269,6 @@ class Zapret2UserPresetsPageController:
             structure_changed=True,
             switched_file_name=selected_file_name,
         )
-
-    def has_deleted_presets(self) -> bool:
-        try:
-            from core.presets.template_support import get_deleted_template_names
-
-            return bool(get_deleted_template_names(self.LAUNCH_METHOD))
-        except Exception:
-            return False
 
     @staticmethod
     def open_presets_info() -> UserPresetActionResult:
@@ -371,7 +348,7 @@ class Zapret2UserPresetsPageController:
                 for item in facade.list_manifests()
             ]
         except Exception as e:
-            log(f"Z2UserPresetsPage: не удалось загрузить lightweight список пресетов: {e}", "ERROR")
+            log(f"Z1UserPresetsPage: не удалось загрузить lightweight список пресетов: {e}", "ERROR")
             return []
 
     @classmethod
@@ -384,20 +361,20 @@ class Zapret2UserPresetsPageController:
         except Exception:
             return ""
 
-    @staticmethod
-    def get_selected_source_preset_file_name_light() -> str:
+    @classmethod
+    def get_selected_source_preset_file_name_light(cls) -> str:
         try:
             from core.services import get_selection_service
 
-            return str(get_selection_service().get_selected_file_name("winws2") or "").strip()
+            return str(get_selection_service().get_selected_file_name(cls.SELECTION_KEY) or "").strip()
         except Exception:
             return ""
 
-    @staticmethod
-    def get_presets_dir_light():
+    @classmethod
+    def get_presets_dir_light(cls):
         from core.services import get_app_paths
 
-        return get_app_paths().engine_paths("winws2").ensure_directories().presets_dir
+        return get_app_paths().engine_paths(cls.SELECTION_KEY).ensure_directories().presets_dir
 
     def load_preset_list_metadata_light(self) -> dict[str, dict[str, object]]:
         from core.presets.list_metadata import read_preset_list_metadata
@@ -493,7 +470,7 @@ class Zapret2UserPresetsPageController:
     def get_hierarchy_store(self):
         from core.presets.library_hierarchy import PresetHierarchyStore
 
-        return PresetHierarchyStore("preset_zapret2")
+        return PresetHierarchyStore(self.HIERARCHY_SCOPE)
 
     def is_builtin_preset_file_with_cache(self, name: str, cached_metadata: dict[str, dict[str, object]] | None) -> bool:
         candidate = str(name or "").strip()
@@ -622,7 +599,7 @@ class Zapret2UserPresetsPageController:
                     {
                         "kind": "empty",
                         "text": tr_catalog(
-                            "page.z2_user_presets.empty.not_found",
+                            "page.z1_user_presets.empty.not_found",
                             language=language,
                             default="Ничего не найдено.",
                         ),
@@ -633,7 +610,7 @@ class Zapret2UserPresetsPageController:
                     {
                         "kind": "empty",
                         "text": tr_catalog(
-                            "page.z2_user_presets.empty.none",
+                            "page.z1_user_presets.empty.none",
                             language=language,
                             default="Нет пресетов. Создайте новый или импортируйте из файла.",
                         ),
@@ -669,8 +646,8 @@ class Zapret2UserPresetsPageController:
                 ok=False,
                 log_level="ERROR",
                 log_message=f"Ошибка активации пресета: {e}",
-                infobar_level="error",
+                infobar_level="warning",
                 infobar_title="Ошибка",
-                infobar_content=f"Ошибка: {e}",
+                infobar_content=f"Не удалось активировать пресет '{target_display_name}'",
                 activated_file_name=None,
             )
