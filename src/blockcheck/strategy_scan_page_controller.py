@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from ui.text_catalog import tr as tr_catalog
 from ui.support_request_actions import prepare_strategy_scan_support_request
 
 
@@ -50,7 +51,124 @@ class StrategyScanFinishPlan:
     baseline_variant: str
 
 
+@dataclass(slots=True)
+class StrategyScanProgressPlan:
+    total: int
+    working_count: int
+    status_text: str
+
+
+@dataclass(slots=True)
+class StrategyScanResultPresentation:
+    number_text: str
+    strategy_name: str
+    strategy_tooltip: str
+    status_text: str
+    status_tone: str
+    status_tooltip: str
+    time_text: str
+    can_apply: bool
+    stored_row: dict[str, object]
+
+
+@dataclass(slots=True)
+class StrategyScanNotificationPlan:
+    kind: str
+    title_key: str
+    title_default: str
+    body_key: str
+    body_default: str
+    body_text: str
+
+
+@dataclass(slots=True)
+class StrategyScanProtocolUiPlan:
+    scan_protocol: str
+    is_udp_games: bool
+    show_target_controls: bool
+    normalized_target: str
+    placeholder_text: str
+
+
+@dataclass(slots=True)
+class StrategyScanUdpHintPlan:
+    visible: bool
+    text: str
+    tooltip: str
+
+
+@dataclass(slots=True)
+class StrategyScanQuickMenuPlan:
+    options: list[str]
+    current_value: str
+
+
+@dataclass(slots=True)
+class StrategyScanInteractionPlan:
+    start_enabled: bool
+    stop_enabled: bool
+    protocol_enabled: bool
+    games_scope_enabled: bool
+    mode_enabled: bool
+    target_enabled: bool
+    quick_domain_enabled: bool
+
+
+@dataclass(slots=True)
+class StrategyScanLogExpandPlan:
+    control_visible: bool
+    warning_visible: bool
+    results_visible: bool
+    log_min_height: int
+    log_max_height: int
+    button_text: str
+
+
+@dataclass(slots=True)
+class StrategyScanLanguagePlan:
+    control_title: str
+    results_title: str
+    log_title: str
+    expand_log_text: str
+    warning_title: str
+    start_text: str
+    stop_text: str
+    prepare_support_text: str
+    protocol_items: list[str]
+    udp_scope_label: str
+    udp_scope_items: list[str]
+    quick_domains_text: str
+    quick_domains_tooltip: str
+
+
+@dataclass(slots=True)
+class StrategyScanUiMessagePlan:
+    kind: str
+    title_key: str
+    title_default: str
+    body_text: str
+    status_text: str = ""
+
+
 class StrategyScanPageController:
+    def __init__(self) -> None:
+        self._quick_domains_cache: list[str] | None = None
+        self._quick_stun_targets_cache: list[str] | None = None
+
+    @staticmethod
+    def scan_protocol_from_value(value) -> str:
+        raw = str(value or "").strip().lower()
+        if raw == "stun_voice":
+            return "stun_voice"
+        if raw == "udp_games":
+            return "udp_games"
+        return "tcp_https"
+
+    @staticmethod
+    def mode_from_index(index: int) -> str:
+        mode_map = {0: "quick", 1: "standard", 2: "full"}
+        return mode_map.get(int(index), "quick")
+
     @staticmethod
     def normalize_udp_games_scope(scope: str) -> str:
         raw = (scope or "").strip().lower()
@@ -226,6 +344,9 @@ class StrategyScanPageController:
         return ["lists/ipset-all.txt"]
 
     def load_quick_domains(self) -> list[str]:
+        if self._quick_domains_cache is not None:
+            return list(self._quick_domains_cache)
+
         try:
             from blockcheck.targets import load_domains
 
@@ -242,9 +363,13 @@ class StrategyScanPageController:
             seen.add(domain)
             normalized_domains.append(domain)
 
-        return normalized_domains
+        self._quick_domains_cache = normalized_domains
+        return list(self._quick_domains_cache)
 
     def load_quick_stun_targets(self) -> list[str]:
+        if self._quick_stun_targets_cache is not None:
+            return list(self._quick_stun_targets_cache)
+
         try:
             from blockcheck.targets import get_default_stun_targets
 
@@ -262,7 +387,256 @@ class StrategyScanPageController:
             seen.add(normalized)
             targets.append(normalized)
 
-        return targets
+        self._quick_stun_targets_cache = targets
+        return list(self._quick_stun_targets_cache)
+
+    def build_protocol_ui_plan(self, *, scan_protocol: str, current_value: str) -> StrategyScanProtocolUiPlan:
+        current = str(current_value or "")
+        is_udp_games = scan_protocol == "udp_games"
+        show_target_controls = scan_protocol != "udp_games"
+
+        if scan_protocol in {"stun_voice", "udp_games"} and current and ":" not in current and not current.upper().startswith("STUN:"):
+            current = ""
+
+        normalized = self.normalize_target_input(current, scan_protocol)
+        if not normalized:
+            normalized = self.default_target_for_protocol(scan_protocol)
+
+        return StrategyScanProtocolUiPlan(
+            scan_protocol=scan_protocol,
+            is_udp_games=is_udp_games,
+            show_target_controls=show_target_controls,
+            normalized_target=normalized,
+            placeholder_text=self.default_target_for_protocol(scan_protocol),
+        )
+
+    def build_udp_scope_hint_plan(
+        self,
+        *,
+        scan_protocol: str,
+        udp_games_scope: str,
+        scope_all_label: str,
+        scope_games_only_label: str,
+    ) -> StrategyScanUdpHintPlan:
+        if scan_protocol != "udp_games":
+            return StrategyScanUdpHintPlan(
+                visible=False,
+                text="",
+                tooltip="",
+            )
+
+        paths = self.resolve_games_ipset_paths(udp_games_scope)
+        scope_label = scope_games_only_label if udp_games_scope == "games_only" else scope_all_label
+
+        short_names = [Path(p).name or p for p in paths]
+        preview = ", ".join(short_names[:4])
+        if len(short_names) > 4:
+            preview += f", ... (+{len(short_names) - 4})"
+
+        return StrategyScanUdpHintPlan(
+            visible=True,
+            text=f"UDP scope: {scope_label} | ipset files: {len(paths)} | {preview}",
+            tooltip="\n".join(paths),
+        )
+
+    def build_quick_target_menu_plan(self, *, scan_protocol: str, current_value: str) -> StrategyScanQuickMenuPlan:
+        current = self.normalize_target_input(current_value, scan_protocol)
+        options = self.load_quick_domains() if scan_protocol == "tcp_https" else self.load_quick_stun_targets()
+        return StrategyScanQuickMenuPlan(
+            options=options,
+            current_value=current,
+        )
+
+    @staticmethod
+    def build_running_interaction_plan() -> StrategyScanInteractionPlan:
+        return StrategyScanInteractionPlan(
+            start_enabled=False,
+            stop_enabled=True,
+            protocol_enabled=False,
+            games_scope_enabled=False,
+            mode_enabled=False,
+            target_enabled=False,
+            quick_domain_enabled=False,
+        )
+
+    @staticmethod
+    def build_idle_interaction_plan(*, is_udp_games: bool) -> StrategyScanInteractionPlan:
+        return StrategyScanInteractionPlan(
+            start_enabled=True,
+            stop_enabled=False,
+            protocol_enabled=True,
+            games_scope_enabled=bool(is_udp_games),
+            mode_enabled=True,
+            target_enabled=True,
+            quick_domain_enabled=True,
+        )
+
+    @staticmethod
+    def build_log_expand_plan(*, expanded: bool, language: str) -> StrategyScanLogExpandPlan:
+        if expanded:
+            return StrategyScanLogExpandPlan(
+                control_visible=False,
+                warning_visible=False,
+                results_visible=False,
+                log_min_height=400,
+                log_max_height=16777215,
+                button_text=tr_catalog("page.strategy_scan.collapse_log", language=language, default="Свернуть"),
+            )
+        return StrategyScanLogExpandPlan(
+            control_visible=True,
+            warning_visible=True,
+            results_visible=True,
+            log_min_height=180,
+            log_max_height=300,
+            button_text=tr_catalog("page.strategy_scan.expand_log", language=language, default="Развернуть"),
+        )
+
+    @staticmethod
+    def build_language_plan(*, language: str, log_expanded: bool) -> StrategyScanLanguagePlan:
+        return StrategyScanLanguagePlan(
+            control_title=tr_catalog("page.strategy_scan.control", language=language, default="Управление сканированием"),
+            results_title=tr_catalog("page.strategy_scan.results", language=language, default="Результаты"),
+            log_title=tr_catalog("page.strategy_scan.log", language=language, default="Подробный лог"),
+            expand_log_text=(
+                tr_catalog("page.strategy_scan.collapse_log", language=language, default="Свернуть")
+                if log_expanded
+                else tr_catalog("page.strategy_scan.expand_log", language=language, default="Развернуть")
+            ),
+            warning_title=tr_catalog("page.strategy_scan.warning_title", language=language, default="Внимание"),
+            start_text=tr_catalog("page.strategy_scan.start", language=language, default="Начать сканирование"),
+            stop_text=tr_catalog("page.strategy_scan.stop", language=language, default="Остановить"),
+            prepare_support_text=tr_catalog(
+                "page.strategy_scan.prepare_support",
+                language=language,
+                default="Подготовить обращение",
+            ),
+            protocol_items=[
+                tr_catalog("page.strategy_scan.protocol_tcp", language=language, default="TCP/HTTPS"),
+                tr_catalog(
+                    "page.strategy_scan.protocol_stun",
+                    language=language,
+                    default="STUN Voice (Discord/Telegram)",
+                ),
+                tr_catalog(
+                    "page.strategy_scan.protocol_games",
+                    language=language,
+                    default="UDP Games (Roblox/Amazon/Steam)",
+                ),
+            ],
+            udp_scope_label=tr_catalog("page.strategy_scan.udp_scope", language=language, default="Охват UDP:"),
+            udp_scope_items=[
+                tr_catalog(
+                    "page.strategy_scan.udp_scope_all",
+                    language=language,
+                    default="Все ipset (по умолчанию)",
+                ),
+                tr_catalog(
+                    "page.strategy_scan.udp_scope_games_only",
+                    language=language,
+                    default="Только игровые ipset",
+                ),
+            ],
+            quick_domains_text=tr_catalog("page.strategy_scan.quick_domains", language=language, default="Быстрый выбор"),
+            quick_domains_tooltip=tr_catalog(
+                "page.strategy_scan.quick_domains_hint",
+                language=language,
+                default="Выберите домен из готового списка",
+            ),
+        )
+
+    @staticmethod
+    def build_apply_success_plan(result: StrategyApplyResult) -> StrategyScanUiMessagePlan:
+        return StrategyScanUiMessagePlan(
+            kind="success",
+            title_key="page.strategy_scan.applied",
+            title_default="Стратегия добавлена",
+            body_text=f"{result.strategy_name} добавлена в пресет для {result.applied_target}",
+        )
+
+    @staticmethod
+    def build_apply_error_plan(error_text: str) -> StrategyScanUiMessagePlan:
+        return StrategyScanUiMessagePlan(
+            kind="warning",
+            title_key="common.error",
+            title_default="Ошибка",
+            body_text=str(error_text or ""),
+        )
+
+    @staticmethod
+    def build_support_success_plan(feedback) -> StrategyScanUiMessagePlan:
+        return StrategyScanUiMessagePlan(
+            kind="success",
+            title_key="page.strategy_scan.support_prepared_title",
+            title_default="Обращение подготовлено",
+            body_text=str(getattr(feedback, "info_text", "") or ""),
+            status_text=str(getattr(feedback, "status_text", "") or ""),
+        )
+
+    @staticmethod
+    def build_support_error_plan(error_text: str) -> StrategyScanUiMessagePlan:
+        return StrategyScanUiMessagePlan(
+            kind="warning",
+            title_key="page.strategy_scan.error",
+            title_default="Ошибка сканирования",
+            body_text=f"Не удалось подготовить обращение:\n{error_text}",
+            status_text="Ошибка подготовки",
+        )
+
+    @staticmethod
+    def count_working_results(result_rows: list[dict]) -> int:
+        return sum(1 for row in result_rows if row.get("success"))
+
+    def build_progress_plan(
+        self,
+        *,
+        strategy_name: str,
+        index: int,
+        total: int,
+        result_rows: list[dict],
+    ) -> StrategyScanProgressPlan:
+        working = self.count_working_results(result_rows)
+        return StrategyScanProgressPlan(
+            total=max(0, int(total)),
+            working_count=working,
+            status_text=f"[{index + 1}/{total}] {strategy_name}  |  {working} рабочих",
+        )
+
+    def build_result_presentation(self, result, *, scan_cursor: int) -> StrategyScanResultPresentation:
+        tip_parts = [result.strategy_args]
+        if result.error:
+            tip_parts.append(f"\n--- Ошибка ---\n{result.error}")
+
+        error_text = str(getattr(result, "error", "") or "")
+        error_lower = error_text.lower()
+        if result.success:
+            status_text = "OK"
+            status_tone = "success"
+        elif "timeout" in error_lower:
+            status_text = "TIMEOUT"
+            status_tone = "timeout"
+        else:
+            status_text = "FAIL"
+            status_tone = "fail"
+
+        time_ms = float(getattr(result, "time_ms", 0) or 0)
+        time_text = f"{time_ms:.0f}" if time_ms > 0 else "—"
+
+        return StrategyScanResultPresentation(
+            number_text=str(scan_cursor + 1),
+            strategy_name=result.strategy_name,
+            strategy_tooltip="".join(tip_parts),
+            status_text=status_text,
+            status_tone=status_tone,
+            status_tooltip=error_text if error_text else "OK",
+            time_text=time_text,
+            can_apply=bool(result.success),
+            stored_row={
+                "id": getattr(result, "strategy_id", ""),
+                "name": result.strategy_name,
+                "args": result.strategy_args,
+                "success": bool(result.success),
+            },
+        )
 
     def plan_scan_start(
         self,
@@ -693,6 +1067,63 @@ class StrategyScanPageController:
             support_status_code="ready",
             notification_kind=notification_kind,
             baseline_variant="stun" if scan_protocol in {"stun_voice", "udp_games"} else "tcp",
+        )
+
+    def build_finish_notification_plan(self, finish_plan: StrategyScanFinishPlan, *, scan_protocol: str) -> StrategyScanNotificationPlan:
+        if finish_plan.notification_kind == "baseline_accessible":
+            if scan_protocol == "udp_games":
+                title_default = "UDP уже доступен"
+            elif finish_plan.baseline_variant == "stun":
+                title_default = "STUN уже доступен"
+            else:
+                title_default = "Домен уже доступен"
+
+            if finish_plan.baseline_variant == "stun":
+                return StrategyScanNotificationPlan(
+                    kind="warning",
+                    title_key="page.strategy_scan.baseline_ok_title_stun",
+                    title_default=title_default,
+                    body_key="page.strategy_scan.baseline_ok_text_stun",
+                    body_default="STUN/UDP уже доступен без обхода DPI — результаты могут быть ложноположительными",
+                    body_text="",
+                )
+
+            return StrategyScanNotificationPlan(
+                kind="warning",
+                title_key="page.strategy_scan.baseline_ok_title",
+                title_default=title_default,
+                body_key="page.strategy_scan.baseline_ok_text",
+                body_default="Домен доступен без обхода DPI — результаты могут быть ложноположительными",
+                body_text="",
+            )
+
+        if finish_plan.notification_kind == "found":
+            return StrategyScanNotificationPlan(
+                kind="success",
+                title_key="page.strategy_scan.found",
+                title_default="Найдены рабочие стратегии",
+                body_key="",
+                body_default="",
+                body_text=f"{finish_plan.working_count} из {finish_plan.total_count}",
+            )
+
+        if finish_plan.notification_kind == "not_found":
+            return StrategyScanNotificationPlan(
+                kind="warning",
+                title_key="page.strategy_scan.not_found",
+                title_default="Рабочих стратегий не найдено",
+                body_key="page.strategy_scan.try_full",
+                body_default="Попробуйте полный режим сканирования",
+                body_text="",
+            )
+
+        return StrategyScanNotificationPlan(
+            kind="none",
+            title_key="",
+            title_default="",
+            body_key="",
+            body_default="",
+            body_text="",
         )
 
     @staticmethod

@@ -7,14 +7,14 @@ Tests strategies one by one through winws2 + HTTPS probe.
 from __future__ import annotations
 
 import logging
-import threading
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QAction
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QHeaderView, QMenu
 
 from blockcheck.strategy_scan_page_controller import StrategyScanPageController
+from blockcheck.strategy_scan_worker import StrategyScanWorker
 from ui.pages.base_page import BasePage, ScrollBlockingTextEdit
 from ui.popup_menu import exec_popup_menu
 from ui.text_catalog import tr as tr_catalog
@@ -42,92 +42,6 @@ from ui.compat_widgets import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Worker (QObject, runs StrategyScanner in a daemon thread)
-# ---------------------------------------------------------------------------
-
-class StrategyScanWorker(QObject):
-    """Bridges StrategyScanner (sync, bg thread) to Qt signals (main thread)."""
-
-    strategy_started = pyqtSignal(str, int, int)   # name, index, total
-    strategy_result = pyqtSignal(object)            # StrategyProbeResult
-    scan_log = pyqtSignal(str)                      # log line
-    phase_changed = pyqtSignal(str)                 # phase description
-    scan_finished = pyqtSignal(object)              # StrategyScanReport
-
-    def __init__(
-        self,
-        target: str,
-        mode: str = "quick",
-        start_index: int = 0,
-        scan_protocol: str = "tcp_https",
-        udp_games_scope: str = "all",
-        parent=None,
-    ):
-        super().__init__(parent)
-        self._target = target
-        self._mode = mode
-        self._scan_protocol = scan_protocol
-        self._udp_games_scope = udp_games_scope
-        try:
-            self._start_index = max(0, int(start_index))
-        except Exception:
-            self._start_index = 0
-        self._scanner = None
-        self._cancelled = False
-        self._bg_thread: threading.Thread | None = None
-
-    def start(self):
-        self._cancelled = False
-        self._bg_thread = threading.Thread(
-            target=self._run_in_thread, daemon=True, name="strategy-scan-worker",
-        )
-        self._bg_thread.start()
-
-    def _run_in_thread(self):
-        try:
-            from blockcheck.strategy_scanner import StrategyScanner
-            self._scanner = StrategyScanner(
-                target=self._target,
-                mode=self._mode,
-                start_index=self._start_index,
-                callback=self,
-                scan_protocol=self._scan_protocol,
-                udp_games_scope=self._udp_games_scope,
-            )
-            report = self._scanner.run()
-            self.scan_finished.emit(report)
-        except Exception as e:
-            logger.exception("StrategyScanWorker crashed")
-            self.scan_log.emit(f"ERROR: {e}")
-            self.scan_finished.emit(None)
-
-    def stop(self):
-        self._cancelled = True
-        if self._scanner:
-            self._scanner.cancel()
-
-    @property
-    def is_running(self) -> bool:
-        return self._bg_thread is not None and self._bg_thread.is_alive()
-
-    # --- StrategyScanCallback implementation (called from bg thread) ---
-    def on_strategy_started(self, name, index, total):
-        self.strategy_started.emit(name, index, total)
-
-    def on_strategy_result(self, result):
-        self.strategy_result.emit(result)
-
-    def on_log(self, message):
-        self.scan_log.emit(message)
-
-    def on_phase(self, phase):
-        self.phase_changed.emit(phase)
-
-    def is_cancelled(self):
-        return self._cancelled
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +75,6 @@ class StrategyScanPage(BasePage):
         self._scan_cursor: int = 0
         self._run_log_file: Path | None = None
         self._quick_domain_btn: ActionButton | None = None
-        self._quick_domains_cache: list[str] | None = None
-        self._quick_stun_targets_cache: list[str] | None = None
         self._target_label: QLabel | None = None
         self._games_scope_label: QLabel | None = None
         self._games_scope_combo = None
@@ -448,25 +360,17 @@ class StrategyScanPage(BasePage):
     def _toggle_log_expand(self):
         """Развернуть/свернуть лог на всю страницу."""
         self._log_expanded = not self._log_expanded
+        plan = self._controller.build_log_expand_plan(
+            expanded=self._log_expanded,
+            language=self._ui_language,
+        )
 
-        if self._log_expanded:
-            # Скрываем остальные карточки
-            self._control_card.setVisible(False)
-            self._warning_card.setVisible(False)
-            self._results_card.setVisible(False)
-            # Убираем потолок высоты лога
-            self._log_edit.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
-            self._log_edit.setMinimumHeight(400)
-            self._expand_log_btn.setText("Свернуть")
-        else:
-            # Восстанавливаем карточки
-            self._control_card.setVisible(True)
-            self._warning_card.setVisible(True)
-            self._results_card.setVisible(True)
-            # Восстанавливаем ограничения
-            self._log_edit.setMinimumHeight(180)
-            self._log_edit.setMaximumHeight(300)
-            self._expand_log_btn.setText("Развернуть")
+        self._control_card.setVisible(plan.control_visible)
+        self._warning_card.setVisible(plan.warning_visible)
+        self._results_card.setVisible(plan.results_visible)
+        self._log_edit.setMinimumHeight(plan.log_min_height)
+        self._log_edit.setMaximumHeight(plan.log_max_height)
+        self._expand_log_btn.setText(plan.button_text)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -482,13 +386,7 @@ class StrategyScanPage(BasePage):
 
     def _scan_protocol_from_combo(self) -> str:
         """Current scan protocol from UI combo."""
-        data = self._protocol_combo.currentData()
-        raw = str(data or "").strip().lower()
-        if raw == "stun_voice":
-            return "stun_voice"
-        if raw == "udp_games":
-            return "udp_games"
-        return "tcp_https"
+        return self._controller.scan_protocol_from_value(self._protocol_combo.currentData())
 
     def _udp_games_scope_from_combo(self) -> str:
         """Current UDP games scope selection from UI combo."""
@@ -500,32 +398,25 @@ class StrategyScanPage(BasePage):
     def _on_protocol_changed(self, _index: int) -> None:
         """Adjust target input defaults when protocol changes."""
         protocol = self._scan_protocol_from_combo()
-        current = self._target_input.text()
+        plan = self._controller.build_protocol_ui_plan(
+            scan_protocol=protocol,
+            current_value=self._target_input.text(),
+        )
 
-        is_udp_games = protocol == "udp_games"
         if self._games_scope_label is not None:
-            self._games_scope_label.setVisible(is_udp_games)
+            self._games_scope_label.setVisible(plan.is_udp_games)
         if self._games_scope_combo is not None:
-            self._games_scope_combo.setVisible(is_udp_games)
-            self._games_scope_combo.setEnabled(is_udp_games)
+            self._games_scope_combo.setVisible(plan.is_udp_games)
+            self._games_scope_combo.setEnabled(plan.is_udp_games)
 
-        show_target_controls = protocol != "udp_games"
         if self._target_label is not None:
-            self._target_label.setVisible(show_target_controls)
-        self._target_input.setVisible(show_target_controls)
+            self._target_label.setVisible(plan.show_target_controls)
+        self._target_input.setVisible(plan.show_target_controls)
         if self._quick_domain_btn is not None:
-            self._quick_domain_btn.setVisible(show_target_controls)
+            self._quick_domain_btn.setVisible(plan.show_target_controls)
 
-        if protocol in {"stun_voice", "udp_games"} and current and ":" not in current and not current.upper().startswith("STUN:"):
-            # When switching from TCP mode, a plain domain is usually not a STUN endpoint.
-            current = ""
-
-        normalized = self._controller.normalize_target_input(current, protocol)
-        if not normalized:
-            normalized = self._controller.default_target_for_protocol(protocol)
-
-        self._target_input.setText(normalized)
-        self._target_input.setPlaceholderText(self._controller.default_target_for_protocol(protocol))
+        self._target_input.setText(plan.normalized_target)
+        self._target_input.setPlaceholderText(plan.placeholder_text)
         self._refresh_udp_scope_hint()
 
     def _on_udp_games_scope_changed(self, _index: int) -> None:
@@ -537,47 +428,15 @@ class StrategyScanPage(BasePage):
         if self._udp_scope_hint_label is None:
             return
 
-        protocol = self._scan_protocol_from_combo()
-        if protocol != "udp_games":
-            self._udp_scope_hint_label.setVisible(False)
-            return
-
-        scope = self._udp_games_scope_from_combo()
-        paths = self._controller.resolve_games_ipset_paths(scope)
-
-        if scope == "games_only":
-            scope_label = tr_catalog("page.strategy_scan.udp_scope_games_only", default="Только игровые ipset")
-        else:
-            scope_label = tr_catalog("page.strategy_scan.udp_scope_all", default="Все ipset (по умолчанию)")
-
-        short_names = [Path(p).name or p for p in paths]
-        preview = ", ".join(short_names[:4])
-        if len(short_names) > 4:
-            preview += f", ... (+{len(short_names) - 4})"
-
-        hint = (
-            f"UDP scope: {scope_label} | "
-            f"ipset files: {len(paths)} | {preview}"
+        hint_plan = self._controller.build_udp_scope_hint_plan(
+            scan_protocol=self._scan_protocol_from_combo(),
+            udp_games_scope=self._udp_games_scope_from_combo(),
+            scope_all_label=tr_catalog("page.strategy_scan.udp_scope_all", default="Все ipset (по умолчанию)"),
+            scope_games_only_label=tr_catalog("page.strategy_scan.udp_scope_games_only", default="Только игровые ipset"),
         )
-        self._udp_scope_hint_label.setText(hint)
-        self._udp_scope_hint_label.setToolTip("\n".join(paths))
-        self._udp_scope_hint_label.setVisible(True)
-
-    def _load_quick_domains(self) -> list[str]:
-        """Load and cache quick domain choices for strategy scan."""
-        if self._quick_domains_cache is not None:
-            return list(self._quick_domains_cache)
-
-        self._quick_domains_cache = self._controller.load_quick_domains()
-        return list(self._quick_domains_cache)
-
-    def _load_quick_stun_targets(self) -> list[str]:
-        """Load and cache quick STUN endpoint choices."""
-        if self._quick_stun_targets_cache is not None:
-            return list(self._quick_stun_targets_cache)
-
-        self._quick_stun_targets_cache = self._controller.load_quick_stun_targets()
-        return list(self._quick_stun_targets_cache)
+        self._udp_scope_hint_label.setText(hint_plan.text)
+        self._udp_scope_hint_label.setToolTip(hint_plan.tooltip)
+        self._udp_scope_hint_label.setVisible(hint_plan.visible)
 
     def _show_quick_domains_menu(self) -> None:
         """Open popup menu with predefined targets for selected protocol."""
@@ -589,13 +448,15 @@ class StrategyScanPage(BasePage):
         else:
             menu = QMenu(self)
         protocol = self._scan_protocol_from_combo()
-        current = self._controller.normalize_target_input(self._target_input.text(), protocol)
-        options = self._load_quick_domains() if protocol == "tcp_https" else self._load_quick_stun_targets()
+        menu_plan = self._controller.build_quick_target_menu_plan(
+            scan_protocol=protocol,
+            current_value=self._target_input.text(),
+        )
 
-        for option in options:
+        for option in menu_plan.options:
             action = QAction(option, menu)
             action.setCheckable(True)
-            action.setChecked(option == current)
+            action.setChecked(option == menu_plan.current_value)
             action.triggered.connect(
                 lambda checked=False, selected_target=option: self._on_pick_quick_domain(selected_target)
             )
@@ -632,6 +493,32 @@ class StrategyScanPage(BasePage):
     def _apply_theme(self):
         pass  # Table colors are set per-cell, no global refresh needed
 
+    def _apply_language_plan(self, language: str) -> None:
+        plan = self._controller.build_language_plan(
+            language=language,
+            log_expanded=self._log_expanded,
+        )
+        self._control_card.set_title(plan.control_title)
+        self._results_card.set_title(plan.results_title)
+        self._log_card.set_title(plan.log_title)
+        self._expand_log_btn.setText(plan.expand_log_text)
+        self._warning_card.set_title(plan.warning_title)
+        self._start_btn.setText(plan.start_text)
+        self._stop_btn.setText(plan.stop_text)
+        if self._prepare_support_btn is not None:
+            self._prepare_support_btn.setText(plan.prepare_support_text)
+        self._protocol_combo.setItemText(0, plan.protocol_items[0])
+        self._protocol_combo.setItemText(1, plan.protocol_items[1])
+        self._protocol_combo.setItemText(2, plan.protocol_items[2])
+        if self._games_scope_label is not None:
+            self._games_scope_label.setText(plan.udp_scope_label)
+        if self._games_scope_combo is not None:
+            self._games_scope_combo.setItemText(0, plan.udp_scope_items[0])
+            self._games_scope_combo.setItemText(1, plan.udp_scope_items[1])
+        if self._quick_domain_btn is not None:
+            self._quick_domain_btn.setText(plan.quick_domains_text)
+            self._quick_domain_btn.setToolTip(plan.quick_domains_tooltip)
+
     # ------------------------------------------------------------------
     # Navigation cleanup
     # ------------------------------------------------------------------
@@ -651,8 +538,7 @@ class StrategyScanPage(BasePage):
         scan_protocol = self._scan_protocol_from_combo()
         scan_games_scope = self._udp_games_scope_from_combo() if scan_protocol == "udp_games" else "all"
 
-        _MODE_MAP = {0: "quick", 1: "standard", 2: "full"}
-        mode = _MODE_MAP.get(self._mode_combo.currentIndex(), "quick")
+        mode = self._controller.mode_from_index(self._mode_combo.currentIndex())
 
         start_plan = self._controller.plan_scan_start(
             raw_target_input=self._target_input.text(),
@@ -688,16 +574,7 @@ class StrategyScanPage(BasePage):
         )
         self._run_log_file = log_state.path
 
-        # UI state
-        self._start_btn.setEnabled(False)
-        self._stop_btn.setEnabled(True)
-        self._protocol_combo.setEnabled(False)
-        if self._games_scope_combo is not None:
-            self._games_scope_combo.setEnabled(False)
-        self._mode_combo.setEnabled(False)
-        self._target_input.setEnabled(False)
-        if self._quick_domain_btn is not None:
-            self._quick_domain_btn.setEnabled(False)
+        self._apply_interaction_plan(self._controller.build_running_interaction_plan())
         self._progress_bar.setVisible(True)
         self._progress_bar.setValue(self._scan_cursor)
         self._status_label.setText(start_plan.status_text)
@@ -737,60 +614,61 @@ class StrategyScanPage(BasePage):
     # ------------------------------------------------------------------
 
     def _on_strategy_started(self, name: str, index: int, total: int):
-        if total > 0:
-            self._progress_bar.setRange(0, total)
+        progress_plan = self._controller.build_progress_plan(
+            strategy_name=name,
+            index=index,
+            total=total,
+            result_rows=self._result_rows,
+        )
+        if progress_plan.total > 0:
+            self._progress_bar.setRange(0, progress_plan.total)
         if self._progress_bar.value() < self._scan_cursor:
             self._progress_bar.setValue(self._scan_cursor)
-        working = sum(1 for r in self._result_rows if r.get("success"))
-        self._status_label.setText(
-            f"[{index + 1}/{total}] {name}  |  {working} рабочих"
-        )
+        self._status_label.setText(progress_plan.status_text)
 
     def _on_strategy_result(self, result):
         """Add a row to the results table."""
         from PyQt6.QtWidgets import QTableWidgetItem
 
+        row_plan = self._controller.build_result_presentation(
+            result,
+            scan_cursor=self._scan_cursor,
+        )
         row_idx = self._table.rowCount()
         self._table.insertRow(row_idx)
 
         # #
-        num_item = QTableWidgetItem(str(self._scan_cursor + 1))
+        num_item = QTableWidgetItem(row_plan.number_text)
         num_item.setFlags(num_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(row_idx, 0, num_item)
 
         # Strategy name
-        name_item = QTableWidgetItem(result.strategy_name)
+        name_item = QTableWidgetItem(row_plan.strategy_name)
         name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        tip_parts = [result.strategy_args]
-        if result.error:
-            tip_parts.append(f"\n--- Ошибка ---\n{result.error}")
-        name_item.setToolTip("".join(tip_parts))
+        name_item.setToolTip(row_plan.strategy_tooltip)
         self._table.setItem(row_idx, 1, name_item)
 
         # Status
-        if result.success:
-            status_item = QTableWidgetItem("OK")
+        status_item = QTableWidgetItem(row_plan.status_text)
+        if row_plan.status_tone == "success":
             status_item.setForeground(QColor("#52c477"))
-        elif "timeout" in result.error.lower():
-            status_item = QTableWidgetItem("TIMEOUT")
+        elif row_plan.status_tone == "timeout":
             status_item.setForeground(QColor("#888888"))
         else:
-            status_item = QTableWidgetItem("FAIL")
             status_item.setForeground(QColor("#e05454"))
         status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        status_item.setToolTip(result.error if result.error else "OK")
+        status_item.setToolTip(row_plan.status_tooltip)
         self._table.setItem(row_idx, 2, status_item)
 
         # Time
-        time_text = f"{result.time_ms:.0f}" if result.time_ms > 0 else "—"
-        time_item = QTableWidgetItem(time_text)
+        time_item = QTableWidgetItem(row_plan.time_text)
         time_item.setFlags(time_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(row_idx, 3, time_item)
 
         # Action button (only for successful strategies)
-        if result.success:
+        if row_plan.can_apply:
             apply_btn = PushButton()
             apply_btn.setText(tr_catalog("page.strategy_scan.apply", default="Применить"))
             apply_btn.setFixedHeight(26)
@@ -802,12 +680,7 @@ class StrategyScanPage(BasePage):
             self._table.setCellWidget(row_idx, 4, apply_btn)
 
         # Track result and update progress after test completes
-        self._result_rows.append({
-            "id": getattr(result, "strategy_id", ""),
-            "name": result.strategy_name,
-            "args": result.strategy_args,
-            "success": result.success,
-        })
+        self._result_rows.append(dict(row_plan.stored_row))
         self._scan_cursor += 1
         self._progress_bar.setValue(self._scan_cursor)
         self._controller.save_resume_state(
@@ -866,46 +739,35 @@ class StrategyScanPage(BasePage):
         )
 
         try:
-            if finish_plan.notification_kind == "baseline_accessible":
-                if finish_plan.baseline_variant == "stun":
-                    if self._scan_protocol == "udp_games":
-                        baseline_title_default = "UDP уже доступен"
-                    else:
-                        baseline_title_default = "STUN уже доступен"
-                    baseline_title = tr_catalog(
-                        "page.strategy_scan.baseline_ok_title_stun",
-                        default=baseline_title_default,
+            notification_plan = self._controller.build_finish_notification_plan(
+                finish_plan,
+                scan_protocol=self._scan_protocol,
+            )
+            if notification_plan.kind == "warning" and notification_plan.title_key:
+                title_text = tr_catalog(
+                    notification_plan.title_key,
+                    default=notification_plan.title_default,
+                )
+                body_text = (
+                    notification_plan.body_text
+                    or tr_catalog(
+                        notification_plan.body_key,
+                        default=notification_plan.body_default,
                     )
-                    baseline_text = tr_catalog(
-                        "page.strategy_scan.baseline_ok_text_stun",
-                        default="STUN/UDP уже доступен без обхода DPI — результаты могут быть ложноположительными",
-                    )
-                else:
-                    baseline_title = tr_catalog(
-                        "page.strategy_scan.baseline_ok_title",
-                        default="Домен уже доступен",
-                    )
-                    baseline_text = tr_catalog(
-                        "page.strategy_scan.baseline_ok_text",
-                        default="Домен доступен без обхода DPI — результаты могут быть ложноположительными",
-                    )
+                )
                 InfoBarHelper.warning(
                     self.window(),
-                    baseline_title,
-                    baseline_text,
+                    title_text,
+                    body_text,
                 )
-            elif finish_plan.notification_kind == "found":
+            elif notification_plan.kind == "success" and notification_plan.title_key:
                 InfoBarHelper.success(
                     self.window(),
-                    tr_catalog("page.strategy_scan.found", default="Найдены рабочие стратегии"),
-                    f"{finish_plan.working_count} из {finish_plan.total_count}",
-                )
-            elif finish_plan.notification_kind == "not_found":
-                InfoBarHelper.warning(
-                    self.window(),
-                    tr_catalog("page.strategy_scan.not_found", default="Рабочих стратегий не найдено"),
-                    tr_catalog("page.strategy_scan.try_full",
-                               default="Попробуйте полный режим сканирования"),
+                    tr_catalog(
+                        notification_plan.title_key,
+                        default=notification_plan.title_default,
+                    ),
+                    notification_plan.body_text,
                 )
         except Exception:
             pass
@@ -924,19 +786,21 @@ class StrategyScanPage(BasePage):
                 scan_protocol=self._scan_protocol,
                 scan_udp_games_scope=self._scan_udp_games_scope,
             )
+            message_plan = self._controller.build_apply_success_plan(result)
 
             InfoBarHelper.success(
                 self.window(),
-                tr_catalog("page.strategy_scan.applied", default="Стратегия добавлена"),
-                f"{result.strategy_name} добавлена в пресет для {result.applied_target}",
+                tr_catalog(message_plan.title_key, default=message_plan.title_default),
+                message_plan.body_text,
             )
         except Exception as e:
             logger.warning("Failed to apply strategy: %s", e)
             try:
+                message_plan = self._controller.build_apply_error_plan(str(e))
                 InfoBarHelper.warning(
                     self.window(),
-                    "Ошибка",
-                    str(e),
+                    tr_catalog(message_plan.title_key, default=message_plan.title_default),
+                    message_plan.body_text,
                 )
             except Exception:
                 pass
@@ -945,16 +809,23 @@ class StrategyScanPage(BasePage):
     # UI helpers
     # ------------------------------------------------------------------
 
-    def _reset_ui(self):
-        self._start_btn.setEnabled(True)
-        self._stop_btn.setEnabled(False)
-        self._protocol_combo.setEnabled(True)
+    def _apply_interaction_plan(self, plan) -> None:
+        self._start_btn.setEnabled(plan.start_enabled)
+        self._stop_btn.setEnabled(plan.stop_enabled)
+        self._protocol_combo.setEnabled(plan.protocol_enabled)
         if self._games_scope_combo is not None:
-            self._games_scope_combo.setEnabled(self._scan_protocol_from_combo() == "udp_games")
-        self._mode_combo.setEnabled(True)
-        self._target_input.setEnabled(True)
+            self._games_scope_combo.setEnabled(plan.games_scope_enabled)
+        self._mode_combo.setEnabled(plan.mode_enabled)
+        self._target_input.setEnabled(plan.target_enabled)
         if self._quick_domain_btn is not None:
-            self._quick_domain_btn.setEnabled(True)
+            self._quick_domain_btn.setEnabled(plan.quick_domain_enabled)
+
+    def _reset_ui(self):
+        self._apply_interaction_plan(
+            self._controller.build_idle_interaction_plan(
+                is_udp_games=self._scan_protocol_from_combo() == "udp_games",
+            )
+        )
 
     def _set_support_status(self, text: str) -> None:
         if self._support_status_label is None:
@@ -985,27 +856,26 @@ class StrategyScanPage(BasePage):
             if result.zip_path:
                 logger.info("Prepared Strategy Scan support archive: %s", result.zip_path)
 
-            self._set_support_status(feedback.status_text)
+            message_plan = self._controller.build_support_success_plan(feedback)
+            self._set_support_status(message_plan.status_text)
 
             try:
                 InfoBarHelper.success(
                     self.window(),
-                    tr_catalog(
-                        "page.strategy_scan.support_prepared_title",
-                        default="Обращение подготовлено",
-                    ),
-                    feedback.info_text,
+                    tr_catalog(message_plan.title_key, default=message_plan.title_default),
+                    message_plan.body_text,
                 )
             except Exception:
                 pass
         except Exception as exc:
             logger.warning("Failed to prepare strategy-scan support bundle: %s", exc)
-            self._set_support_status("Ошибка подготовки")
+            message_plan = self._controller.build_support_error_plan(str(exc))
+            self._set_support_status(message_plan.status_text)
             try:
                 InfoBarHelper.warning(
                     self.window(),
-                    tr_catalog("page.strategy_scan.error", default="Ошибка сканирования"),
-                    f"Не удалось подготовить обращение:\n{exc}",
+                    tr_catalog(message_plan.title_key, default=message_plan.title_default),
+                    message_plan.body_text,
                 )
             except Exception:
                 pass
@@ -1017,87 +887,7 @@ class StrategyScanPage(BasePage):
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
         try:
-            self._control_card.set_title(
-                tr_catalog("page.strategy_scan.control", language=language,
-                           default="Управление сканированием"))
-            self._results_card.set_title(
-                tr_catalog("page.strategy_scan.results", language=language,
-                           default="Результаты"))
-            self._log_card.set_title(
-                tr_catalog("page.strategy_scan.log", language=language,
-                           default="Подробный лог"))
-            self._expand_log_btn.setText(
-                tr_catalog("page.strategy_scan.collapse_log", language=language,
-                           default="Свернуть")
-                if self._log_expanded else
-                tr_catalog("page.strategy_scan.expand_log", language=language,
-                           default="Развернуть")
-            )
-            self._warning_card.set_title(
-                tr_catalog("page.strategy_scan.warning_title", language=language,
-                           default="Внимание"))
-            self._start_btn.setText(
-                tr_catalog("page.strategy_scan.start", language=language,
-                           default="Начать сканирование"))
-            self._stop_btn.setText(
-                tr_catalog("page.strategy_scan.stop", language=language,
-                           default="Остановить"))
-            if self._prepare_support_btn is not None:
-                self._prepare_support_btn.setText(
-                    tr_catalog(
-                        "page.strategy_scan.prepare_support",
-                        language=language,
-                        default="Подготовить обращение",
-                    )
-                )
-            self._protocol_combo.setItemText(
-                0,
-                tr_catalog("page.strategy_scan.protocol_tcp", language=language, default="TCP/HTTPS"),
-            )
-            self._protocol_combo.setItemText(
-                1,
-                tr_catalog(
-                    "page.strategy_scan.protocol_stun",
-                    language=language,
-                    default="STUN Voice (Discord/Telegram)",
-                ),
-            )
-            self._protocol_combo.setItemText(
-                2,
-                tr_catalog(
-                    "page.strategy_scan.protocol_games",
-                    language=language,
-                    default="UDP Games (Roblox/Amazon/Steam)",
-                ),
-            )
-            if self._games_scope_label is not None:
-                self._games_scope_label.setText(
-                    tr_catalog("page.strategy_scan.udp_scope", language=language, default="Охват UDP:")
-                )
-            if self._games_scope_combo is not None:
-                self._games_scope_combo.setItemText(
-                    0,
-                    tr_catalog(
-                        "page.strategy_scan.udp_scope_all",
-                        language=language,
-                        default="Все ipset (по умолчанию)",
-                    ),
-                )
-                self._games_scope_combo.setItemText(
-                    1,
-                    tr_catalog(
-                        "page.strategy_scan.udp_scope_games_only",
-                        language=language,
-                        default="Только игровые ipset",
-                    ),
-                )
-            if self._quick_domain_btn is not None:
-                self._quick_domain_btn.setText(
-                    tr_catalog("page.strategy_scan.quick_domains", language=language,
-                               default="Быстрый выбор"))
-                self._quick_domain_btn.setToolTip(
-                    tr_catalog("page.strategy_scan.quick_domains_hint", language=language,
-                               default="Выберите домен из готового списка"))
+            self._apply_language_plan(language)
             self._refresh_udp_scope_hint()
         except Exception:
             pass
