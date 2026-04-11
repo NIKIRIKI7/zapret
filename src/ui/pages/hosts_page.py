@@ -1,18 +1,50 @@
 # ui/pages/hosts_page.py
 """Страница управления Hosts файлом - разблокировка сервисов"""
 
-import os
 from string import Template
-from PyQt6.QtCore import Qt, QThread, QTimer, QEvent
+from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QScrollArea, QFrame, QLayout, QCheckBox
+    QWidget, QLabel,
+    QPushButton, QLayout, QCheckBox
 )
 import qtawesome as qta
 
 from hosts.page_controller import HostsPageController
 from .base_page import BasePage
-from ui.compat_widgets import SettingsCard, SemanticNotice
+from ui.pages.hosts_page_sections_build import (
+    build_hosts_adobe_section,
+    build_hosts_browser_warning,
+    build_hosts_info_note,
+    build_hosts_status_section,
+)
+from ui.pages.hosts_page_services_build import (
+    build_hosts_service_row,
+    build_hosts_services_container,
+    build_hosts_services_group,
+    build_hosts_services_section_title,
+)
+from ui.pages.hosts_page_selection_workflow import (
+    apply_bulk_profile_selection_ui,
+    apply_direct_toggle_ui,
+    apply_profile_selection_ui,
+)
+from ui.pages.hosts_page_catalog_workflow import (
+    ensure_catalog_watcher,
+    reconcile_catalog_after_hidden_refresh,
+    refresh_catalog_if_needed,
+    rebuild_services_runtime_state,
+)
+from ui.pages.hosts_page_access_workflow import (
+    check_hosts_access,
+    dismiss_hosts_error_bar,
+    restore_hosts_permissions_flow,
+    show_hosts_access_error,
+)
+from ui.pages.hosts_page_operation_workflow import (
+    complete_hosts_operation,
+    reset_all_service_profiles_ui,
+    start_hosts_operation,
+)
 from ui.text_catalog import tr as tr_catalog
 
 from log import log
@@ -77,15 +109,6 @@ def _get_fluent_chip_style(tokens=None) -> str:
         accent_hex=tokens.accent_hex,
         accent_rgb=tokens.accent_rgb_str,
     )
-
-# Импортируем сервисы и домены
-try:
-    from hosts.proxy_domains import (
-        ensure_ipv6_catalog_sections_if_available,
-    )
-except ImportError:
-    def ensure_ipv6_catalog_sections_if_available() -> tuple[bool, bool]:
-        return (False, False)
 
 def _is_fluent_combo(obj) -> bool:
     """Проверяет, является ли объект qfluentwidgets ComboBox."""
@@ -455,10 +478,9 @@ class HostsPage(BasePage):
 
 
     def _build_services_container(self) -> None:
-        self._services_container = QWidget()
-        self._services_layout = QVBoxLayout(self._services_container)
-        self._services_layout.setContentsMargins(0, 0, 0, 0)
-        self._services_layout.setSpacing(16)
+        widgets = build_hosts_services_container()
+        self._services_container = widgets.container
+        self._services_layout = widgets.layout
         self.add_widget(self._services_container)
 
     def _clear_layout(self, layout: QLayout) -> None:
@@ -475,20 +497,22 @@ class HostsPage(BasePage):
                 self._clear_layout(child_layout)
 
     def _start_catalog_watcher(self) -> None:
-        if self._catalog_watch_timer is None:
-            self._catalog_watch_timer = QTimer(self)
-            self._catalog_watch_timer.setInterval(5000)
-            self._catalog_watch_timer.timeout.connect(lambda: self._refresh_catalog_if_needed(trigger="watcher"))
-        if not self._catalog_watch_timer.isActive():
-            self._catalog_watch_timer.start()
+        self._catalog_watch_timer = ensure_catalog_watcher(
+            page=self,
+            timer=self._catalog_watch_timer,
+            interval_ms=5000,
+            refresh_callback=self._refresh_catalog_if_needed,
+        )
 
     def _reconcile_catalog_after_hidden_refresh(self) -> None:
-        if not self._catalog_dirty:
-            return
-        self._catalog_dirty = False
-        if self._services_layout is not None:
-            self._rebuild_services_selectors()
-        self._invalidate_cache()
+        handled = reconcile_catalog_after_hidden_refresh(
+            catalog_dirty=self._catalog_dirty,
+            services_layout_exists=self._services_layout is not None,
+            rebuild_services_selectors=self._rebuild_services_selectors,
+            invalidate_cache=self._invalidate_cache,
+        )
+        if handled:
+            self._catalog_dirty = False
 
     def _ensure_ipv6_catalog_sections(self) -> tuple[bool, bool]:
         """Добавляет managed IPv6 секции в hosts.ini при доступном IPv6."""
@@ -512,44 +536,25 @@ class HostsPage(BasePage):
             return (False, False)
 
     def _refresh_catalog_if_needed(self, trigger: str) -> None:
-        sig = HostsPageController.get_catalog_signature()
-        refresh_plan = HostsPageController.build_catalog_refresh_plan(
+        result = refresh_catalog_if_needed(
             current_signature=self._catalog_sig,
-            new_signature=sig,
             trigger=trigger,
             services_layout_exists=self._services_layout is not None,
+            page_visible=self.isVisible(),
+            invalidate_catalog_cache=HostsPageController.invalidate_catalog_cache,
+            rebuild_services_selectors=self._rebuild_services_selectors,
+            log_info=lambda message: log(message, "INFO"),
         )
-
-        if not refresh_plan.changed:
+        if not result["changed"]:
             return
-
-        if refresh_plan.invalidate_cache:
-            HostsPageController.invalidate_catalog_cache()
-
-        if not self.isVisible():
-            self._catalog_sig = refresh_plan.new_signature
-            self._catalog_dirty = True
-            return
-
-        if not refresh_plan.should_rebuild:
-            self._catalog_sig = refresh_plan.new_signature
-            return
-
-        if refresh_plan.should_log:
-            log(refresh_plan.log_message, "INFO")
-
-        self._rebuild_services_selectors()
-        self._catalog_sig = refresh_plan.new_signature
+        self._catalog_dirty = bool(result["catalog_dirty"])
+        self._catalog_sig = result["catalog_sig"]
 
     def _services_add_section_title(self, text: str) -> None:
         if self._services_layout is None:
             return
-        label = QLabel(text)
+        label = build_hosts_services_section_title(text=text)
         self._services_section_title_labels.append(label)
-        tokens = get_theme_tokens()
-        label.setStyleSheet(
-            f"color: {tokens.fg_muted}; font-size: 13px; font-weight: 600; padding-top: 8px; padding-bottom: 4px;"
-        )
         self._services_layout.addWidget(label)
 
     def _services_add_widget(self, widget: QWidget) -> None:
@@ -557,10 +562,7 @@ class HostsPage(BasePage):
             return
         self._services_layout.addWidget(widget)
 
-    def _rebuild_services_selectors(self) -> None:
-        if self._services_layout is None:
-            return
-        self._clear_layout(self._services_layout)
+    def _reset_services_runtime_bindings(self) -> None:
         self.service_combos = {}
         self.service_icon_labels = {}
         self.service_icon_names = {}
@@ -570,63 +572,35 @@ class HostsPage(BasePage):
         self._service_group_title_labels = []
         self._service_group_chips_scrolls = []
         self._service_group_chip_buttons = []
-        self._build_services_selectors()
-        self._catalog_sig = HostsPageController.get_catalog_signature()
+
+    def _rebuild_services_selectors(self) -> None:
+        if self._services_layout is None:
+            return
+        self._catalog_sig = rebuild_services_runtime_state(
+            clear_layout=lambda: (self._clear_layout(self._services_layout), self._reset_services_runtime_bindings()),
+            build_services_selectors=self._build_services_selectors,
+        )
 
     def _show_error(self, message: str):
         """Показывает InfoBar с ошибкой доступа и кнопкой восстановления прав."""
-        if self._last_error == message:
-            return  # Не дублируем одну и ту же ошибку
-        self._dismiss_hosts_error_bar()
-        self._last_error = message
-
-        if not InfoBar:
-            log(f"hosts access error (no InfoBar): {message}", "WARNING")
-            return
-
-        try:
-            from qfluentwidgets import InfoBarPosition
-            error_plan = HostsPageController.build_error_bar_plan(
-                message=message,
-                title=self._tr("page.hosts.error.title", "Нет доступа к hosts"),
-                action_text=self._tr("page.hosts.button.restore_access", "Восстановить права доступа"),
-                action_pending_text=self._tr("page.hosts.button.restoring_access", "Восстановление..."),
-            )
-
-            bar = InfoBar.error(
-                title=error_plan.title,
-                content=error_plan.content,
-                orient=Qt.Orientation.Vertical,
-                isClosable=True,
-                position=InfoBarPosition.TOP,
-                duration=-1,  # Не исчезает автоматически
-                parent=self.window(),
-            )
-
-            # Кнопка "Восстановить права"
-            restore_btn = PushButton(error_plan.action_text)
-            restore_btn.setFixedWidth(220)
-
-            def _on_restore():
-                restore_btn.setEnabled(False)
-                restore_btn.setText(error_plan.action_pending_text)
-                self._restore_hosts_permissions(bar, restore_btn)
-
-            restore_btn.clicked.connect(_on_restore)
-            bar.addWidget(restore_btn)
-            self._hosts_error_bar = bar
-        except Exception as e:
-            log(f"Ошибка показа InfoBar: {e}", "DEBUG")
+        self._hosts_error_bar, self._last_error = show_hosts_access_error(
+            current_bar=self._hosts_error_bar,
+            last_error=self._last_error,
+            message=message,
+            tr_fn=self._tr,
+            info_bar_cls=InfoBar,
+            push_button_cls=PushButton,
+            window=self.window(),
+            on_restore=self._restore_hosts_permissions,
+            log_warning=lambda text: log(text, "WARNING"),
+            log_debug=lambda text: log(text, "DEBUG"),
+        )
 
     def _dismiss_hosts_error_bar(self):
         """Закрывает текущий InfoBar ошибки доступа к hosts."""
         self._last_error = None
-        if self._hosts_error_bar is not None:
-            try:
-                self._hosts_error_bar.close()
-            except Exception:
-                pass
-            self._hosts_error_bar = None
+        dismiss_hosts_error_bar(self._hosts_error_bar)
+        self._hosts_error_bar = None
 
     def _hide_error(self):
         """Скрывает ошибку доступа к hosts."""
@@ -634,149 +608,56 @@ class HostsPage(BasePage):
 
     def _restore_hosts_permissions(self, bar=None, btn=None):
         """Восстанавливает стандартные права доступа к файлу hosts."""
-        try:
-            result = HostsPageController.restore_hosts_permissions()
-            success = result.success
-            message = result.message
-            restore_plan = HostsPageController.build_restore_permissions_plan(
-                success=success,
-                message=message,
-            )
-
-            if success:
-                self._dismiss_hosts_error_bar()
-                self._invalidate_cache()
-                self._update_ui()
-                self._sync_selections_from_hosts()
-                if InfoBar and restore_plan.message_plan is not None:
-                    from qfluentwidgets import InfoBarPosition
-                    InfoBar.success(
-                        title=restore_plan.message_plan.title,
-                        content=restore_plan.message_plan.content,
-                        isClosable=True,
-                        position=InfoBarPosition.TOP,
-                        duration=5000,
-                        parent=self.window(),
-                    )
-            else:
-                if bar is not None:
-                    try:
-                        bar.close()
-                    except Exception:
-                        pass
-                self._hosts_error_bar = None
-                self._last_error = None
-                self._show_error(restore_plan.error_message)
-        except Exception as e:
-            log(f"Ошибка при восстановлении прав: {e}", "ERROR")
-            if bar is not None:
-                try:
-                    bar.close()
-                except Exception:
-                    pass
-            self._hosts_error_bar = None
-            self._last_error = None
-            self._show_error(str(e))
+        _ = btn
+        if bar is not None:
+            dismiss_hosts_error_bar(bar)
+        self._hosts_error_bar = None
+        self._last_error = None
+        restore_hosts_permissions_flow(
+            info_bar_cls=InfoBar,
+            window=self.window(),
+            dismiss_error_bar=self._dismiss_hosts_error_bar,
+            invalidate_cache=self._invalidate_cache,
+            update_ui=self._update_ui,
+            sync_selections_from_hosts=self._sync_selections_from_hosts,
+            show_error=self._show_error,
+            log_error=lambda text: log(text, "ERROR"),
+        )
 
     def _check_hosts_access(self):
         """Проверяет доступ к hosts файлу при загрузке страницы"""
-        state = self._get_hosts_runtime_state()
-        access_plan = HostsPageController.build_access_plan(
-            state,
+        check_hosts_access(
+            runtime_state=self._get_hosts_runtime_state(),
             hosts_path=self._get_hosts_path_str(),
-            read_error_message=self._tr("page.hosts.error.read_hosts", "Ошибка чтения hosts: {error}", error=state.error_message),
-            no_access_message=self._tr(
-                "page.hosts.error.no_access.short",
-                "Нет доступа для изменения файла hosts. Скорее всего защитник/антивирус заблокировал запись.\nПуть: {path}",
-                path="{path}",
-            ),
+            tr_fn=self._tr,
+            hide_error=self._hide_error,
+            show_error=self._show_error,
         )
-        if not access_plan.show_error:
-            self._hide_error()
-            return
-        self._show_error(access_plan.error_message)
 
     def _build_info_note(self):
         """Информационная заметка о том, зачем нужен hosts"""
-        semantic = get_semantic_palette()
-        info_card = SettingsCard()
-
-        info_layout = QHBoxLayout()
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(10)
-
-        # Иконка лампочки (QLabel с pixmap — оставляем)
-        icon_label = QLabel()
-        icon_label.setPixmap(qta.icon('fa5s.lightbulb', color=semantic.warning).pixmap(20, 20))
-        icon_label.setFixedSize(24, 24)
-        info_layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
-
-        # Текст пояснения
-        self._info_text_label = CaptionLabel(
-            self._tr(
-                "page.hosts.info.note",
-                "Некоторые сервисы (ChatGPT, Spotify и др.) сами блокируют доступ из России — это не блокировка РКН. Решается не через Zapret, а через проксирование: домены направляются через отдельный прокси-сервер в файле hosts.",
-            )
-        )
-        self._info_text_label.setWordWrap(True)
-        info_layout.addWidget(self._info_text_label, 1)
-
-        info_card.add_layout(info_layout)
-        self.add_widget(info_card)
+        widgets = build_hosts_info_note(tr_fn=self._tr)
+        self._info_text_label = widgets.info_text_label
+        self.add_widget(widgets.card)
 
     def _build_browser_warning(self):
         """Предупреждение о необходимости перезапуска браузера"""
-        self._browser_warning_label = SemanticNotice(
-            self._tr(
-                "page.hosts.warning.browser_restart",
-                "После добавления или удаления доменов необходимо перезапустить браузер, чтобы изменения вступили в силу.",
-            ),
-            tone="warning",
-        )
+        self._browser_warning_label = build_hosts_browser_warning(tr_fn=self._tr)
         self.add_widget(self._browser_warning_label)
 
     def _build_status_section(self):
-        status_card = SettingsCard()
-        status_layout = QHBoxLayout()
-        status_layout.setContentsMargins(0, 0, 0, 0)
-        status_layout.setSpacing(10)
-
         active = self._get_active_domains()
-        tokens = get_theme_tokens()
-        semantic = get_semantic_palette()
-
-        # status_dot — цветной символ «●», оставляем plain QLabel для управления цветом
-        self.status_dot = QLabel("●")
-        dot_color = semantic.success if active else tokens.fg_faint
-        self.status_dot.setStyleSheet(f"color: {dot_color}; font-size: 12px;")
-        status_layout.addWidget(self.status_dot)
-
-        self.status_label = BodyLabel(
-            self._tr("page.hosts.status.active_domains", "Активно {count} доменов", count=len(active))
-            if active
-            else self._tr("page.hosts.status.none_active", "Нет активных")
+        widgets = build_hosts_status_section(
+            tr_fn=self._tr,
+            active_count=len(active),
+            on_clear_clicked=self._on_clear_clicked,
+            on_open_hosts_file=self._open_hosts_file,
         )
-        self.status_label.setProperty("tone", "primary")
-        status_layout.addWidget(self.status_label, 1)
-
-        self.clear_btn = PushButton()
-        self.clear_btn.setIcon(qta.icon('fa5s.trash-alt', color=tokens.fg_muted))
-        self.clear_btn.setText(self._tr("page.hosts.button.clear", " Очистить"))
-        self.clear_btn.setFixedHeight(32)
-        self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.clear_btn.clicked.connect(self._on_clear_clicked)
-        status_layout.addWidget(self.clear_btn)
-
-        self._open_hosts_button = PushButton()
-        self._open_hosts_button.setIcon(qta.icon('fa5s.external-link-alt', color=tokens.fg))
-        self._open_hosts_button.setText(self._tr("page.hosts.button.open", " Открыть"))
-        self._open_hosts_button.setFixedHeight(32)
-        self._open_hosts_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._open_hosts_button.clicked.connect(self._open_hosts_file)
-        status_layout.addWidget(self._open_hosts_button)
-
-        status_card.add_layout(status_layout)
-        self.add_widget(status_card)
+        self.status_dot = widgets.status_dot
+        self.status_label = widgets.status_label
+        self.clear_btn = widgets.clear_button
+        self._open_hosts_button = widgets.open_hosts_button
+        self.add_widget(widgets.card)
 
     def _make_fluent_chip(self, label: str) -> QPushButton:
         btn = QPushButton(label)
@@ -784,6 +665,12 @@ class HostsPage(BasePage):
         btn.setFixedHeight(24)
         btn.setStyleSheet(_get_fluent_chip_style())
         return btn
+
+    def _get_building_services_ui(self) -> bool:
+        return bool(getattr(self, "_building_services_ui", False))
+
+    def _set_building_services_ui(self, value: bool) -> None:
+        self._building_services_ui = bool(value)
 
     def _bulk_apply_dns_profile(self, service_names: list[str], profile_name: str | None) -> None:
         if self._applying:
@@ -795,42 +682,21 @@ class HostsPage(BasePage):
             profile_name=profile_name,
         )
 
-        if not plan.changed:
-            if plan.skipped_services:
-                log(
-                    "Hosts: профиль недоступен для: "
-                    + ", ".join(plan.skipped_services[:8])
-                    + ("…" if len(plan.skipped_services) > 8 else ""),
-                    "DEBUG",
-                )
-            return
-
-        target_profile = (profile_name or "").strip()
-        for service_name in service_names:
-            control = self.service_combos.get(service_name)
-            if not control:
-                continue
-
-            if _is_fluent_combo(control):
-                target_idx = control.findData(target_profile) if target_profile else 0
-                if target_idx >= 0 and control.currentIndex() != target_idx:
-                    control.blockSignals(True)
-                    control.setCurrentIndex(target_idx)
-                    control.blockSignals(False)
-            elif isinstance(control, QCheckBox):
-                desired = bool(target_profile)
-                if control.isChecked() != desired:
-                    was_building = getattr(self, "_building_services_ui", False)
-                    self._building_services_ui = True
-                    try:
-                        control.setChecked(desired)
-                    finally:
-                        self._building_services_ui = was_building
-
-            self._update_profile_row_visual(service_name)
-
-        self._service_dns_selection = dict(plan.new_selection)
-        self._apply_current_selection()
+        new_selection = apply_bulk_profile_selection_ui(
+            plan=plan,
+            profile_name=profile_name,
+            service_names=service_names,
+            service_combos=self.service_combos,
+            is_fluent_combo=_is_fluent_combo,
+            checkbox_cls=QCheckBox,
+            get_building_state=self._get_building_services_ui,
+            set_building_state=self._set_building_services_ui,
+            update_profile_visual=self._update_profile_row_visual,
+            apply_current_selection=self._apply_current_selection,
+            log_debug=lambda message: log(message, "DEBUG"),
+        )
+        if new_selection is not None:
+            self._service_dns_selection = new_selection
 
     def _build_services_selectors(self):
         OFF_LABEL = self._tr("page.hosts.services.off", "Откл.")
@@ -850,124 +716,34 @@ class HostsPage(BasePage):
         self._building_services_ui = True
         try:
             for group_plan in catalog_plan.groups:
-                card = SettingsCard()
-
-                header = QHBoxLayout()
-                header.setContentsMargins(0, 0, 0, 0)
-                header.setSpacing(10)
-
-                title_label = StrongBodyLabel(group_plan.title)
-                self._service_group_title_labels.append(title_label)
-                header.addWidget(title_label, 0, Qt.AlignmentFlag.AlignVCenter)
-
-                if not group_plan.direct_only:
-                    chips = QWidget()
-                    chips_layout = QHBoxLayout(chips)
-                    chips_layout.setContentsMargins(0, 0, 0, 0)
-                    chips_layout.setSpacing(4)
-                    chips_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
-                    chips_layout.addStretch(1)
-
-                    off_btn = self._make_fluent_chip(OFF_LABEL)
-                    self._service_group_chip_buttons.append(off_btn)
-                    off_btn.clicked.connect(
-                        lambda _checked=False, n=tuple(group_plan.service_names): self._bulk_apply_dns_profile(list(n), None)
-                    )
-                    chips_layout.addWidget(off_btn)
-
-                    for profile_name, label in group_plan.common_profiles:
-                        if not label:
-                            continue
-                        btn = self._make_fluent_chip(label)
-                        self._service_group_chip_buttons.append(btn)
-                        btn.clicked.connect(
-                            lambda _checked=False, n=tuple(group_plan.service_names), p=profile_name: self._bulk_apply_dns_profile(list(n), p)
-                        )
-                        chips_layout.addWidget(btn)
-
-                    chips_scroll = QScrollArea()
-                    chips_scroll.setFrameShape(QFrame.Shape.NoFrame)
-                    chips_scroll.setWidgetResizable(True)
-                    chips_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-                    chips_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-                    chips_scroll.setFixedHeight(30)
-                    self._service_group_chips_scrolls.append(chips_scroll)
-                    tokens = get_theme_tokens()
-                    chips_scroll.setStyleSheet(
-                        (
-                            "QScrollArea { background: transparent; border: none; }"
-                            "QScrollArea QWidget { background: transparent; }"
-                            "QScrollBar:horizontal { height: 4px; background: transparent; margin: 0px; }"
-                            f"QScrollBar::handle:horizontal {{ background: {tokens.scrollbar_handle}; border-radius: 2px; min-width: 24px; }}"
-                            f"QScrollBar::handle:horizontal:hover {{ background: {tokens.scrollbar_handle_hover}; }}"
-                            "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; height: 0px; background: transparent; border: none; }"
-                            "QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }"
-                        )
-                    )
-                    chips_scroll.setWidget(chips)
-
-                    header.addWidget(chips_scroll, 1, Qt.AlignmentFlag.AlignVCenter)
-                else:
-                    header.addStretch(1)
-
-                card.add_layout(header)
+                group_widgets = build_hosts_services_group(
+                    group_plan,
+                    off_label=OFF_LABEL,
+                    strong_body_label_cls=StrongBodyLabel,
+                    make_chip=self._make_fluent_chip,
+                    on_bulk_apply=self._bulk_apply_dns_profile,
+                )
+                card = group_widgets.card
+                self._service_group_title_labels.append(group_widgets.title_label)
+                if group_widgets.chips_scroll is not None:
+                    self._service_group_chips_scrolls.append(group_widgets.chips_scroll)
+                self._service_group_chip_buttons.extend(group_widgets.chip_buttons)
 
                 for row_plan in group_plan.rows:
-                    row = QHBoxLayout()
-                    row.setContentsMargins(0, 0, 0, 0)
-                    row.setSpacing(10)
-
-                    # Иконка сервиса (QLabel с pixmap — оставляем)
-                    icon_label = QLabel()
-                    icon_label.setFixedSize(20, 20)
-                    row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
-
-                    name_label = BodyLabel(row_plan.service_name)
-                    self.service_name_labels[row_plan.service_name] = name_label
-                    row.addWidget(name_label, 1, Qt.AlignmentFlag.AlignVCenter)
-
-                    if row_plan.direct_only:
-                        toggle = Win11ToggleSwitchNoText()
-                        toggle.setEnabled(row_plan.toggle_enabled)
-                        toggle.setChecked(row_plan.toggle_checked)
-
-                        toggle.toggled.connect(
-                            lambda checked, s=row_plan.service_name: self._on_direct_toggle_changed(s, checked)
-                        )
-
-                        row.addWidget(toggle, 0, Qt.AlignmentFlag.AlignVCenter)
-                        card.add_layout(row)
-                        self.service_combos[row_plan.service_name] = toggle
-                    else:
-                        if _HAS_FLUENT and ComboBox is not None:
-                            combo = ComboBox()
-                        else:
-                            from PyQt6.QtWidgets import QComboBox as _QComboBox
-                            combo = _QComboBox()
-                        combo.setFixedHeight(32)
-                        combo.setCursor(Qt.CursorShape.PointingHandCursor)
-                        combo.setMinimumWidth(220)
-                        combo.addItem(OFF_LABEL, userData=None)
-                        for profile_name, label in row_plan.profile_items:
-                            combo.addItem(label, userData=profile_name)
-
-                        if row_plan.selected_profile:
-                            inferred_idx = combo.findData(row_plan.selected_profile)
-                            if inferred_idx >= 0:
-                                combo.setCurrentIndex(inferred_idx)
-                            else:
-                                combo.setCurrentIndex(0)
-                        else:
-                            combo.setCurrentIndex(0)
-
-                        combo.currentIndexChanged.connect(
-                            lambda _idx, s=row_plan.service_name, c=combo: self._on_profile_changed(s, c.currentData())
-                        )
-                        row.addWidget(combo, 0, Qt.AlignmentFlag.AlignVCenter)
-
-                        card.add_layout(row)
-                        self.service_combos[row_plan.service_name] = combo
-                    self.service_icon_labels[row_plan.service_name] = icon_label
+                    row_widgets = build_hosts_service_row(
+                        row_plan,
+                        body_label_cls=BodyLabel,
+                        combo_cls=ComboBox,
+                        has_fluent=_HAS_FLUENT,
+                        toggle_cls=Win11ToggleSwitchNoText,
+                        off_label=OFF_LABEL,
+                        on_direct_toggle=self._on_direct_toggle_changed,
+                        on_profile_changed=self._on_profile_changed,
+                    )
+                    self.service_name_labels[row_plan.service_name] = row_widgets.name_label
+                    card.add_layout(row_widgets.row_layout)
+                    self.service_combos[row_plan.service_name] = row_widgets.control
+                    self.service_icon_labels[row_plan.service_name] = row_widgets.icon_label
                     self.service_icon_names[row_plan.service_name] = row_plan.icon_name
                     self.service_icon_base_colors[row_plan.service_name] = row_plan.icon_color
 
@@ -994,66 +770,31 @@ class HostsPage(BasePage):
             service_name=service_name,
             checked=checked,
         )
-        self._service_dns_selection = dict(plan.new_selection)
-
-        if plan.force_checked is not None or plan.force_enabled is not None:
-            control = self.service_combos.get(service_name)
-            if isinstance(control, QCheckBox):
-                was_building = getattr(self, "_building_services_ui", False)
-                self._building_services_ui = True
-                try:
-                    if plan.force_checked is not None:
-                        control.setChecked(plan.force_checked)
-                    if plan.force_enabled is not None:
-                        control.setEnabled(plan.force_enabled)
-                finally:
-                    self._building_services_ui = was_building
-            return
-
-        self._update_profile_row_visual(service_name)
-        if plan.apply_now:
-            self._apply_current_selection()
+        self._service_dns_selection, _ = apply_direct_toggle_ui(
+            plan=plan,
+            service_name=service_name,
+            service_combos=self.service_combos,
+            checkbox_cls=QCheckBox,
+            get_building_state=self._get_building_services_ui,
+            set_building_state=self._set_building_services_ui,
+            update_profile_visual=self._update_profile_row_visual,
+            apply_current_selection=self._apply_current_selection,
+        )
 
     def _build_adobe_section(self):
         self.add_section_title(text_key="page.hosts.section.additional")
-
-        adobe_card = SettingsCard()
-
-        self._adobe_desc_label = CaptionLabel(
-            self._tr(
-                "page.hosts.adobe.description",
-                "⚠️ Блокирует серверы проверки активации Adobe. Включите, если у вас установлена пиратская версия.",
-            )
-        )
-        self._adobe_desc_label.setWordWrap(True)
-        adobe_card.add_widget(self._adobe_desc_label)
-
-        adobe_layout = QHBoxLayout()
-        adobe_layout.setContentsMargins(0, 0, 0, 0)
-        adobe_layout.setSpacing(8)
-
-        icon_label = QLabel()
-        icon_label.setPixmap(qta.icon('fa5s.puzzle-piece', color='#ff0000').pixmap(20, 20))
-        adobe_layout.addWidget(icon_label)
-
-        self._adobe_title_label = StrongBodyLabel(self._tr("page.hosts.adobe.title", "Блокировка Adobe"))
-        adobe_layout.addWidget(self._adobe_title_label, 1)
-
         is_adobe_active = self.hosts_manager.is_adobe_domains_active() if self.hosts_manager else False
-
-        if SwitchButton is not None:
-            self.adobe_switch = SwitchButton()
-            self.adobe_switch.setChecked(is_adobe_active)
-            self.adobe_switch.checkedChanged.connect(self._toggle_adobe)
-        else:
-            from PyQt6.QtWidgets import QCheckBox
-            self.adobe_switch = QCheckBox()
-            self.adobe_switch.setChecked(is_adobe_active)
-            self.adobe_switch.toggled.connect(self._toggle_adobe)
-        adobe_layout.addWidget(self.adobe_switch)
-
-        adobe_card.add_layout(adobe_layout)
-        self.add_widget(adobe_card)
+        widgets = build_hosts_adobe_section(
+            tr_fn=self._tr,
+            adobe_active=is_adobe_active,
+            on_toggle_adobe=self._toggle_adobe,
+            switch_button_cls=SwitchButton,
+            fallback_checkbox_cls=QCheckBox,
+        )
+        self._adobe_desc_label = widgets.description_label
+        self._adobe_title_label = widgets.title_label
+        self.adobe_switch = widgets.switch
+        self.add_widget(widgets.card)
 
     # ═══════════════════════════════════════════════════════════════
     # ОБРАБОТЧИКИ
@@ -1072,11 +813,12 @@ class HostsPage(BasePage):
             service_name=service_name,
             selected_profile=selected_profile,
         )
-        self._service_dns_selection = dict(plan.new_selection)
-
-        self._update_profile_row_visual(service_name)
-        if plan.apply_now:
-            self._apply_current_selection()
+        self._service_dns_selection, _ = apply_profile_selection_ui(
+            plan=plan,
+            service_name=service_name,
+            update_profile_visual=self._update_profile_row_visual,
+            apply_current_selection=self._apply_current_selection,
+        )
 
     def _update_profile_row_visual(self, service_name: str):
         combo = self.service_combos.get(service_name)
@@ -1150,69 +892,46 @@ class HostsPage(BasePage):
         self._run_operation('adobe_add' if checked else 'adobe_remove')
 
     def _run_operation(self, operation: str, payload=None):
-        if not self.hosts_manager or self._applying:
+        runtime = start_hosts_operation(
+            hosts_manager=self.hosts_manager,
+            applying=self._applying,
+            operation=operation,
+            payload=payload,
+            on_operation_complete=self._on_operation_complete,
+        )
+        if runtime is None:
             return
-
-        self._applying = True
-        self._current_operation = operation
-
-        self._worker = HostsPageController.create_operation_worker(self.hosts_manager, operation, payload)
-        self._thread = QThread()
-
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.finished.connect(self._on_operation_complete)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
-
-        self._thread.start()
+        self._applying = runtime["applying"]
+        self._current_operation = runtime["current_operation"]
+        self._worker = runtime["worker"]
+        self._thread = runtime["thread"]
 
     def _on_operation_complete(self, success: bool, message: str):
-        operation = self._current_operation
-        self._current_operation = None
-        self._applying = False
-        completion_plan = HostsPageController.build_operation_completion_plan(
-            operation=operation,
+        state = complete_hosts_operation(
+            current_operation=self._current_operation,
             success=success,
             message=message,
             hosts_path=self._get_hosts_path_str(),
+            invalidate_cache=self._invalidate_cache,
+            update_ui=self._update_ui,
+            sync_selections_from_hosts=self._sync_selections_from_hosts,
+            reset_profiles_ui=self._reset_all_service_profiles,
+            hide_error=self._hide_error,
+            show_error=self._show_error,
         )
-
-        # Сбрасываем кеш и обновляем UI
-        self._invalidate_cache()
-        self._update_ui()
-        self._sync_selections_from_hosts()
-
-        if completion_plan.reset_profiles:
-            self._reset_all_service_profiles()
-
-        if completion_plan.clear_error:
-            self._hide_error()
-        else:
-            self._show_error(completion_plan.error_message)
+        self._current_operation = state["current_operation"]
+        self._applying = state["applying"]
 
     def _reset_all_service_profiles(self) -> None:
         """Сбрасывает выбор профилей в UI и user_hosts.ini (после очистки hosts)."""
-        reset_plan = HostsPageController.build_reset_selection_plan()
-        self._service_dns_selection = dict(reset_plan.new_selection)
-        HostsPageController.save_user_selection(self._service_dns_selection)
-
-        was_building = getattr(self, "_building_services_ui", False)
-        self._building_services_ui = True
-        try:
-            for control in self.service_combos.values():
-                if _is_fluent_combo(control):
-                    control.blockSignals(True)
-                    control.setCurrentIndex(0)
-                    control.blockSignals(False)
-                elif isinstance(control, QCheckBox):
-                    control.setChecked(False)
-        finally:
-            self._building_services_ui = was_building
-
-        for service_name in list(self.service_combos.keys()):
-            self._update_profile_row_visual(service_name)
+        self._service_dns_selection = reset_all_service_profiles_ui(
+            service_combos=self.service_combos,
+            is_fluent_combo=_is_fluent_combo,
+            checkbox_cls=QCheckBox,
+            get_building_state=self._get_building_services_ui,
+            set_building_state=self._set_building_services_ui,
+            update_profile_visual=self._update_profile_row_visual,
+        )
 
     def _update_ui(self):
         """Обновляет весь UI"""

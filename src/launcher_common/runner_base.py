@@ -123,7 +123,7 @@ class StrategyRunnerBase(ABC):
         only supported direct-start contract in the current architecture.
 
         Args:
-            preset_path: Path to the prepared launch preset file
+            preset_path: Path to the preset file
             strategy_name: Strategy name for logs
 
         Returns:

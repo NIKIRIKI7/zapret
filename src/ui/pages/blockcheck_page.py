@@ -14,10 +14,7 @@ from ui.pages.blockcheck_page_domains_build import build_blockcheck_domains_ui
 from ui.pages.blockcheck_page_sections_build import build_actions_section, build_results_section
 from ui.pages.blockcheck_page_log_build import build_log_card_section
 from ui.pages.blockcheck_page_summary_content import (
-    DPI_BADGE_COLORS as _DPI_BADGE_COLORS,
-    DPI_LABELS_RU as _DPI_LABELS_RU,
     build_dpi_summary_content,
-    generate_recommendations,
 )
 from ui.pages.blockcheck_page_summary_build import build_dpi_summary_section
 from ui.pages.blockcheck_page_helpers import (
@@ -28,7 +25,6 @@ from ui.pages.blockcheck_page_helpers import (
     format_result_detail,
     load_domain_chips,
     remove_domain_chip,
-    result_family_label,
     sort_results_by_family,
     truncate_detail,
 )
@@ -122,11 +118,10 @@ class BlockcheckPage(BasePage):
         self._strategy_tab_page = None
         self._diagnostics_tab_page = None
         self._dns_spoofing_tab_page = None
-        self.connection_page = None
-        self.dns_check_page = None
         self._active_tab_index: int = 0
         self._pending_tab_key: str | None = None
         self._pending_diagnostics_start_focus = False
+        self._cleanup_in_progress = False
         self._tabs_pivot = None
         self._domains_section_label: QLabel | None = None
         self._tcp_section_label: QLabel | None = None
@@ -388,7 +383,6 @@ class BlockcheckPage(BasePage):
             self._diagnostics_tab_page = ConnectionTestPage(parent=self.parent_app)
             self._diagnostics_tab_page.setVisible(False)
             self.add_widget(self._diagnostics_tab_page)
-            self.connection_page = self._diagnostics_tab_page
 
             try:
                 self._diagnostics_tab_page.set_ui_language(self._ui_language)
@@ -407,7 +401,6 @@ class BlockcheckPage(BasePage):
             self._dns_spoofing_tab_page = DNSCheckPage(parent=self.parent_app)
             self._dns_spoofing_tab_page.setVisible(False)
             self.add_widget(self._dns_spoofing_tab_page)
-            self.dns_check_page = self._dns_spoofing_tab_page
 
             try:
                 self._dns_spoofing_tab_page.set_ui_language(self._ui_language)
@@ -481,7 +474,7 @@ class BlockcheckPage(BasePage):
         if not self._pending_diagnostics_start_focus:
             return
         self._ensure_diagnostics_tab()
-        page = getattr(self, "connection_page", None)
+        page = self._diagnostics_tab_page
         if page is None:
             return
         request_focus = getattr(page, "request_start_focus", None)
@@ -508,6 +501,7 @@ class BlockcheckPage(BasePage):
     def _on_start(self):
         if self._worker and self._worker.is_running:
             return
+        self._cleanup_in_progress = False
 
         # Get mode from combo
         mode = self._mode_combo.currentData()
@@ -555,40 +549,57 @@ class BlockcheckPage(BasePage):
         self._worker.finished.connect(self._on_finished)
         self._worker.start()
 
-    def _on_open_strategy_scan(self):
-        """Legacy handler kept for compatibility with old button bindings."""
-        self.switch_to_tab(self.TAB_STRATEGY_SCAN)
-
     def _on_stop(self):
         if self._worker:
             self._worker.stop()
+            expected_worker = self._worker
+        else:
+            expected_worker = None
         self._stop_btn.setEnabled(False)
         self._status_label.setText(
             tr_catalog("page.blockcheck.stopping", default="Остановка...")
         )
 
-        # If worker doesn't finish in 5s, just reset UI (daemon thread dies with app)
-        QTimer.singleShot(5000, self._force_stop)
+        # Если остановка затянулась, честно показываем ожидание, не притворяясь что всё уже завершилось.
+        QTimer.singleShot(5000, lambda worker=expected_worker: self._force_stop(worker))
 
-    def _force_stop(self):
-        if self._worker and self._worker.is_running:
-            # Daemon thread will die when app exits; just reset the UI
-            self._reset_ui()
+    def _force_stop(self, expected_worker=None):
+        if expected_worker is None:
+            return
+        if self._worker is expected_worker and self._worker.is_running:
+            warning_text = tr_catalog(
+                "page.blockcheck.stopping_slow",
+                default="Остановка занимает больше времени, ждём завершения фоновой проверки...",
+            )
+            self._status_label.setText(warning_text)
+            self._append_run_log(f"WARNING: {warning_text}")
+            self._set_support_status(
+                tr_catalog(
+                    "page.blockcheck.support_wait_stop",
+                    default="Подождите завершения остановки перед новым запуском",
+                )
+            )
 
     # ------------------------------------------------------------------
     # Signal handlers
     # ------------------------------------------------------------------
 
     def _on_phase_changed(self, phase: str):
+        if self._cleanup_in_progress:
+            return
         self._status_label.setText(phase)
         self._append_run_log(f"[PHASE] {phase}")
 
     def _on_test_result(self, result):
         """Update table with individual test result."""
+        if self._cleanup_in_progress:
+            return
         pass  # Table is updated on target_complete for better UX
 
     def _on_target_complete(self, target_result):
         """Add/update a row in the results table for a completed target."""
+        if self._cleanup_in_progress:
+            return
         from blockcheck.models import TestStatus, TestType
 
         name = target_result.name
@@ -671,6 +682,8 @@ class BlockcheckPage(BasePage):
         self._table.setItem(row, 7, detail_cell)
 
     def _on_log(self, message: str):
+        if self._cleanup_in_progress:
+            return
         self._log_edit.append(message)
         self._append_run_log(message)
 
@@ -690,6 +703,15 @@ class BlockcheckPage(BasePage):
 
     def _on_finished(self, report):
         """Handle test completion."""
+        if self._cleanup_in_progress:
+            return
+        worker = self._worker
+        self._worker = None
+        if worker is not None:
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
         self._last_report = report
         self._reset_ui()
 
@@ -883,51 +905,6 @@ class BlockcheckPage(BasePage):
         item.setToolTip(build_family_tooltip(sorted_results))
         self._table.setItem(row, col, item)
 
-    def _build_target_detail_text(self, tests: list) -> str:
-        from blockcheck.models import TestStatus, TestType
-
-        ordered_types = [
-            ("HTTP", TestType.HTTP),
-            ("TLS1.2", TestType.TLS_12),
-            ("TLS1.3", TestType.TLS_13),
-            ("ISP", TestType.ISP_PAGE),
-            ("DNS", TestType.DNS_UDP),
-            ("DNS", TestType.DNS_DOH),
-            ("Ping", TestType.PING),
-        ]
-
-        per_type: dict[TestType, list] = {}
-        for t in tests:
-            per_type.setdefault(t.test_type, []).append(t)
-
-        parts: list[str] = []
-        for label, test_type in ordered_types:
-            candidates = sort_results_by_family(per_type.get(test_type, []))
-            if not candidates:
-                continue
-
-            if len(candidates) == 1:
-                chosen = candidates[0]
-                if chosen.status == TestStatus.OK and test_type not in (TestType.TLS_12, TestType.TLS_13):
-                    continue
-                parts.append(f"{label}: {format_result_detail(chosen)}")
-                continue
-
-            has_non_ok = any(r.status != TestStatus.OK for r in candidates)
-            if not has_non_ok and test_type not in (TestType.TLS_12, TestType.TLS_13):
-                continue
-
-            family_chunks = [
-                f"{result_family_label(r)} {format_result_detail(r)}"
-                for r in candidates
-            ]
-            parts.append(f"{label}: {' ; '.join(family_chunks)}")
-
-        if not parts:
-            return "OK"
-
-        return " | ".join(parts)
-
     @staticmethod
     def _tcp_status_text_and_color(result) -> tuple[str, str]:
         from blockcheck.models import TestStatus
@@ -1042,10 +1019,6 @@ class BlockcheckPage(BasePage):
         self._dns_summary.setText(content.dns_summary_text)
         self._recommendation.setText(content.recommendation_text)
 
-    @staticmethod
-    def _generate_recommendations(report) -> str:
-        return generate_recommendations(report)
-
     # ------------------------------------------------------------------
     # Custom domains
     # ------------------------------------------------------------------
@@ -1115,11 +1088,18 @@ class BlockcheckPage(BasePage):
     # ------------------------------------------------------------------
 
     def cleanup(self) -> None:
+        self._cleanup_in_progress = True
         if self._worker and self._worker.is_running:
             try:
                 self._worker.stop()
             except Exception:
                 pass
+        elif self._worker is not None:
+            try:
+                self._worker.deleteLater()
+            except Exception:
+                pass
+            self._worker = None
 
         for page in (self._strategy_tab_page, self._diagnostics_tab_page, self._dns_spoofing_tab_page):
             if page is None:

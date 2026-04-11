@@ -773,50 +773,6 @@ class HostsManager:
         self.set_status("Нет прав для изменения файла hosts")
         log("Нет прав для изменения файла hosts")
 
-    def add_proxy_domains(self) -> bool:
-        """LEGACY: включает все домены (профиль 0) + статические."""
-        log("🟡 add_proxy_domains начат (legacy)", "DEBUG")
-
-        all_domains: dict[str, str] = {}
-        default_profile = (get_dns_profiles() or [None])[0]
-        for service_name in get_all_services():
-            domain_map = get_service_domain_ip_map(service_name, default_profile) if default_profile else {}
-            if domain_map:
-                all_domains.update(domain_map)
-            else:
-                all_domains.update(get_service_domains(service_name))
-
-        return self.apply_domain_ip_map(all_domains)
-
-    def remove_proxy_domains(self) -> bool:
-        """LEGACY: удаляет все управляемые домены из hosts."""
-        log("🟡 remove_proxy_domains начат (legacy)", "DEBUG")
-        return self.apply_domain_ip_map({})
-    
-    def apply_selected_domains(self, selected_domains):
-        """LEGACY: применяет выбранные домены (IP берётся из профиля 0)."""
-        try:
-            selected = set(selected_domains or [])
-        except Exception:
-            selected = set()
-
-        log(f"🟡 apply_selected_domains начат (legacy): {len(selected)} доменов", "DEBUG")
-
-        if not selected:
-            return self.apply_domain_ip_map({})
-
-        base_map: dict[str, str] = {}
-        default_profile = (get_dns_profiles() or [None])[0]
-        for service_name in get_all_services():
-            domain_map = get_service_domain_ip_map(service_name, default_profile) if default_profile else {}
-            if domain_map:
-                base_map.update(domain_map)
-            else:
-                base_map.update(get_service_domains(service_name))
-
-        out: dict[str, str] = {domain: ip for domain, ip in base_map.items() if domain in selected}
-        return self.apply_domain_ip_map(out)
-
     def apply_service_dns_selections(self, service_dns: dict[str, str], static_enabled: set[str] | None = None) -> bool:
         """
         Применяет выбор DNS-профилей по сервисам.

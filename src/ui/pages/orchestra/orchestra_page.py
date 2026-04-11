@@ -517,8 +517,8 @@ class OrchestraPage(BasePage):
         try:
             app = self.window()
             runner_alive = False
-            if hasattr(app, 'dpi_starter') and app.dpi_starter:
-                runner_alive = bool(app.dpi_starter.check_process_running_wmi(silent=True))
+            if hasattr(app, 'dpi_runtime') and app.dpi_runtime:
+                runner_alive = bool(app.dpi_runtime.is_any_running(silent=True))
 
             plan = OrchestraPageController.build_update_cycle_plan(runner_alive=runner_alive)
             if plan.next_state == self.STATE_IDLE:

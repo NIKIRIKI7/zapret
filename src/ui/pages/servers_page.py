@@ -1,23 +1,30 @@
 # ui/pages/servers_page.py
 """Страница мониторинга серверов обновлений"""
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QFrame, QStackedWidget, QTableWidgetItem, QHeaderView,
+    QVBoxLayout, QHBoxLayout, QLabel,
 )
-from PyQt6.QtGui import QColor
 import qtawesome as qta
-import time
 
 from .base_page import BasePage
-from ui.compat_widgets import SettingsCard, ActionButton, PrimaryActionButton
+from ui.compat_widgets import SettingsCard, ActionButton, SwitchButton
 from ui.theme import get_theme_tokens
-from ui.theme_refresh import ThemeRefreshController
 from ui.text_catalog import tr as tr_catalog
 from updater.update_page_controller import UpdatePageController
 from updater.server_status_table_state import ServerStatusTableState
 from updater.update_page_view_controller import UpdatePageViewController
+from ui.pages.servers_page_main_build import (
+    build_servers_header_widgets,
+    build_servers_table_widget,
+)
+from ui.pages.servers_page_language import apply_servers_page_language
+from ui.pages.servers_page_table_workflow import (
+    refresh_server_rows,
+    render_server_row,
+    reset_server_rows as reset_servers_table_rows,
+    upsert_server_status as upsert_server_table_status,
+)
 from ui.pages.servers_page_settings_build import (
     build_servers_settings_section,
     build_servers_telegram_section,
@@ -26,20 +33,16 @@ from ui.widgets.win11_controls import Win11ToggleRow
 
 try:
     from qfluentwidgets import (
-        BodyLabel, CaptionLabel, StrongBodyLabel,
-        PushButton, TransparentPushButton,
-        TableWidget,
-        FluentIcon, PushSettingCard, SettingCardGroup,
+        BodyLabel, CaptionLabel,
+        PushButton,
+        PushSettingCard, SettingCardGroup,
     )
     _HAS_FLUENT = True
 except ImportError:
-    from PyQt6.QtWidgets import QPushButton, QTableWidget as TableWidget
+    from PyQt6.QtWidgets import QPushButton
     BodyLabel = QLabel
     CaptionLabel = QLabel
-    StrongBodyLabel = QLabel
     PushButton = QPushButton
-    TransparentPushButton = QPushButton
-    FluentIcon = None
     PushSettingCard = None  # type: ignore[assignment]
     SettingCardGroup = None  # type: ignore[assignment]
     _HAS_FLUENT = False
@@ -111,88 +114,46 @@ class ServersPage(BasePage):
                 pass
 
     def _render_server_row(self, row: int, server_name: str, status: dict) -> None:
-        plan = UpdatePageViewController.build_server_row_plan(
-            row_server_name=server_name,
+        render_server_row(
+            self.servers_table,
+            row=row,
+            server_name=server_name,
             status=status,
             channel=CHANNEL,
             language=self._ui_language,
+            accent_hex=self._tokens.accent_hex,
         )
-        name_item = QTableWidgetItem(plan.server_text)
-        if plan.server_accent:
-            name_item.setForeground(QColor(self._tokens.accent_hex))
-        self.servers_table.setItem(row, 0, name_item)
-
-        status_item = QTableWidgetItem(plan.status_text)
-        status_item.setForeground(QColor(*plan.status_color))
-        self.servers_table.setItem(row, 1, status_item)
-        self.servers_table.setItem(row, 2, QTableWidgetItem(plan.time_text))
-        self.servers_table.setItem(row, 3, QTableWidgetItem(plan.extra_text))
 
     def _refresh_server_rows(self) -> None:
-        for entry in self._server_table_state.iter_entries():
-            if entry.row < 0 or entry.row >= self.servers_table.rowCount():
-                continue
-            self._render_server_row(entry.row, entry.server_name, entry.status)
+        refresh_server_rows(
+            self.servers_table,
+            table_state=self._server_table_state,
+            channel=CHANNEL,
+            language=self._ui_language,
+            accent_hex=self._tokens.accent_hex,
+        )
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
-
-        self.update_card.set_ui_language(self._ui_language)
-        self.changelog_card.set_ui_language(self._ui_language)
-
-        self._back_btn.setText(self._tr("page.servers.back.about", "О программе"))
-        self._page_title_label.setText(self._tr("page.servers.title", "Серверы"))
-        self._servers_title_label.setText(self._tr("page.servers.section.update_servers", "Серверы обновлений"))
-        self._legend_active_label.setText(self._tr("page.servers.legend.active", "⭐ активный"))
-        self.servers_table.setHorizontalHeaderLabels([
-            self._tr("page.servers.table.header.server", "Сервер"),
-            self._tr("page.servers.table.header.status", "Статус"),
-            self._tr("page.servers.table.header.time", "Время"),
-            self._tr("page.servers.table.header.versions", "Версии"),
-        ])
-
-        self._settings_card.set_title(self._tr("page.servers.settings.title", "Настройки"))
-        title_label = getattr(self._settings_card, "titleLabel", None)
-        if title_label is not None:
-            title_label.setText(self._tr("page.servers.settings.title", "Настройки"))
-        if self._toggle_label is not None:
-            self._toggle_label.setText(self._tr("page.servers.settings.auto_check", "Проверять обновления при запуске"))
-        if hasattr(self, "_auto_check_card") and self._auto_check_card is not None:
-            self._auto_check_card.set_texts(
-                self._tr("page.servers.settings.auto_check", "Проверять обновления при запуске"),
-                self._tr(
-                    "page.servers.settings.auto_check.description",
-                    "Автоматически проверять наличие обновлений при старте приложения.",
-                ),
-            )
-        self._version_info_label.setText(
-            self._tr("page.servers.settings.version_channel_template", "v{version} · {channel}").format(
-                version=APP_VERSION,
-                channel=CHANNEL,
-            )
+        apply_servers_page_language(
+            tr_fn=self._tr,
+            ui_language=self._ui_language,
+            update_card=self.update_card,
+            changelog_card=self.changelog_card,
+            back_button=self._back_btn,
+            page_title_label=self._page_title_label,
+            servers_title_label=self._servers_title_label,
+            legend_active_label=self._legend_active_label,
+            servers_table=self.servers_table,
+            settings_card=self._settings_card,
+            toggle_label=self._toggle_label,
+            auto_check_card=getattr(self, "_auto_check_card", None),
+            version_info_label=self._version_info_label,
+            telegram_card=self._tg_card,
+            telegram_info_label=self._tg_info_label,
+            telegram_button=self._tg_btn,
+            refresh_server_rows=self._refresh_server_rows,
         )
-
-        self._tg_card.set_title(self._tr("page.servers.telegram.title", "Проблемы с обновлением?"))
-        if self._tg_info_label is not None:
-            self._tg_info_label.setText(
-                self._tr(
-                    "page.servers.telegram.info",
-                    "Если возникают трудности с автоматическим обновлением, все версии программы выкладываются в Telegram канале.",
-                )
-            )
-        else:
-            try:
-                self._tg_card.setContent(
-                    self._tr(
-                        "page.servers.telegram.info",
-                        "Если возникают трудности с автоматическим обновлением, все версии программы выкладываются в Telegram канале.",
-                    )
-                )
-            except Exception:
-                pass
-        self._tg_btn.setText(self._tr("page.servers.telegram.button.open_channel", "Открыть Telegram канал"))
-
-        self._refresh_server_rows()
 
     def _build_ui(self):
         # ── Custom header (back link + title) ───────────────────────────
@@ -207,32 +168,18 @@ class ServersPage(BasePage):
             self.subtitle_label.setText("")
             self.subtitle_label.hide()
 
-        header = QWidget()
-        header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 8)
-        header_layout.setSpacing(4)
+        header_widgets = build_servers_header_widgets(
+            tr_fn=self._tr,
+            qta_module=qta,
+            parent=self,
+            on_back_clicked=self._on_back_to_about,
+        )
+        self._back_btn = header_widgets.back_button
+        self._page_title_label = header_widgets.page_title_label
+        self._servers_title_label = header_widgets.servers_title_label
+        self._legend_active_label = header_widgets.legend_active_label
 
-        back_row = QHBoxLayout()
-        back_row.setContentsMargins(0, 0, 0, 0)
-        back_row.setSpacing(0)
-
-        self._back_btn = TransparentPushButton(parent=self)
-        self._back_btn.setText(self._tr("page.servers.back.about", "О программе"))
-        self._back_btn.setIcon(qta.icon("fa5s.chevron-left", color="#888"))
-        self._back_btn.setIconSize(QSize(12, 12))
-        self._back_btn.clicked.connect(self._on_back_to_about)
-        back_row.addWidget(self._back_btn)
-        back_row.addStretch()
-        header_layout.addLayout(back_row)
-
-        try:
-            from qfluentwidgets import TitleLabel as _TitleLabel
-            self._page_title_label = _TitleLabel(self._tr("page.servers.title", "Серверы"))
-        except Exception:
-            self._page_title_label = QLabel(self._tr("page.servers.title", "Серверы"))
-        header_layout.addWidget(self._page_title_label)
-
-        self.add_widget(header)
+        self.add_widget(header_widgets.header_widget)
 
         # Update status card
         self.update_card = UpdateStatusCard(language=self._ui_language)
@@ -246,41 +193,10 @@ class ServersPage(BasePage):
         self.add_widget(self.changelog_card)
 
         # Table header row
-        servers_header = QHBoxLayout()
-        self._servers_title_label = StrongBodyLabel(
-            self._tr("page.servers.section.update_servers", "Серверы обновлений")
-        )
-        servers_header.addWidget(self._servers_title_label)
-        servers_header.addStretch()
-
-        self._legend_active_label = CaptionLabel(self._tr("page.servers.legend.active", "⭐ активный"))
-        servers_header.addWidget(self._legend_active_label)
-
-        header_widget = QWidget()
-        header_widget.setLayout(servers_header)
-        self.add_widget(header_widget)
+        self.add_widget(header_widgets.servers_header_widget)
 
         # Servers table
-        self.servers_table = TableWidget()
-        self.servers_table.setColumnCount(4)
-        self.servers_table.setRowCount(0)
-        self.servers_table.setBorderVisible(True)
-        self.servers_table.setBorderRadius(8)
-        self.servers_table.setHorizontalHeaderLabels([
-            self._tr("page.servers.table.header.server", "Сервер"),
-            self._tr("page.servers.table.header.status", "Статус"),
-            self._tr("page.servers.table.header.time", "Время"),
-            self._tr("page.servers.table.header.versions", "Версии"),
-        ])
-        header = self.servers_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self.servers_table.verticalHeader().setVisible(False)
-        self.servers_table.verticalHeader().setDefaultSectionSize(36)
-        self.servers_table.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        self.servers_table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
+        self.servers_table = build_servers_table_widget(tr_fn=self._tr)
         self.add_widget(self.servers_table, stretch=1)
 
         # Settings card
@@ -312,7 +228,7 @@ class ServersPage(BasePage):
         # Telegram card
         telegram_widgets = build_servers_telegram_section(
             tr_fn=self._tr,
-            accent_hex=tokens.accent_hex,
+            accent_hex=self._tokens.accent_hex,
             has_fluent=_HAS_FLUENT,
             push_setting_card_cls=PushSettingCard,
             settings_card_cls=SettingsCard,
@@ -334,18 +250,21 @@ class ServersPage(BasePage):
         return self._ui_language
 
     def reset_server_rows(self) -> None:
-        self.servers_table.setRowCount(0)
-        self._server_table_state.reset()
+        reset_servers_table_rows(
+            self.servers_table,
+            table_state=self._server_table_state,
+        )
 
     def upsert_server_status(self, server_name: str, status: dict) -> None:
-        result = self._server_table_state.upsert(
-            server_name,
-            status,
-            next_row=self.servers_table.rowCount(),
+        upsert_server_table_status(
+            self.servers_table,
+            table_state=self._server_table_state,
+            server_name=server_name,
+            status=status,
+            channel=CHANNEL,
+            language=self._ui_language,
+            accent_hex=self._tokens.accent_hex,
         )
-        if result.created:
-            self.servers_table.insertRow(result.row)
-        self._render_server_row(result.row, server_name, result.status)
 
     def start_checking(self) -> None:
         self.update_card.start_checking()

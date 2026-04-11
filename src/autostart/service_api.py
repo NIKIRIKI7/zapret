@@ -475,37 +475,3 @@ def create_zapret_service(
         description=description,
         start_type=start_type
     )
-
-
-def create_bat_service(
-    service_name: str,
-    display_name: str,
-    bat_path: str,
-    description: Optional[str] = None,
-    auto_start: bool = True
-) -> bool:
-    """
-    Создаёт службу, запускающую .bat файл.
-    
-    Args:
-        service_name: Имя службы
-        display_name: Отображаемое имя
-        bat_path: Путь к .bat файлу
-        description: Описание службы
-        auto_start: Запускать автоматически при загрузке
-    
-    Returns:
-        True если служба создана
-    """
-    # cmd.exe /c "путь к bat"
-    binary_path = f'{get_system_exe("cmd.exe")} /c "{bat_path}"'
-    
-    start_type = SERVICE_AUTO_START if auto_start else SERVICE_DEMAND_START
-    
-    return create_service(
-        service_name=service_name,
-        display_name=display_name,
-        binary_path=binary_path,
-        description=description,
-        start_type=start_type
-    )

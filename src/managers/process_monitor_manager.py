@@ -19,7 +19,7 @@ class ProcessMonitorManager(QObject):
         from config.process_monitor import ProcessMonitorThread
         
         # 2000 ms is enough for crash detection; direct start/stop already updates UI immediately.
-        self.process_monitor = ProcessMonitorThread(self.app.dpi_starter, interval_ms=2000)
+        self.process_monitor = ProcessMonitorThread(interval_ms=2000)
         self.app.process_monitor = self.process_monitor  # Сохраняем ссылку в app
         
         if hasattr(self.process_monitor, "processDetailsChanged"):

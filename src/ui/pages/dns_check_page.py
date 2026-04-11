@@ -1,11 +1,12 @@
 # ui/pages/dns_check_page.py
 """Страница проверки DNS подмены провайдером."""
 
+import html
+
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel,
-    QFrame, QWidget
 )
-from PyQt6.QtCore import QThread, Qt
+from PyQt6.QtCore import QThread
 from PyQt6.QtGui import QFont, QTextCursor
 import qtawesome as qta
 
@@ -39,6 +40,7 @@ class DNSCheckPage(BasePage):
         )
         self.worker = None
         self.thread = None
+        self._cleanup_in_progress = False
         self._status_tone = "muted"
         self._status_bold = False
         self._info_icon_labels = []
@@ -213,9 +215,10 @@ class DNSCheckPage(BasePage):
             "error": semantic.error,
         }
         color = tone_map.get(tone, tokens.fg_muted)
+        weight = "600" if bold else "400"
         self.status_label.setText(text)
         self.status_label.setStyleSheet(
-            f"color: {color}; padding: 4px 0;"
+            f"color: {color}; padding: 4px 0; font-weight: {weight};"
         )
         self._status_tone = tone
         self._status_bold = bold
@@ -265,6 +268,7 @@ class DNSCheckPage(BasePage):
         """Начинает полную проверку DNS."""
         if self.thread and self.thread.isRunning():
             return
+        self._cleanup_in_progress = False
         
         self.result_text.clear()
         start_plan = DNSCheckPageController.build_start_plan()
@@ -277,7 +281,7 @@ class DNSCheckPage(BasePage):
         self._set_status(start_plan.status_text, tone=start_plan.status_tone, bold=False)
         
         # Создаём поток и worker
-        self.thread = QThread()
+        self.thread = QThread(self)
         self.worker = DNSCheckPageController.create_worker()
         self.worker.moveToThread(self.thread)
         
@@ -285,12 +289,17 @@ class DNSCheckPage(BasePage):
         self.thread.started.connect(self.worker.run)
         self.worker.update_signal.connect(self.append_result)
         self.worker.finished_signal.connect(self.on_check_finished)
+        self.worker.finished_signal.connect(self.worker.deleteLater)
+        self.worker.finished_signal.connect(self.thread.quit)
+        self.thread.finished.connect(self.thread.deleteLater)
         
         # Запускаем
         self.thread.start()
     
     def append_result(self, text):
         """Добавляет текст в результаты с форматированием."""
+        if self._cleanup_in_progress:
+            return
         tokens = get_theme_tokens()
         semantic = get_semantic_palette()
         plan = DNSCheckPageController.build_result_line_plan(text)
@@ -305,8 +314,8 @@ class DNSCheckPage(BasePage):
         }
         color = role_map.get(plan.color_role, tokens.fg)
         
-        # Форматируем текст
-        formatted_text = f'<span style="color: {color};">{text}</span>'
+        safe_text = html.escape(str(text or ""))
+        formatted_text = f'<span style="color: {color};">{safe_text}</span>'
         
         # Добавляем в текстовое поле
         cursor = self.result_text.textCursor()
@@ -320,6 +329,8 @@ class DNSCheckPage(BasePage):
     
     def on_check_finished(self, results):
         """Обработчик завершения проверки."""
+        if self._cleanup_in_progress:
+            return
         # Обновляем статус
         plan = DNSCheckPageController.build_finish_plan(results)
         self._apply_interaction_state(
@@ -333,18 +344,12 @@ class DNSCheckPage(BasePage):
         # Очистка потока
         cleanup_plan = DNSCheckPageController.build_cleanup_plan(
             has_thread=self.thread is not None,
-            has_worker=self.worker is not None,
             thread_running=bool(self.thread and self.thread.isRunning()),
         )
         if cleanup_plan.should_quit_thread and self.thread:
-            self.thread.quit()
             self.thread.wait(cleanup_plan.wait_timeout_ms)
-        if cleanup_plan.should_delete_thread and self.thread:
-            self.thread.deleteLater()
-            self.thread = None
-        if cleanup_plan.should_delete_worker and self.worker:
-            self.worker.deleteLater()
-            self.worker = None
+        self.thread = None
+        self.worker = None
     
     def quick_dns_check(self):
         """Выполняет быструю проверку только системного DNS."""
@@ -382,13 +387,18 @@ class DNSCheckPage(BasePage):
         """Очистка потоков при закрытии"""
         from log import log
         try:
+            self._cleanup_in_progress = True
             cleanup_plan = DNSCheckPageController.build_cleanup_plan(
                 has_thread=self.thread is not None,
-                has_worker=self.worker is not None,
                 thread_running=bool(self.thread and self.thread.isRunning()),
             )
             if cleanup_plan.should_quit_thread and self.thread and self.thread.isRunning():
                 log("Останавливаем DNS check worker...", "DEBUG")
+                if self.worker is not None:
+                    try:
+                        self.worker.stop()
+                    except Exception:
+                        pass
                 self.thread.quit()
                 if not self.thread.wait(cleanup_plan.wait_timeout_ms):
                     log("⚠ DNS check worker не завершился, принудительно завершаем", "WARNING")
@@ -397,12 +407,8 @@ class DNSCheckPage(BasePage):
                         self.thread.wait(500)
                     except:
                         pass
-            if cleanup_plan.should_delete_thread and self.thread is not None:
-                self.thread.deleteLater()
-                self.thread = None
-            if cleanup_plan.should_delete_worker and self.worker is not None:
-                self.worker.deleteLater()
-                self.worker = None
+            self.thread = None
+            self.worker = None
         except Exception as e:
             log(f"Ошибка при очистке dns_check_page: {e}", "DEBUG")
 
@@ -434,10 +440,6 @@ class DNSCheckPage(BasePage):
         self.check_button.setText(tr_catalog("page.dns_check.button.start", language=self._ui_language, default="Начать проверку"))
         self.quick_check_button.setText(tr_catalog("page.dns_check.button.quick", language=self._ui_language, default="Быстрая проверка"))
         self.save_button.setText(tr_catalog("page.dns_check.button.save", language=self._ui_language, default="Сохранить результаты"))
-        if self._actions_title_label is not None:
-            self._actions_title_label.setText(
-                tr_catalog("page.dns_check.section.actions", language=self._ui_language, default="Действия")
-            )
         self.check_button.setToolTip(
             tr_catalog(
                 "page.dns_check.action.start.description",

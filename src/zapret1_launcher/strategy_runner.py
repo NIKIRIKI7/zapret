@@ -2,9 +2,9 @@
 """
 Strategy runner for Zapret 1 (winws.exe).
 
-Supports hot-reload via ConfigFileWatcher when the launch preset file changes.
+Supports hot-reload via ConfigFileWatcher when the preset file changes.
 Does NOT support Lua functionality.
-Writes args to a launch preset file and launches winws.exe via @file syntax.
+Launches winws.exe via @preset-file syntax.
 """
 
 import os
@@ -107,11 +107,11 @@ class StrategyRunnerV1(StrategyRunnerBase):
         return snapshot
 
     def _on_config_changed(self) -> None:
-        """Called when the launch preset file changes. Performs full restart."""
+        """Called when the preset file changes. Performs full restart."""
         if controller_transition_in_progress("direct_zapret1"):
             log("Hot-reload пропущен: controller уже выполняет transition для direct_zapret1", "DEBUG")
             return
-        log("Launch preset file changed, restarting winws.exe...", "INFO")
+        log("Preset file changed, restarting winws.exe...", "INFO")
         try:
             with self._state_lock:
                 preset_path = str(self._preset_file_path or "").strip()

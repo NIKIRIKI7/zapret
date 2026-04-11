@@ -1,6 +1,5 @@
 # URLs for updates and documentation
 #VERSION_URL = "https://nozapret.ru/test.json"  # URL для проверки обновлений
-#UPDATER_BAT_URL = "https://nozapret.ru/updater.bat"  # URL для скачивания BAT-файла обновления
 #EXE_UPDATE_URL = "https://nozapret.ru/main.exe"  # URL для скачивания обновления EXE
 DOCS_URL = "https://publish.obsidian.md/zapret/Zapret/Zapret2"  # Основная документация
 INFO_URL = "https://publish.obsidian.md/zapret/Zapret/Zapret2"  # URL с информацией о программе

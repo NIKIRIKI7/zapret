@@ -1,7 +1,5 @@
-# dpi/bat_start.py
 import os
 import time
-import psutil
 from typing import Optional, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -9,21 +7,30 @@ if TYPE_CHECKING:
 
 from log import log
 from utils import run_hidden, get_system32_path
+from .process_probe import (
+    get_canonical_winws_process_pids,
+    is_expected_winws_running,
+)
 
-class BatDPIStart:
-    """Управляет процессом DPI: проверка состояния, остановка, очистка WinDivert"""
 
-    def __init__(self, winws_exe: str, status_callback: Optional[Callable[[str], None]] = None,
-                 app_instance: Optional['LupiDPIApp'] = None):
+class DpiRuntimeApi:
+    """Низкоуровневый runtime-слой DPI: статус процесса, ожидаемый exe и очистка WinDivert."""
+
+    def __init__(
+        self,
+        expected_exe_path: str,
+        status_callback: Optional[Callable[[str], None]] = None,
+        app_instance: Optional["LupiDPIApp"] = None,
+    ):
         """
-        Инициализирует BatDPIStart.
+        Инициализирует DpiRuntimeApi.
 
         Args:
-            winws_exe: Путь к исполняемому файлу winws.exe
+            expected_exe_path: Путь к ожидаемому winws.exe/winws2.exe
             status_callback: Функция обратного вызова для отображения статуса
             app_instance: Ссылка на главное приложение
         """
-        self.winws_exe = winws_exe
+        self.expected_exe_path = expected_exe_path
         self.status_callback = status_callback
         self.app_instance = app_instance
 
@@ -39,43 +46,43 @@ class BatDPIStart:
         else:
             print(text)
 
-    def check_process_running_fast(self, silent: bool = False) -> bool:
+    def set_expected_exe_path(self, exe_path: str) -> None:
+        self.expected_exe_path = str(exe_path or "").strip()
+
+    def is_any_running(self, silent: bool = False) -> bool:
         """
-        БЫСТРАЯ проверка через psutil (~1-10ms вместо 100-2000ms у WMI)
-        Основной метод проверки — используйте его везде!
+        Проверка семейства winws через канонический WinAPI probe.
+
+        Считает запущенными только процессы, чей полный путь совпадает
+        с ожидаемыми `exe/winws.exe` и `exe/winws2.exe` этого проекта.
         """
         try:
-            for proc in psutil.process_iter(['name']):
-                try:
-                    proc_name = proc.info['name']
-                    if proc_name and proc_name.lower() in ('winws.exe', 'winws2.exe'):
-                        if not silent:
-                            log(f"winws/winws2 state → True (psutil)", "DEBUG")
-                        return True
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    continue
+            is_running = bool(get_canonical_winws_process_pids())
             if not silent:
-                log(f"winws/winws2 state → False (psutil)", "DEBUG")
-            return False
+                log(f"winws/winws2 state → {is_running} (WinAPI canonical)", "DEBUG")
+            return is_running
         except Exception as e:
             if not silent:
-                log(f"psutil check error: {e}", "DEBUG")
-            # psutil не работает - возвращаем False (процесс не найден)
+                log(f"WinAPI canonical check error: {e}", "DEBUG")
             return False
 
-    def check_process_running_wmi(self, silent: bool = False) -> bool:
+    def is_expected_running(self, silent: bool = False) -> bool:
         """
-        Проверка процесса (теперь использует psutil, WMI как резерв)
-        Оставлен для обратной совместимости — внутри вызывает check_process_running_fast()
-        """
-        return self.check_process_running_fast(silent)
+        Проверка только текущего ожидаемого exe из `self.expected_exe_path`.
 
-    def check_process_running(self, silent: bool = False) -> bool:
+        Это нужно там, где нам важен именно активный режим запуска,
+        а не любой процесс семейства winws.
         """
-        Проверка процесса (теперь использует psutil)
-        Оставлен для обратной совместимости — внутри вызывает check_process_running_fast()
-        """
-        return self.check_process_running_fast(silent)
+        try:
+            is_running = bool(is_expected_winws_running(self.expected_exe_path))
+            if not silent:
+                exe_name = os.path.basename(self.expected_exe_path) or "winws.exe"
+                log(f"{exe_name} state → {is_running} (WinAPI canonical)", "DEBUG")
+            return is_running
+        except Exception as e:
+            if not silent:
+                log(f"Expected WinAPI canonical check error: {e}", "DEBUG")
+            return False
 
     def cleanup_windivert_service(self) -> bool:
         """Очистка службы через PowerShell - без окон"""
@@ -113,7 +120,7 @@ class BatDPIStart:
             log(f"Ошибка остановки через Win API: {e}", "⚠ WARNING")
 
         time.sleep(0.3)
-        ok = not self.check_process_running_wmi(silent=True)
+        ok = not self.is_any_running(silent=True)
         log("Все процессы остановлены" if ok else "winws/winws2 ещё работает",
             "✅ SUCCESS" if ok else "⚠ WARNING")
         return ok

@@ -1,10 +1,11 @@
 from PyQt6.QtCore import QThread, pyqtSignal
-import psutil
+
+from dpi.runtime import get_canonical_winws_process_pids
 
 
 class ProcessMonitorThread(QThread):
     """
-    ⚡ Следит за процессом winws.exe/winws2.exe через psutil (быстро!)
+    Следит за каноническими процессами winws.exe/winws2.exe через WinAPI.
     Шлёт сигнал когда состояние (запущен/остановлен) изменилось.
     """
     processStatusChanged = pyqtSignal(bool)          # True / False
@@ -12,50 +13,33 @@ class ProcessMonitorThread(QThread):
     checkingStarted = pyqtSignal()                   # Начало проверки
     checkingFinished = pyqtSignal()                  # Конец проверки
 
-    def __init__(self, dpi_starter, interval_ms: int = 5000):
+    def __init__(self, interval_ms: int = 5000):
         """
         Args:
-            dpi_starter: Экземпляр BatDPIStart для fallback проверки
             interval_ms: Интервал проверки в миллисекундах (по умолчанию 5 сек)
         """
         super().__init__()
-        self.dpi_starter   = dpi_starter
         self.interval_ms   = interval_ms
         self._running      = True
         self._cur_state: bool | None = None
         self._cur_details: dict[str, list[int]] | None = None
         
-        # Кэш имен процессов для быстрого поиска
-        self._target_names = frozenset(['winws.exe', 'winws2.exe'])
-
     def _check_processes_fast(self) -> dict[str, list[int]]:
         """
-        ⚡ Быстрая проверка через psutil (~1-10ms)
-        Возвращает PID'ы найденных процессов winws.exe/winws2.exe.
+        Возвращает PID канонических winws.exe/winws2.exe.
+
+        Канонический здесь означает:
+        - имя процесса совпадает;
+        - полный путь процесса совпадает с ожидаемым `exe/winws*.exe` проекта.
         """
-        details: dict[str, list[int]] = {}
         try:
-            for proc in psutil.process_iter(['name', 'pid']):
-                try:
-                    proc_name_raw = proc.info.get('name')
-                    if not proc_name_raw:
-                        continue
-                    proc_name = str(proc_name_raw).lower()
-                    if proc_name in self._target_names:
-                        pid = proc.info.get('pid')
-                        if isinstance(pid, int):
-                            details.setdefault(proc_name, []).append(pid)
-                        else:
-                            details.setdefault(proc_name, [])
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    continue
-            return details
+            return get_canonical_winws_process_pids()
         except Exception:
             return {}
 
     def _check_process_fast(self) -> bool:
         """
-        ⚡ Быстрая проверка через psutil (~1-10ms)
+        Быстрая проверка через канонический WinAPI probe.
         Не блокирует GUI!
         """
         return bool(self._check_processes_fast())
@@ -63,14 +47,13 @@ class ProcessMonitorThread(QThread):
     # ------------------------- ОСНОВНОЙ ЦИКЛ --------------------------
     def run(self):
         from log import log            # импорт здесь, чтобы не было циклических импортов
-        log("Process-monitor thread started (psutil mode)", level="INFO")
+        log("Process-monitor thread started (WinAPI canonical mode)", level="INFO")
 
         while self._running:
             try:
                 # 🔄 Сигнализируем о начале проверки
                 self.checkingStarted.emit()
                 
-                # ⚡ Используем быструю проверку через psutil
                 details = self._check_processes_fast()
                 is_running = bool(details)
                 
@@ -85,7 +68,7 @@ class ProcessMonitorThread(QThread):
                 # Если состояние изменилось — отдаём сигнал в GUI
                 if is_running != self._cur_state:
                     self._cur_state = is_running
-                    log(f"winws.exe state → {is_running}", level="DEBUG")
+                    log(f"canonical winws state → {is_running}", level="DEBUG")
                     self.processStatusChanged.emit(is_running)
 
             except Exception as e:

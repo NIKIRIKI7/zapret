@@ -11,8 +11,9 @@ if TYPE_CHECKING:
 
 def _is_dpi_running(app: "LupiDPIApp") -> bool:
     try:
-        if hasattr(app, "dpi_starter") and app.dpi_starter:
-            return bool(app.dpi_starter.check_process_running_wmi(silent=True))
+        controller = getattr(app, "dpi_controller", None)
+        if controller is not None:
+            return bool(controller.is_running())
     except Exception as e:
         log(f"Ошибка проверки состояния DPI: {e}", "DEBUG")
     return False

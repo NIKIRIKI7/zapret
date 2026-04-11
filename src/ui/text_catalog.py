@@ -1043,10 +1043,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Оркестр (автообучение)",
         "en": "Orchestrator (auto-learning)",
     },
-    "page.autostart.mode.classic_bat": {
-        "ru": "Классический (BAT файлы)",
-        "en": "Classic (BAT files)",
-    },
     "page.autostart.mode.unknown": {
         "ru": "Неизвестно",
         "en": "Unknown",
@@ -4028,7 +4024,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "",
     },
     "page.z2_control.subtitle": {
-        "ru": "Настройка и запуск Zapret 2. Выберите готовые пресеты-конфиги (как раньше .bat), а при необходимости выполните тонкую настройку для каждой категории в разделе «Прямой запуск».",
+        "ru": "Настройка и запуск Zapret 2. Выберите готовые пресеты-конфиги, а при необходимости выполните тонкую настройку для каждой категории в разделе «Прямой запуск».",
         "en": "Configure and launch Zapret 2. Choose ready presets and fine-tune categories in Direct Launch.",
     },
     "page.z2_control.section.status": {

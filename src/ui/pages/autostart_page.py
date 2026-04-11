@@ -470,8 +470,6 @@ class AutostartPage(BasePage):
                 mode_text = "Прямой запуск (Zapret 2)"
             elif method == "orchestra":
                 mode_text = "Оркестр (автообучение)"
-            elif method:
-                mode_text = "Классический (BAT файлы)"
             else:
                 mode_text = "Неизвестно"
             self.mode_label.setText(mode_text)

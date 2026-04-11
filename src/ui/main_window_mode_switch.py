@@ -15,7 +15,7 @@ def handle_main_window_launch_method_changed(window, method: str) -> None:
     except Exception:
         pass
 
-    if hasattr(window, 'dpi_starter') and window.dpi_starter.check_process_running_wmi(silent=True):
+    if hasattr(window, 'dpi_runtime') and window.dpi_runtime.is_any_running(silent=True):
         log("Останавливаем все процессы winws*.exe перед переключением режима...", "INFO")
 
         try:
@@ -25,8 +25,8 @@ def handle_main_window_launch_method_changed(window, method: str) -> None:
             killed = kill_winws_all()
             if killed:
                 log("Все процессы winws*.exe остановлены через Win API", "INFO")
-            if hasattr(window, 'dpi_starter'):
-                window.dpi_starter.cleanup_windivert_service()
+            if hasattr(window, 'dpi_runtime'):
+                window.dpi_runtime.cleanup_windivert_service()
             if runtime_service is not None:
                 runtime_service.mark_stopped(clear_error=True)
             import time
@@ -54,8 +54,8 @@ def complete_main_window_method_switch(window, method: str) -> None:
     except Exception:
         pass
 
-    if hasattr(window, 'dpi_starter'):
-        window.dpi_starter.winws_exe = get_winws_exe_for_method(method)
+    if hasattr(window, 'dpi_runtime'):
+        window.dpi_runtime.set_expected_exe_path(get_winws_exe_for_method(method))
 
     try:
         invalidate_strategy_runner()

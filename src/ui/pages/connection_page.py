@@ -370,13 +370,16 @@ class ConnectionTestPage(BasePage):
 
         finish_mode = self._finish_mode
         self._finish_mode = "completed"
+        worker = self.worker
 
         if self.stop_check_timer is not None:
             self.stop_check_timer.stop()
+            self.stop_check_timer.deleteLater()
         self.is_testing = False
         self.worker = None
         self.worker_thread = None
         self.stop_check_timer = None
+        self._release_worker_resources(worker)
 
         if finish_mode == "stopped":
             plan = ConnectionPageController.build_stopped_finish_plan()
@@ -389,11 +392,23 @@ class ConnectionTestPage(BasePage):
             send_log_enabled=plan.send_log_enabled,
             progress_visible=plan.progress_visible,
         )
+        self._set_status(plan.status_text, plan.status_tone)
         self.status_badge.set_status(plan.status_badge_text, plan.status_tone)
         self.progress_badge.set_status(plan.progress_badge_text, "muted")
-        self._set_status(plan.status_text, plan.status_tone)
         for line in plan.finish_lines:
             self._append(line)
+
+    @staticmethod
+    def _release_worker_resources(worker) -> None:
+        if worker is None:
+            return
+        release = getattr(worker, "release_resources", None)
+        if not callable(release):
+            return
+        try:
+            release()
+        except Exception:
+            pass
 
     # ──────────────────────────────────────────────────────────────
     # DNS и поддержка
@@ -497,6 +512,7 @@ class ConnectionTestPage(BasePage):
             self._finish_mode = "completed"
             if self.stop_check_timer is not None:
                 self.stop_check_timer.stop()
+                self.stop_check_timer.deleteLater()
                 self.stop_check_timer = None
             cleanup_plan = ConnectionPageController.build_cleanup_plan(
                 has_worker=self.worker is not None,
@@ -512,6 +528,7 @@ class ConnectionTestPage(BasePage):
                     if cleanup_plan.should_terminate:
                         self.worker_thread.terminate()
                         self.worker_thread.wait(cleanup_plan.terminate_wait_ms)
+            self._release_worker_resources(self.worker)
             self.is_testing = False
             self.worker = None
             self.worker_thread = None

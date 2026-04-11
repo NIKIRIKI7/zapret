@@ -52,8 +52,9 @@ def _is_dpi_running(app: 'LupiDPIApp') -> bool:
         True если winws/winws2 процесс запущен
     """
     try:
-        if hasattr(app, 'dpi_starter') and app.dpi_starter:
-            return app.dpi_starter.check_process_running_wmi(silent=True)
+        controller = getattr(app, "dpi_controller", None)
+        if controller is not None:
+            return bool(controller.is_running())
         return False
     except Exception as e:
         log(f"Ошибка проверки состояния DPI: {e}", "DEBUG")

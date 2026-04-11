@@ -128,7 +128,7 @@ class InitializationManager:
         # Фаза 1: только минимальный контур, который нужен для немедленного
         # взаимодействия с окном. Всё остальное — позже отдельным queued-шагом.
         startup_steps = [
-            self._init_dpi_starter,
+            self._init_dpi_runtime,
             self._init_dpi_controller,
             self._init_menu,
             self._connect_signals,
@@ -177,11 +177,9 @@ class InitializationManager:
     # ───────────────────────── инициализация подсистем ───────────────────────
 
     def _init_strategy_manager(self):
-        """Stub: BAT strategy manager removed — preset-based zapret1 replaces it."""
-        # BatZapret1Manager was only used for .bat file strategy management.
-        # Zapret1 now uses the preset_zapret1 module for strategy management.
+        """Stub: старый strategy manager удалён — теперь используется preset_zapret1."""
         self.app.strategy_manager = None
-        log("Strategy Manager (BAT) отключён — используется preset_zapret1", "DEBUG")
+        log("Legacy strategy manager отключён — используется preset_zapret1", "DEBUG")
         self.init_tasks_completed.add('strategy_manager')
 
     def _init_strategy_cache(self):
@@ -277,10 +275,10 @@ class InitializationManager:
         except Exception as e:
             log(f"Ошибка применения стартового summary стратегии: {e}", "DEBUG")
 
-    def _init_dpi_starter(self):
-        """Инициализация DPI стартера"""
+    def _init_dpi_runtime(self):
+        """Инициализация DPI runtime API."""
         try:
-            from dpi.bat_start import BatDPIStart
+            from dpi.runtime import DpiRuntimeApi
             from config import get_winws_exe_for_method, is_zapret2_mode
             from strategy_menu import get_strategy_launch_method
 
@@ -292,15 +290,15 @@ class InitializationManager:
             else:
                 log(f"Используется winws.exe для режима {launch_method}", "INFO")
 
-            self.app.dpi_starter = BatDPIStart(
-                winws_exe=winws_exe,
+            self.app.dpi_runtime = DpiRuntimeApi(
+                expected_exe_path=winws_exe,
                 status_callback=self.app.set_status,
-                app_instance=self.app
+                app_instance=self.app,
             )
-            log("DPI Starter инициализирован", "INFO")
-            self.init_tasks_completed.add('dpi_starter')
+            log("DPI runtime API инициализирован", "INFO")
+            self.init_tasks_completed.add('dpi_runtime')
         except Exception as e:
-            log(f"Ошибка инициализации DPI Starter: {e}", "❌ ERROR")
+            log(f"Ошибка инициализации DPI runtime API: {e}", "❌ ERROR")
             self.app.set_status(f"Ошибка DPI: {e}")
 
     def _handle_startup_dns_status(self, message: str) -> None:
@@ -367,7 +365,7 @@ class InitializationManager:
     def _init_dpi_controller(self):
         """Инициализация DPI контроллера"""
         try:
-            from dpi.dpi_controller import DPIController
+            from dpi.runtime import DPIController
             self.app.dpi_controller = DPIController(self.app)
             log("DPI Controller инициализирован", "INFO")
             self.init_tasks_completed.add('dpi_controller')
@@ -503,8 +501,8 @@ class InitializationManager:
 
             try:
                 runtime_service = getattr(self.app, "dpi_runtime_service", None)
-                dpi_starter = getattr(self.app, "dpi_starter", None)
-                if runtime_service is not None and dpi_starter is not None:
+                dpi_runtime = getattr(self.app, "dpi_runtime", None)
+                if runtime_service is not None and dpi_runtime is not None:
                     from config import get_winws_exe_for_method
                     from strategy_menu import get_strategy_launch_method
                     import os
@@ -512,9 +510,14 @@ class InitializationManager:
                     launch_method = str(get_strategy_launch_method() or "").strip().lower()
                     expected_process = ""
                     if launch_method != "orchestra":
-                        expected_process = os.path.basename(get_winws_exe_for_method(launch_method)).strip().lower()
+                        target_exe = get_winws_exe_for_method(launch_method)
+                        expected_process = os.path.basename(target_exe).strip().lower()
+                    else:
+                        target_exe = get_winws_exe_for_method("direct_zapret2")
+
+                    dpi_runtime.set_expected_exe_path(target_exe)
                     runtime_service.bootstrap_probe(
-                        bool(dpi_starter.check_process_running_wmi(silent=True)),
+                        dpi_runtime.is_expected_running(silent=True),
                         launch_method=launch_method,
                         expected_process=expected_process,
                     )
@@ -721,7 +724,7 @@ class InitializationManager:
 
     def _required_components(self):
         """Список требуемых компонентов для успешного старта"""
-        return ['dpi_starter', 'dpi_controller', 'strategy_manager', 'managers']
+        return ['dpi_runtime', 'dpi_controller', 'strategy_manager', 'managers']
 
     def _check_and_complete_initialization(self) -> bool:
         """
@@ -797,16 +800,16 @@ class InitializationManager:
         t_total = _time.perf_counter()
 
         try:
-            # Проверка winws.exe
+            exe_name, _ = self._get_current_winws_target()
             t_winws = _time.perf_counter()
             if not self._check_winws_exists():
-                log("winws.exe не найден", "❌ ERROR")
-                self.app.set_status("❌ winws.exe не найден")
+                log(f"{exe_name} не найден", "❌ ERROR")
+                self.app.set_status(f"❌ {exe_name} не найден")
                 post_init_metric_source = "post_init_winws_missing"
                 return
             self._log_startup_step("PostInitCheckWinws", f"{(_time.perf_counter() - t_winws)*1000:.0f}ms")
 
-            log("✅ winws.exe найден", "DEBUG")
+            log(f"✅ {exe_name} найден", "DEBUG")
 
             # Быструю часть post-init оставляем в критическом пути,
             # а реальный автозапуск передаём в единый dispatcher после возврата в event loop.
@@ -864,8 +867,7 @@ class InitializationManager:
                 f"{method or 'unknown'} {(_time.perf_counter() - started_at)*1000:.0f}ms",
             )
 
-    def _check_winws_exists(self) -> bool:
-        """Проверка наличия winws.exe"""
+    def _get_current_winws_target(self) -> tuple[str, str]:
         try:
             import os
             from config import get_winws_exe_for_method
@@ -873,15 +875,31 @@ class InitializationManager:
 
             launch_method = get_strategy_launch_method()
             target_file = get_winws_exe_for_method(launch_method)
+            exe_name = os.path.basename(target_file) or "winws.exe"
+            return exe_name, target_file
+        except Exception:
+            try:
+                from config import WINWS_EXE
+                import os
 
-            return os.path.exists(target_file)
+                return os.path.basename(WINWS_EXE) or "winws.exe", WINWS_EXE
+            except Exception:
+                return "winws.exe", ""
+
+    def _check_winws_exists(self) -> bool:
+        """Проверка наличия текущего winws.exe/winws2.exe для выбранного режима."""
+        try:
+            import os
+
+            _, target_file = self._get_current_winws_target()
+            return bool(target_file) and os.path.exists(target_file)
 
         except Exception as e:
-            log(f"Ошибка при проверке winws.exe: {e}", "DEBUG")
+            log(f"Ошибка при проверке winws файла: {e}", "DEBUG")
             # Fallback на WINWS_EXE
             try:
                 from config import WINWS_EXE
                 import os
                 return os.path.exists(WINWS_EXE)
-            except:
+            except Exception:
                 return False

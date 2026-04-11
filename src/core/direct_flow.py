@@ -25,14 +25,14 @@ class DirectLaunchProfile:
     engine: str
     preset_file_name: str
     preset_name: str
-    launch_config_path: Path
+    preset_path: Path
     display_name: str
 
     def to_selected_mode(self) -> dict[str, object]:
         return {
             "is_preset_file": True,
             "name": self.display_name,
-            "preset_path": str(self.launch_config_path),
+            "preset_path": str(self.preset_path),
         }
 
 
@@ -59,7 +59,7 @@ class DirectStartupSnapshot:
             engine=self.engine,
             preset_file_name=self.preset_file_name,
             preset_name=self.preset_name,
-            launch_config_path=self.preset_path,
+            preset_path=self.preset_path,
             display_name=self.display_name,
         )
 
@@ -121,20 +121,20 @@ class DirectFlowCoordinator:
         self._emit_timing(timing_callback, f"{label}.selected_manifest", t_selected)
 
         t_path = time.perf_counter()
-        launch_config_path = self._get_source_preset_path(
+        preset_path = self._get_source_preset_path(
             self._METHOD_TO_ENGINE[method],
             selected.file_name,
         )
         self._emit_timing(timing_callback, f"{label}.selected_source_path", t_path)
-        if not launch_config_path.exists():
-            raise DirectFlowError(f"Selected source preset not found: {launch_config_path}")
+        if not preset_path.exists():
+            raise DirectFlowError(f"Selected source preset not found: {preset_path}")
 
         has_required_filters: bool | None = None
         if require_filters:
             text = ""
             t_read = time.perf_counter()
             try:
-                text = launch_config_path.read_text(encoding="utf-8").strip()
+                text = preset_path.read_text(encoding="utf-8").strip()
             except Exception as exc:
                 raise DirectFlowError(f"Failed to read selected source preset: {exc}") from exc
             self._emit_timing(timing_callback, f"{label}.read_preset_text", t_read)
@@ -152,7 +152,7 @@ class DirectFlowCoordinator:
             engine=self._METHOD_TO_ENGINE[method],
             preset_file_name=selected.file_name,
             preset_name=selected.name,
-            preset_path=launch_config_path,
+            preset_path=preset_path,
             display_name=f"Пресет: {selected.name}",
             has_required_filters=has_required_filters,
         )
@@ -208,7 +208,7 @@ class DirectFlowCoordinator:
             engine=engine,
             preset_file_name=selected_file_name,
             preset_name=display_name,
-            launch_config_path=selected_path,
+            preset_path=selected_path,
             display_name=f"Пресет: {display_name}",
         )
 

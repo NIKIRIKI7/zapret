@@ -774,23 +774,7 @@ def load_user_hosts_selection() -> dict[str, str]:
 
     Хранится отдельно от каталога доменов в `%APPDATA%/zapret/user_hosts.ini`.
     """
-    user_path = get_user_hosts_ini_path()
-    path = user_path
-    migrate_to_new_path = False
-
-    if not user_path.exists():
-        # Back-compat: earlier builds could store the selection in `%APPDATA%/zapret/hosts.ini`.
-        legacy_path = user_path.with_name("hosts.ini")
-        if legacy_path.exists():
-            try:
-                with legacy_path.open("r", encoding="utf-8", errors="replace") as f:
-                    sample = f.read(64 * 1024).lower()
-                if "[profiles]" in sample or "[selectedprofiles]" in sample:
-                    path = legacy_path
-                    migrate_to_new_path = True
-            except Exception:
-                pass
-
+    path = get_user_hosts_ini_path()
     if not path.exists():
         return {}
 
@@ -804,9 +788,6 @@ def load_user_hosts_selection() -> dict[str, str]:
     section = None
     if parser.has_section("profiles"):
         section = "profiles"
-    elif parser.has_section("SelectedProfiles"):
-        # compatibility
-        section = "SelectedProfiles"
 
     if not section:
         return {}
@@ -817,9 +798,6 @@ def load_user_hosts_selection() -> dict[str, str]:
         profile_name = (profile_name or "").strip()
         if service_name and profile_name:
             out[service_name] = profile_name
-
-    if migrate_to_new_path and out:
-        save_user_hosts_selection(out)
     return out
 
 

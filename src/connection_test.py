@@ -24,36 +24,55 @@ class ConnectionTestWorker(QObject):
         self._curl_path = None
         self._curl_path_checked = False
         self._curl_available_logged = False
-        
-        for handler in logging.root.handlers[:]:
-            logging.root.removeHandler(handler)
-            
-        logging.basicConfig(
-            filename=self.log_filename,
-            level=logging.INFO,
-            format="%(asctime)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-            encoding='utf-8'  # Добавляем явную кодировку
+        self._logger = logging.getLogger("connection_test.worker")
+        self._logger.setLevel(logging.INFO)
+        self._logger.propagate = False
+
+        for handler in self._logger.handlers[:]:
+            self._logger.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
+
+        self._file_handler = logging.FileHandler(self.log_filename, "w", "utf-8")
+        self._file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(message)s", "%Y-%m-%d %H:%M:%S")
         )
-    
-        file_handler = logging.FileHandler(self.log_filename, 'w', 'utf-8')
-        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s", "%Y-%m-%d %H:%M:%S"))
-        logging.getLogger().handlers = [file_handler]
+        self._logger.addHandler(self._file_handler)
     
     def stop_gracefully(self):
         """Мягкая остановка теста."""
+        self.log_message("⚠️ Получен запрос на остановку теста...", allow_after_stop=True)
         self._stop_requested = True
-        self.log_message("⚠️ Получен запрос на остановку теста...")
     
     def is_stop_requested(self):
         """Проверяет, запрошена ли остановка"""
         return self._stop_requested
     
-    def log_message(self, message):
+    def log_message(self, message, *, allow_after_stop: bool = False):
         """Записывает сообщение в лог и отправляет сигнал в GUI."""
-        if not self._stop_requested:  # Не логируем после остановки
-            logging.info(message)
+        if allow_after_stop or not self._stop_requested:
+            self._logger.info(message)
             self.update_signal.emit(message)
+
+    def _close_logger(self) -> None:
+        handler = getattr(self, "_file_handler", None)
+        if handler is None:
+            return
+        try:
+            self._logger.removeHandler(handler)
+        except Exception:
+            pass
+        try:
+            handler.close()
+        except Exception:
+            pass
+        self._file_handler = None
+
+    def release_resources(self) -> None:
+        """Освобождает файловые ресурсы worker'а."""
+        self._close_logger()
 
     def check_dns_poisoning(self):
         """Проверяет DNS подмену провайдером"""
@@ -67,7 +86,10 @@ class ConnectionTestWorker(QObject):
         
         try:
             dns_checker = DNSChecker()
-            results = dns_checker.check_dns_poisoning(log_callback=self.log_message)
+            results = dns_checker.check_dns_poisoning(
+                log_callback=self.log_message,
+                should_stop=self.is_stop_requested,
+            )
             
             # Добавляем итоговые рекомендации
             if results['summary']['dns_poisoning_detected']:
@@ -349,6 +371,8 @@ class ConnectionTestWorker(QObject):
 
     def check_youtube_video_access(self):
         """Проверяет реальный доступ к YouTube видео"""
+        if self.is_stop_requested():
+            return
         self.log_message("=" * 40)
         self.log_message("Проверка реального доступа к YouTube видео:")
         self.log_message("=" * 40)
@@ -360,10 +384,14 @@ class ConnectionTestWorker(QObject):
         ]
         
         for url in test_video_urls:
+            if self.is_stop_requested():
+                break
             self.check_real_youtube_endpoint(url)
 
     def check_real_youtube_endpoint(self, url):
         """Проверяет реальный YouTube endpoint"""
+        if self.is_stop_requested():
+            return
         try:
             domain = url.split('/')[2]
             path = '/' + '/'.join(url.split('/')[3:])
@@ -385,6 +413,9 @@ class ConnectionTestWorker(QObject):
             
             result = subprocess.run(command, capture_output=True, timeout=10,
                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+
+            if self.is_stop_requested():
+                return
 
             if result and result.returncode == 0:
                 output = result.stdout.decode('utf-8', errors='ignore') if result.stdout else ""
@@ -505,7 +536,7 @@ class ConnectionTestWorker(QObject):
                     continue
 
             if not winws_found:
-                self.log_message("❌ Процесс winws.exe НЕ запущен")
+                self.log_message("❌ Процессы winws.exe и winws2.exe НЕ запущены")
                 self.log_message("   Zapret не работает!")
 
         except Exception as e:
@@ -636,6 +667,8 @@ class ConnectionTestWorker(QObject):
 
     def check_port_443(self, domain):
         """Проверяет доступность 443 порта через telnet/nc или Python socket."""
+        if self.is_stop_requested():
+            return
         try:
             import socket
             
@@ -646,6 +679,8 @@ class ConnectionTestWorker(QObject):
             
             try:
                 result = sock.connect_ex((domain, 443))
+                if self.is_stop_requested():
+                    return
                 
                 if result == 0:
                     self.log_message(f"  ✅ Порт 443 открыт")
@@ -682,8 +717,12 @@ class ConnectionTestWorker(QObject):
 
     def check_curl_http(self, domain):
         """Проверка HTTP (без HTTPS)."""
+        if self.is_stop_requested():
+            return
         try:
             self.check_port_80(domain)
+            if self.is_stop_requested():
+                return
             
             curl_exe = self._get_curl_path()
             if not curl_exe:
@@ -700,6 +739,9 @@ class ConnectionTestWorker(QObject):
 
             result = subprocess.run(command, capture_output=True, timeout=10,
                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+
+            if self.is_stop_requested():
+                return
 
             if result and result.returncode == 0:
                 output = result.stdout.decode('utf-8', errors='ignore') if result.stdout else ""
@@ -719,6 +761,8 @@ class ConnectionTestWorker(QObject):
 
     def check_port_80(self, domain):
         """Проверяет доступность 80 порта."""
+        if self.is_stop_requested():
+            return
         try:
             import socket
             
@@ -729,6 +773,8 @@ class ConnectionTestWorker(QObject):
             
             try:
                 result = sock.connect_ex((domain, 80))
+                if self.is_stop_requested():
+                    return
                 
                 if result == 0:
                     self.log_message(f"  ✅ Порт 80 открыт")
@@ -743,6 +789,8 @@ class ConnectionTestWorker(QObject):
 
     def check_curl_extended(self):
         """Расширенная проверка через curl с различными параметрами."""
+        if self.is_stop_requested():
+            return
         test_domain = "rr2---sn-axq7sn7z.googlevideo.com"
         
         self.log_message("=" * 40)
@@ -751,18 +799,26 @@ class ConnectionTestWorker(QObject):
         
         self.log_message(f"1. Проверка портов и HTTPS для {test_domain}:")
         self.check_curl_domain(test_domain)
+        if self.is_stop_requested():
+            return
         
         self.log_message(f"2. HTTP тест (без шифрования):")
         self.check_curl_http(test_domain)
+        if self.is_stop_requested():
+            return
         
         self.log_message(f"3. HTTPS с игнорированием SSL:")
         self.check_curl_insecure(test_domain)
+        if self.is_stop_requested():
+            return
         
         self.log_message(f"4. Тест различных TLS версий:")
         self.check_tls_versions(test_domain)
 
     def check_tls_versions(self, domain):
         """Проверяет доступность с различными версиями TLS."""
+        if self.is_stop_requested():
+            return
         curl_exe = self._get_curl_path()
         if not curl_exe:
             self.log_message("  ⚠️ curl не найден")
@@ -776,6 +832,8 @@ class ConnectionTestWorker(QObject):
         ]
         
         for version_name, tls_flag in tls_versions:
+            if self.is_stop_requested():
+                break
             try:
                 command = [
                     curl_exe, "-I", "-k",
@@ -788,6 +846,9 @@ class ConnectionTestWorker(QObject):
 
                 result = subprocess.run(command, capture_output=True, timeout=10,
                                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+
+                if self.is_stop_requested():
+                    return
 
                 if result and result.returncode == 0:
                     output = result.stdout.decode('utf-8', errors='ignore') if result.stdout else ""
@@ -807,6 +868,8 @@ class ConnectionTestWorker(QObject):
 
     def check_curl_insecure(self, domain):
         """Проверка HTTPS с игнорированием SSL ошибок."""
+        if self.is_stop_requested():
+            return
         try:
             curl_exe = self._get_curl_path()
             if not curl_exe:
@@ -823,6 +886,9 @@ class ConnectionTestWorker(QObject):
 
             result = subprocess.run(command, capture_output=True, timeout=15,
                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+
+            if self.is_stop_requested():
+                return
 
             if result and result.returncode == 0:
                 output = result.stdout.decode('utf-8', errors='ignore') if result.stdout else ""
@@ -871,7 +937,7 @@ class ConnectionTestWorker(QObject):
                     self.check_youtube()
             
             if self.is_stop_requested():
-                self.log_message("⚠️ Тестирование остановлено пользователем")
+                self.log_message("⚠️ Тестирование остановлено пользователем", allow_after_stop=True)
             else:
                 self.log_message("="*50)
                 self.log_message("Тестирование завершено")
@@ -880,4 +946,5 @@ class ConnectionTestWorker(QObject):
             if not self.is_stop_requested():
                 self.log_message(f"❌ Критическая ошибка в тесте: {str(e)}")
         finally:
+            self._close_logger()
             self.finished_signal.emit()

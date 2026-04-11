@@ -1079,8 +1079,8 @@ class TelegramProxyPage(BasePage):
                     zapret_running = False
                     try:
                         app = self.window()
-                        if hasattr(app, 'app') and hasattr(app.app, 'dpi_starter'):
-                            zapret_running = app.app.dpi_starter.check_process_running_wmi(silent=True)
+                        if hasattr(app, 'app') and hasattr(app.app, 'dpi_runtime'):
+                            zapret_running = app.app.dpi_runtime.is_any_running(silent=True)
                     except Exception:
                         pass
 

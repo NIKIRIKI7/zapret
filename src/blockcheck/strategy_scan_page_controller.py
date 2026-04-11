@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import os
 import re
@@ -859,14 +857,6 @@ class StrategyScanPageController:
         state = cls.load_resume_state()
         domains = state.get("domains", {})
         entry = domains.get(key, {})
-
-        if not entry and (scan_protocol or "").strip().lower() == "udp_games":
-            legacy_key = f"udp_games|{(target or '').strip().lower()}"
-            entry = domains.get(legacy_key, {})
-
-        if not entry and (scan_protocol or "").strip().lower() == "tcp_https":
-            legacy_key = (target or "").strip().lower()
-            entry = domains.get(legacy_key, {})
         try:
             return max(0, int(entry.get("next_index", 0) or 0))
         except Exception:
@@ -897,16 +887,6 @@ class StrategyScanPageController:
         domains = state.get("domains", {})
         if key in domains:
             del domains[key]
-
-        if (scan_protocol or "").strip().lower() == "udp_games":
-            legacy_key = f"udp_games|{(target or '').strip().lower()}"
-            if legacy_key in domains:
-                del domains[legacy_key]
-
-        if (scan_protocol or "").strip().lower() == "tcp_https":
-            legacy_key = (target or "").strip().lower()
-            if legacy_key in domains:
-                del domains[legacy_key]
 
         if domains:
             state["domains"] = domains
@@ -1128,7 +1108,9 @@ class StrategyScanPageController:
         else:
             status_text = f"Готово. Протестировано: {total_count}, рабочих: {working} ({elapsed:.1f}s)"
 
-        if report.baseline_accessible:
+        if report.cancelled:
+            notification_kind = "none"
+        elif report.baseline_accessible:
             notification_kind = "baseline_accessible"
         elif working > 0:
             notification_kind = "found"

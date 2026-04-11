@@ -6,8 +6,8 @@
 
 import socket
 import subprocess
-import re, os, sys
-from typing import Dict, List, Tuple, Optional
+import re, sys
+from typing import Dict, Optional
 from log import log
 from blockcheck.config import KNOWN_BLOCK_IPS
 
@@ -75,7 +75,7 @@ class DNSChecker:
         # Известные IP адреса блокировок провайдеров (из blockcheck.config)
         self.known_block_ips = list(KNOWN_BLOCK_IPS)
     
-    def check_dns_poisoning(self, log_callback=None) -> Dict:
+    def check_dns_poisoning(self, log_callback=None, should_stop=None) -> Dict:
         """
         Главная функция проверки DNS подмены
         
@@ -97,29 +97,41 @@ class DNSChecker:
             }
         }
         
-        self._log("=" * 40, log_callback)
-        self._log("🔍 ПРОВЕРКА DNS ПОДМЕНЫ", log_callback)
-        self._log("=" * 40, log_callback)
+        self._log("=" * 40, log_callback, should_stop)
+        self._log("🔍 ПРОВЕРКА DNS ПОДМЕНЫ", log_callback, should_stop)
+        self._log("=" * 40, log_callback, should_stop)
+        
+        if self._is_stop_requested(should_stop):
+            return results
         
         # Сначала проверяем доступность внешних DNS
-        self._log("\n🌐 Проверка доступности DNS серверов:", log_callback)
-        dns_availability = self._check_dns_servers_availability(log_callback)
+        self._log("\n🌐 Проверка доступности DNS серверов:", log_callback, should_stop)
+        dns_availability = self._check_dns_servers_availability(log_callback, should_stop)
+
+        if self._is_stop_requested(should_stop):
+            return results
         
         if not any(dns_availability.values()):
-            self._log("⚠️ Все внешние DNS серверы недоступны!", log_callback)
-            self._log("Возможно, провайдер блокирует альтернативные DNS", log_callback)
+            self._log("⚠️ Все внешние DNS серверы недоступны!", log_callback, should_stop)
+            self._log("Возможно, провайдер блокирует альтернативные DNS", log_callback, should_stop)
             results['summary']['external_dns_blocked'] = True
         
         # Проверяем YouTube
-        self._log("\n📹 Проверка DNS для YouTube:", log_callback)
-        results['youtube'] = self._check_service('youtube', log_callback)
+        self._log("\n📹 Проверка DNS для YouTube:", log_callback, should_stop)
+        results['youtube'] = self._check_service('youtube', log_callback, should_stop)
+
+        if self._is_stop_requested(should_stop):
+            return results
         
         # Проверяем Discord
-        self._log("\n💬 Проверка DNS для Discord:", log_callback)
-        results['discord'] = self._check_service('discord', log_callback)
+        self._log("\n💬 Проверка DNS для Discord:", log_callback, should_stop)
+        results['discord'] = self._check_service('discord', log_callback, should_stop)
+
+        if self._is_stop_requested(should_stop):
+            return results
         
         # Анализируем результаты
-        self._analyze_results(results, log_callback)
+        self._analyze_results(results, log_callback, should_stop)
         
         return results
 
@@ -255,33 +267,15 @@ class DNSChecker:
             log(f"nslookup error: {e}", "DEBUG")
             return None
 
-    def _ping_dns_server(self, dns_server: str) -> bool:
-        """Проверяет доступность DNS сервера через ping"""
-        try:
-            # Простой ping для проверки доступности хоста
-            command = ["ping", "-n", "1", "-w", "1000", dns_server]
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                timeout=2,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform.startswith('win') else 0  # ✅ ИСПРАВЛЕНО
-            )
-            
-            output = result.stdout.decode('cp866', errors='ignore')
-            
-            # Проверяем успешность ping
-            return any(pattern in output for pattern in ["TTL=", "ttl=", "bytes=", "байт="])
-            
-        except Exception:
-            return False
-
-    def _check_dns_servers_availability(self, log_callback=None) -> Dict[str, bool]:
+    def _check_dns_servers_availability(self, log_callback=None, should_stop=None) -> Dict[str, bool]:
         """Проверяет доступность DNS серверов через DNS запросы"""
         availability = {}
         
-        self._log("Проверка доступности DNS серверов...", log_callback)
+        self._log("Проверка доступности DNS серверов...", log_callback, should_stop)
         
         for dns_name, dns_server in self.dns_servers.items():
+            if self._is_stop_requested(should_stop):
+                break
             if dns_server is None:  # Пропускаем системный DNS
                 continue
             
@@ -292,6 +286,8 @@ class DNSChecker:
             test_domains = ["google.com", "cloudflare.com", "example.com"]
             
             for test_domain in test_domains:
+                if self._is_stop_requested(should_stop):
+                    break
                 result = self._resolve_domain(test_domain, dns_server)
                 if result['ip'] is not None:
                     test_successful = True
@@ -300,37 +296,13 @@ class DNSChecker:
             availability[dns_name] = test_successful
             
             if test_successful:
-                self._log(f"  {dns_name} ({dns_server}): ✅ Доступен", log_callback)
+                self._log(f"  {dns_name} ({dns_server}): ✅ Доступен", log_callback, should_stop)
             else:
-                self._log(f"  {dns_name} ({dns_server}): ❌ Недоступен", log_callback)
+                self._log(f"  {dns_name} ({dns_server}): ❌ Недоступен", log_callback, should_stop)
         
         return availability
 
-
-    def _resolve_via_socket(self, domain: str, dns_server: str) -> Optional[str]:
-        """Альтернативный метод резолвинга через DNS библиотеку"""
-        try:
-            # Пробуем использовать встроенный резолвер Python
-            # Это не будет работать с кастомным DNS, но хотя бы проверит доступность
-            import socket
-            
-            # Временно меняем DNS (работает не всегда)
-            # Это больше для проверки что домен вообще резолвится
-            try:
-                result = socket.gethostbyname(domain)
-                if self._is_valid_ip(result):
-                    log(f"Socket resolved {domain} to {result}", "DEBUG")
-                    return result
-            except:
-                pass
-                
-            return None
-            
-        except Exception as e:
-            log(f"Socket resolve error: {e}", "DEBUG")
-            return None
-            
-    def _check_service(self, service: str, log_callback=None) -> Dict:
+    def _check_service(self, service: str, log_callback=None, should_stop=None) -> Dict:
         """Проверяет DNS для конкретного сервиса"""
         service_results = {
             'domains': {},
@@ -343,11 +315,15 @@ class DNSChecker:
         
         # Проверяем каждый домен
         for domain in service_info['domains']:
-            self._log(f"\nПроверка домена: {domain}", log_callback)
+            if self._is_stop_requested(should_stop):
+                break
+            self._log(f"\nПроверка домена: {domain}", log_callback, should_stop)
             domain_results = {}
             
             # Проверяем через разные DNS серверы
             for dns_name, dns_server in self.dns_servers.items():
+                if self._is_stop_requested(should_stop):
+                    break
                 result = self._resolve_domain(domain, dns_server)
                 domain_results[dns_name] = result
                 
@@ -367,15 +343,15 @@ class DNSChecker:
                         status_text = "Подозрительный IP"
                         service_results['poisoned'] = True
                     
-                    self._log(f"  {dns_name}: {result['ip']} - {icon} {status_text}", log_callback)
+                    self._log(f"  {dns_name}: {result['ip']} - {icon} {status_text}", log_callback, should_stop)
                 else:
                     if result.get('error'):
                         if 'timeout' in str(result['error']).lower():
-                            self._log(f"  {dns_name}: ⏱️ Таймаут", log_callback)
+                            self._log(f"  {dns_name}: ⏱️ Таймаут", log_callback, should_stop)
                         else:
-                            self._log(f"  {dns_name}: ❌ Не разрешается", log_callback)
+                            self._log(f"  {dns_name}: ❌ Не разрешается", log_callback, should_stop)
                     else:
-                        self._log(f"  {dns_name}: ❌ Не разрешается", log_callback)
+                        self._log(f"  {dns_name}: ❌ Не разрешается", log_callback, should_stop)
             
             service_results['domains'][domain] = domain_results
         
@@ -443,30 +419,32 @@ class DNSChecker:
         # IP не в известных диапазонах - подозрительный
         return 'suspicious'
     
-    def _analyze_results(self, results: Dict, log_callback=None):
+    def _analyze_results(self, results: Dict, log_callback=None, should_stop=None):
         """Анализирует результаты и формирует рекомендации"""
-        self._log("\n" + "=" * 40, log_callback)
-        self._log("📊 АНАЛИЗ РЕЗУЛЬТАТОВ", log_callback)
-        self._log("=" * 40, log_callback)
+        if self._is_stop_requested(should_stop):
+            return
+        self._log("\n" + "=" * 40, log_callback, should_stop)
+        self._log("📊 АНАЛИЗ РЕЗУЛЬТАТОВ", log_callback, should_stop)
+        self._log("=" * 40, log_callback, should_stop)
         
         # Проверяем YouTube
         if results['youtube']['poisoned']:
             results['summary']['youtube_blocked'] = True
             results['summary']['dns_poisoning_detected'] = True
-            self._log("❌ YouTube: Обнаружена DNS подмена!", log_callback)
+            self._log("❌ YouTube: Обнаружена DNS подмена!", log_callback, should_stop)
         else:
-            self._log("✅ YouTube: DNS резолвинг корректный", log_callback)
+            self._log("✅ YouTube: DNS резолвинг корректный", log_callback, should_stop)
         
         # Проверяем Discord
         if results['discord']['poisoned']:
             results['summary']['discord_blocked'] = True
             results['summary']['dns_poisoning_detected'] = True
-            self._log("❌ Discord: Обнаружена DNS подмена!", log_callback)
+            self._log("❌ Discord: Обнаружена DNS подмена!", log_callback, should_stop)
         else:
-            self._log("✅ Discord: DNS резолвинг корректный", log_callback)
+            self._log("✅ Discord: DNS резолвинг корректный", log_callback, should_stop)
         
         # Анализируем ситуацию с DNS серверами
-        self._log("", log_callback)
+        self._log("", log_callback, should_stop)
         
         # Проверяем есть ли вообще рабочие внешние DNS
         working_dns_count = 0
@@ -478,101 +456,47 @@ class DNSChecker:
                         break
         
         if working_dns_count == 0 and not results['summary']['dns_poisoning_detected']:
-            self._log("ℹ️ ИНФОРМАЦИЯ:", log_callback)
-            self._log("Внешние DNS серверы не отвечают на запросы.", log_callback)
-            self._log("", log_callback)
-            self._log("Возможные причины:", log_callback)
-            self._log("  • Firewall блокирует исходящие DNS запросы (UDP порт 53)", log_callback)
-            self._log("  • Антивирус блокирует нестандартные DNS запросы", log_callback)
-            self._log("  • Корпоративная сеть с ограничениями", log_callback)
-            self._log("  • Провайдер перехватывает все DNS запросы", log_callback)
-            self._log("", log_callback)
-            self._log("Что можно сделать:", log_callback)
-            self._log("  1. Проверьте настройки firewall/антивируса", log_callback)
-            self._log("  2. Попробуйте DNS-over-HTTPS в браузере", log_callback)
-            self._log("  3. Используйте VPN со встроенным DNS", log_callback)
-            self._log("", log_callback)
+            self._log("ℹ️ ИНФОРМАЦИЯ:", log_callback, should_stop)
+            self._log("Внешние DNS серверы не отвечают на запросы.", log_callback, should_stop)
+            self._log("", log_callback, should_stop)
+            self._log("Возможные причины:", log_callback, should_stop)
+            self._log("  • Firewall блокирует исходящие DNS запросы (UDP порт 53)", log_callback, should_stop)
+            self._log("  • Антивирус блокирует нестандартные DNS запросы", log_callback, should_stop)
+            self._log("  • Корпоративная сеть с ограничениями", log_callback, should_stop)
+            self._log("  • Провайдер перехватывает все DNS запросы", log_callback, should_stop)
+            self._log("", log_callback, should_stop)
+            self._log("Что можно сделать:", log_callback, should_stop)
+            self._log("  1. Проверьте настройки firewall/антивируса", log_callback, should_stop)
+            self._log("  2. Попробуйте DNS-over-HTTPS в браузере", log_callback, should_stop)
+            self._log("  3. Используйте VPN со встроенным DNS", log_callback, should_stop)
+            self._log("", log_callback, should_stop)
             
         # Итоговое заключение
         if results['summary']['dns_poisoning_detected']:
-            self._log("⚠️ ТРЕБУЕТСЯ ДЕЙСТВИЕ:", log_callback)
-            self._log("Обнаружена DNS подмена! Смените DNS или используйте Zapret.", log_callback)
+            self._log("⚠️ ТРЕБУЕТСЯ ДЕЙСТВИЕ:", log_callback, should_stop)
+            self._log("Обнаружена DNS подмена! Смените DNS или используйте Zapret.", log_callback, should_stop)
         elif working_dns_count == 0:
-            self._log("💡 РЕКОМЕНДАЦИЯ:", log_callback)
-            self._log("DNS работает корректно, но внешние DNS недоступны.", log_callback)
-            self._log("Если есть проблемы с сайтами - используйте Zapret для обхода DPI.", log_callback)
+            self._log("💡 РЕКОМЕНДАЦИЯ:", log_callback, should_stop)
+            self._log("DNS работает корректно, но внешние DNS недоступны.", log_callback, should_stop)
+            self._log("Если есть проблемы с сайтами - используйте Zapret для обхода DPI.", log_callback, should_stop)
         else:
-            self._log("✅ РЕЗУЛЬТАТ:", log_callback)
-            self._log("DNS работает корректно. Если сайты недоступны - используйте Zapret.", log_callback)
+            self._log("✅ РЕЗУЛЬТАТ:", log_callback, should_stop)
+            self._log("DNS работает корректно. Если сайты недоступны - используйте Zapret.", log_callback, should_stop)
     
-    def _find_working_dns(self, results: Dict) -> Optional[str]:
-        """Находит DNS сервер который дает валидные результаты"""
-        # Собираем статистику по DNS серверам
-        dns_scores = {}
-        
-        for service in ['youtube', 'discord']:
-            for domain, domain_results in results[service]['domains'].items():
-                for dns_name, dns_result in domain_results.items():
-                    if dns_name not in dns_scores:
-                        dns_scores[dns_name] = 0
-                    
-                    if dns_result['ip']:
-                        status = self._check_ip_validity(dns_result['ip'], service)
-                        if status == 'valid':
-                            dns_scores[dns_name] += 1
-                        elif status == 'blocked':
-                            dns_scores[dns_name] -= 2
-        
-        # Находим лучший DNS
-        best_dns = None
-        best_score = -1
-        
-        for dns_name, score in dns_scores.items():
-            if score > best_score and dns_name != 'System Default':
-                best_score = score
-                best_dns = dns_name
-        
-        return best_dns if best_score > 0 else None
-    
-    def _log(self, message: str, callback=None):
+    @staticmethod
+    def _is_stop_requested(should_stop=None) -> bool:
+        if not callable(should_stop):
+            return False
+        try:
+            return bool(should_stop())
+        except Exception:
+            return False
+
+    def _log(self, message: str, callback=None, should_stop=None):
         """Выводит сообщение в лог"""
+        if self._is_stop_requested(should_stop):
+            return
         if callback:
             callback(message)
         else:
             print(message)
-    
-    def get_quick_dns_check(self, domain: str) -> Dict:
-        """Быстрая проверка DNS для одного домена"""
-        result = {
-            'domain': domain,
-            'system_dns': None,
-            'google_dns': None,
-            'cloudflare_dns': None,
-            'is_blocked': False
-        }
-        
-        # Проверяем через системный DNS
-        system_result = self._resolve_domain(domain, None)
-        result['system_dns'] = system_result['ip']
-        
-        # Проверяем через Google DNS
-        google_result = self._resolve_domain(domain, '8.8.8.8')
-        result['google_dns'] = google_result['ip']
-        
-        # Проверяем через Cloudflare
-        cf_result = self._resolve_domain(domain, '1.1.1.1')
-        result['cloudflare_dns'] = cf_result['ip']
-        
-        # Определяем сервис
-        service = None
-        if 'youtube' in domain or 'google' in domain:
-            service = 'youtube'
-        elif 'discord' in domain:
-            service = 'discord'
-        
-        # Проверяем блокировку
-        if service and result['system_dns']:
-            status = self._check_ip_validity(result['system_dns'], service)
-            result['is_blocked'] = (status == 'blocked')
-        
-        return result

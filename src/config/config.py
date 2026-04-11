@@ -96,7 +96,6 @@ def get_other_template_path() -> str:
 
 # Все папки относительно MAIN_DIRECTORY
 BIN_FOLDER = os.path.join(MAIN_DIRECTORY, "bin")
-BAT_FOLDER = os.path.join(MAIN_DIRECTORY, "bat")
 INDEXJSON_FOLDER = os.path.join(MAIN_DIRECTORY, "json")
 EXE_FOLDER = os.path.join(MAIN_DIRECTORY, "exe")
 LUA_FOLDER = os.path.join(MAIN_DIRECTORY, "lua")  # Lua библиотеки для Zapret 2
@@ -113,15 +112,15 @@ MAX_DEBUG_LOG_FILES = 20     # zapret_winws2_debug_*.log - debug логи winws2
 WINDIVERT_FILTER = os.path.join(MAIN_DIRECTORY, "windivert.filter")
 
 # Пути к файлам
-WINWS_EXE = os.path.join(EXE_FOLDER, "winws.exe")      # Для BAT режима (Zapret 1)
-WINWS2_EXE = os.path.join(EXE_FOLDER, "winws2.exe")    # Для прямого запуска (Zapret 2)
+WINWS_EXE = os.path.join(EXE_FOLDER, "winws.exe")      # Для Zapret 1
+WINWS2_EXE = os.path.join(EXE_FOLDER, "winws2.exe")    # Для Zapret 2
 
 # ═══════════════════════════════════════════════════════════════════
 # ОПРЕДЕЛЕНИЕ EXE ПО МЕТОДУ ЗАПУСКА
 # ═══════════════════════════════════════════════════════════════════
 # Все режимы, которые используют winws2.exe (Zapret 2 с Lua)
 ZAPRET2_MODES = ("direct_zapret2", "orchestra")
-# Режимы, которые используют winws.exe (Zapret 1) напрямую (не через BAT)
+# Режимы, которые используют winws.exe (Zapret 1)
 ZAPRET1_DIRECT_MODES = ("direct_zapret1",)
 
 def get_winws_exe_for_method(method: str) -> str:
@@ -129,7 +128,7 @@ def get_winws_exe_for_method(method: str) -> str:
     Возвращает путь к winws exe в зависимости от метода запуска.
 
     Args:
-        method: Метод запуска (direct_zapret2, orchestra, bat, direct_zapret1)
+        method: Метод запуска (direct_zapret2, orchestra, direct_zapret1)
 
     Returns:
         Путь к winws2.exe для Zapret 2 режимов, winws.exe для остальных
@@ -152,13 +151,13 @@ def is_zapret2_mode(method: str) -> bool:
 
 def is_zapret1_direct_mode(method: str) -> bool:
     """
-    Проверяет, является ли метод прямым режимом Zapret 1 (winws.exe без BAT).
+    Проверяет, является ли метод режимом Zapret 1 (winws.exe).
 
     Args:
         method: Метод запуска
 
     Returns:
-        True если режим использует winws.exe напрямую (без BAT файлов)
+        True если режим использует winws.exe
     """
     return method in ZAPRET1_DIRECT_MODES
 
@@ -172,7 +171,7 @@ def get_current_winws_exe() -> str:
 
     Returns:
         Путь к winws2.exe для Zapret 2 режимов (direct_zapret2, orchestra),
-        winws.exe для Zapret 1 режимов (bat, direct_zapret1 и др.)
+        winws.exe для Zapret 1 режимов (direct_zapret1)
 
     Примечание:
         Используйте эту функцию когда метод запуска не передаётся явно.
@@ -227,9 +226,6 @@ REGISTRY_PATH_GUI = rf"{REGISTRY_PATH}\GUI"                     # Настрой
 REGISTRY_PATH_STRATEGIES = rf"{REGISTRY_PATH}\Strategies"       # Настройки стратегий
 REGISTRY_PATH_WINDOW = rf"{REGISTRY_PATH}\Window"               # Позиция и размер окна
 # ═══════════════════════════════════════════════════════════════════
-
-# Настройки для GitHub стратегий
-STRATEGIES_FOLDER = BAT_FOLDER
 
 BASE_WIDTH = 1000  # Базовый размер для бокового меню в стиле Windows 11
 BASE_HEIGHT = 950  # Базовая высота для нового интерфейса
@@ -319,7 +315,7 @@ WIDTH, HEIGHT = get_scaled_window_size()
 
 # Discord TCP конфигурации
 
-#DiscordFix (ALT v10).bat
+# DiscordFix (ALT v10)
 Ankddev10_1 = ""
 
 #$UDP6 = "--filter-udp=50000-65535 --dpi-desync=fake,split2 --dpi-desync-any-protocol --dpi-desync-cutoff=d2 --dpi-desync-fake-quic=quic_test_00.bin --new"
@@ -327,8 +323,8 @@ Ankddev10_1 = ""
 # Отладочная информация (можно убрать в продакшене)
 if __name__ == "__main__":
     print(f"MAIN_DIRECTORY: {MAIN_DIRECTORY}")
-    print(f"BAT_FOLDER: {BAT_FOLDER}")
-    print(f"Существует BAT_FOLDER: {os.path.exists(BAT_FOLDER)}")
+    print(f"EXE_FOLDER: {EXE_FOLDER}")
+    print(f"Существует EXE_FOLDER: {os.path.exists(EXE_FOLDER)}")
 
 
 def get_window_position():

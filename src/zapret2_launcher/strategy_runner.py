@@ -4,7 +4,7 @@ Strategy runner for Zapret 2 (winws2.exe) with hot-reload support.
 
 This version:
 - Supports hot-reload via ConfigFileWatcher
-- Monitors the launch preset file for changes
+- Monitors the preset file for changes
 - Automatically restarts process when config changes
 - Uses winws2.exe executable
 """
@@ -153,7 +153,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
     Runner for Zapret 2 (winws2.exe) with hot-reload support.
 
     Features:
-    - Hot-reload: automatically restarts when the launch preset file changes
+    - Hot-reload: automatically restarts when the preset file changes
     - Full Lua support
     - Uses winws2.exe executable
     """
@@ -834,7 +834,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
         Starts strategy directly from existing preset file.
 
         This is the primary method for ordinary direct_zapret2 launch - it uses
-        an already prepared preset file instead of generating args from
+        an existing preset file instead of generating args from
         registry/category selections.
 
         Features:
@@ -843,7 +843,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
         - Preset file already contains all arguments
 
         Args:
-            preset_path: Path to the prepared launch preset file
+            preset_path: Path to the preset file
             strategy_name: Strategy name for logs
 
         Returns:

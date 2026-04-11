@@ -4,8 +4,6 @@ Can be used as a standalone page or embedded as a tab inside BlockCheck.
 Tests strategies one by one through winws2 + HTTPS probe.
 """
 
-from __future__ import annotations
-
 import logging
 from pathlib import Path
 
@@ -17,7 +15,6 @@ import qtawesome as qta
 from blockcheck.strategy_scan_page_controller import StrategyScanPageController
 from blockcheck.strategy_scan_worker import StrategyScanWorker
 from ui.pages.base_page import BasePage, ScrollBlockingTextEdit
-from ui.compat_widgets import QuickActionsBar
 from ui.popup_menu import exec_popup_menu
 from ui.text_catalog import tr as tr_catalog
 
@@ -40,7 +37,7 @@ except ImportError:
     )
 
 from ui.compat_widgets import (
-    SettingsCard, ActionButton, PrimaryActionButton, InfoBarHelper,
+    SettingsCard, ActionButton, InfoBarHelper, QuickActionsBar,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,6 +81,7 @@ class StrategyScanPage(BasePage):
         self._actions_bar = None
         self._prepare_support_btn = None
         self._support_status_label = None
+        self._cleanup_in_progress = False
 
         self._build_ui()
         if self._embedded:
@@ -559,6 +557,7 @@ class StrategyScanPage(BasePage):
     def _on_start(self):
         if self._worker and self._worker.is_running:
             return
+        self._cleanup_in_progress = False
 
         selection = StrategyScanPageController.build_selection_state(
             protocol_value=self._protocol_combo.currentData(),
@@ -624,22 +623,39 @@ class StrategyScanPage(BasePage):
     def _on_stop(self):
         if self._worker:
             self._worker.stop()
+            expected_worker = self._worker
+        else:
+            expected_worker = None
         self._stop_btn.setEnabled(False)
         self._status_label.setText(
             tr_catalog("page.strategy_scan.stopping", default="Остановка...")
         )
-        # Force-reset UI if worker doesn't finish in 5s
-        QTimer.singleShot(5000, self._force_stop)
+        QTimer.singleShot(5000, lambda worker=expected_worker: self._force_stop(worker))
 
-    def _force_stop(self):
-        if self._worker and self._worker.is_running:
-            self._reset_ui()
+    def _force_stop(self, expected_worker=None):
+        if expected_worker is None:
+            return
+        if self._worker is expected_worker and self._worker.is_running:
+            warning_text = tr_catalog(
+                "page.strategy_scan.stopping_slow",
+                default="Остановка занимает больше времени, ждём завершения фонового сканирования...",
+            )
+            self._status_label.setText(warning_text)
+            StrategyScanPageController.append_run_log(self._run_log_file, f"WARNING: {warning_text}")
+            self._set_support_status(
+                tr_catalog(
+                    "page.strategy_scan.support_wait_stop",
+                    default="Подождите завершения остановки перед новым запуском",
+                )
+            )
 
     # ------------------------------------------------------------------
     # Signal handlers
     # ------------------------------------------------------------------
 
     def _on_strategy_started(self, name: str, index: int, total: int):
+        if self._cleanup_in_progress:
+            return
         progress_plan = StrategyScanPageController.build_progress_plan(
             strategy_name=name,
             index=index,
@@ -654,6 +670,8 @@ class StrategyScanPage(BasePage):
 
     def _on_strategy_result(self, result):
         """Add a row to the results table."""
+        if self._cleanup_in_progress:
+            return
         from PyQt6.QtWidgets import QTableWidgetItem
 
         row_plan = StrategyScanPageController.build_result_presentation(
@@ -720,15 +738,28 @@ class StrategyScanPage(BasePage):
         self._table.scrollToBottom()
 
     def _on_log(self, message: str):
+        if self._cleanup_in_progress:
+            return
         self._log_edit.append(message)
         StrategyScanPageController.append_run_log(self._run_log_file, message)
 
     def _on_phase_changed(self, phase: str):
+        if self._cleanup_in_progress:
+            return
         self._status_label.setText(phase)
         StrategyScanPageController.append_run_log(self._run_log_file, f"[PHASE] {phase}")
 
     def _on_finished(self, report):
         """Handle scan completion."""
+        if self._cleanup_in_progress:
+            return
+        worker = self._worker
+        self._worker = None
+        if worker is not None:
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
         self._reset_ui()
         finish_plan = StrategyScanPageController.finalize_scan_report(
             report,
@@ -753,6 +784,15 @@ class StrategyScanPage(BasePage):
                 tr_catalog(
                     "page.strategy_scan.support_ready_after_error",
                     default="Можно подготовить обращение по логам ошибки",
+                )
+            )
+            return
+
+        if finish_plan.cancelled:
+            self._set_support_status(
+                tr_catalog(
+                    "page.strategy_scan.support_ready_after_cancel",
+                    default="Можно подготовить обращение по частичным логам отменённого сканирования",
                 )
             )
             return
@@ -864,6 +904,8 @@ class StrategyScanPage(BasePage):
         self._support_status_label.setText(str(text or "").strip())
 
     def _prepare_support_from_strategy_scan(self) -> None:
+        if self._cleanup_in_progress:
+            return
         support_context = StrategyScanPageController.build_support_context(
             stored_scan_protocol=self._scan_protocol,
             stored_scan_target=self._scan_target,
@@ -921,3 +963,17 @@ class StrategyScanPage(BasePage):
             self._refresh_udp_scope_hint()
         except Exception:
             pass
+
+    def cleanup(self) -> None:
+        self._cleanup_in_progress = True
+        if self._worker is not None:
+            try:
+                self._worker.stop()
+            except Exception:
+                pass
+            if not self._worker.is_running:
+                try:
+                    self._worker.deleteLater()
+                except Exception:
+                    pass
+                self._worker = None

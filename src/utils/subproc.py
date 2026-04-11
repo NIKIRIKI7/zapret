@@ -4,7 +4,7 @@ run_hidden – единый «тихий» запуск процессов (бе
 """
 
 from __future__ import annotations
-import os, subprocess, sys, shlex, tempfile
+import os, subprocess, sys, shlex
 from typing import Sequence, Union
 from functools import lru_cache
 
@@ -123,57 +123,6 @@ def _prepare_cmd(cmd, use_shell: bool):
     return cmd, use_shell
 
 
-def run_bat_through_vbs(bat_path: str, cwd: str = None) -> subprocess.Popen:
-    """Запускает BAT файл через VBScript для максимального скрытия"""
-    if not cwd:
-        cwd = os.path.dirname(bat_path)
-    
-    def _vbs_escape(s: str) -> str:
-        # VBScript string literal escaping: " -> ""
-        return (s or "").replace('"', '""')
-
-    # Создаем VBS скрипт для скрытого запуска
-    escaped_cwd = _vbs_escape(cwd)
-    escaped_bat = _vbs_escape(bat_path)
-
-    vbs_content = f'''
-	Set objShell = CreateObject("Wscript.Shell")
-	objShell.CurrentDirectory = "{escaped_cwd}"
-	' cmd.exe quoting: cmd /c ""C:\\Path With Spaces\\file.bat""
-	objShell.Run "cmd /c """"{escaped_bat}""""", 0, False
-'''
-    
-    # Создаем временный VBS файл
-    # ВАЖНО: пишем VBS в UTF-16LE с BOM, чтобы корректно работало с Unicode-путями (кириллица и т.п.)
-    vbs_bytes = b"\xff\xfe" + vbs_content.lstrip("\n").encode("utf-16-le")
-    with tempfile.NamedTemporaryFile(mode="wb", suffix=".vbs", delete=False) as f:
-        f.write(vbs_bytes)
-        vbs_path = f.name
-    
-    try:
-        # Запускаем VBS скрипт
-        process = subprocess.Popen(
-            ['wscript.exe', vbs_path],
-            creationflags=WIN_FLAGS,
-            startupinfo=_hidden_startupinfo(),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        return process
-    finally:
-        # Удаляем VBS файл через небольшую задержку
-        import threading
-        def cleanup():
-            import time
-            time.sleep(2)  # Даем время VBS файлу выполниться
-            try:
-                os.unlink(vbs_path)
-            except:
-                pass
-        threading.Thread(target=cleanup, daemon=True).start()
-
-
 def run_hidden(cmd: Union[str, Sequence[str]],
                *,
                wait: bool = False,
@@ -185,30 +134,11 @@ def run_hidden(cmd: Union[str, Sequence[str]],
                shell: bool = False,
                cwd: str | None = None,
                env: dict | None = None,
-               use_vbs_for_bat: bool = True,  # Новый параметр
                **kw):
     """
     Параметры совпадают с subprocess.run/Popen.
     На Windows shell=True игнорируется – команда оборачивается вручную.
     """
-
-    # --- специальная обработка BAT файлов ---
-    if (sys.platform == "win32" and use_vbs_for_bat and 
-        isinstance(cmd, (str, list)) and not capture_output):
-        
-        # Определяем, это BAT файл или нет
-        bat_path = None
-        if isinstance(cmd, str) and cmd.strip().lower().endswith('.bat'):
-            bat_path = cmd.strip()
-        elif isinstance(cmd, list) and len(cmd) >= 3:
-            # Проверяем команды вида ['cmd', '/Q', '/C', 'file.bat']
-            if (cmd[0].lower() in ('cmd', 'cmd.exe') and 
-                len(cmd) > 2 and cmd[-1].lower().endswith('.bat')):
-                bat_path = cmd[-1]
-        
-        if bat_path and os.path.exists(bat_path):
-            # Запускаем через VBS для максимального скрытия
-            return run_bat_through_vbs(bat_path, cwd)
 
     # --- подготовка команды / shell ---
     cmd, shell = _prepare_cmd(cmd, shell)

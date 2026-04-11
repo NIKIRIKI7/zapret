@@ -42,11 +42,11 @@ class DpiRuntimeService:
 
         return DpiRuntimeOwnershipMap(
             canonical_writers=(
-                "dpi.dpi_controller.DPIController._begin_runtime_start",
-                "dpi.dpi_controller.DPIController._mark_runtime_running",
-                "dpi.dpi_controller.DPIController._mark_runtime_failed",
-                "dpi.dpi_controller.DPIController._begin_runtime_stop",
-                "dpi.dpi_controller.DPIController._mark_runtime_stopped",
+                "dpi.runtime.controller.DPIController._begin_runtime_start",
+                "dpi.runtime.controller.DPIController._mark_runtime_running",
+                "dpi.runtime.controller.DPIController._mark_runtime_failed",
+                "dpi.runtime.controller.DPIController._begin_runtime_stop",
+                "dpi.runtime.controller.DPIController._mark_runtime_stopped",
             ),
             canonical_readers=(
                 "main.LupiDPIApp._apply_runner_runtime_state_update",

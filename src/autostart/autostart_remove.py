@@ -6,7 +6,7 @@ import winreg
 from pathlib import Path
 from typing import Callable, Iterable
 
-from config import APP_CORE_PATH, MAIN_DIRECTORY, REGISTRY_PATH
+from config import REGISTRY_PATH
 from log import log
 from utils import get_system_exe, run_hidden
 
@@ -28,14 +28,6 @@ class AutoStartCleaner:
         "ZapretDirect",
         "ZapretDirectService",
     )
-    LEGACY_FILES: tuple[str, ...] = (
-        "zapret_autostart.bat",
-        "zapret_direct.bat",
-        "zapret_boot_task.xml",
-        "zapret_logon_task.xml",
-        "zapret_service.bat",
-    )
-
     def __init__(
         self,
         *,
@@ -60,7 +52,6 @@ class AutoStartCleaner:
             removed_count += self._remove_scheduler_tasks(self.LEGACY_SCHEDULER_TASKS)
             removed_count += self._remove_legacy_run_entry()
             removed_count += self._remove_autostart_registry_state_key()
-            removed_count += self._remove_legacy_files()
 
             for svc_name in self.service_names:
                 removed_count += self._remove_service(svc_name)
@@ -165,27 +156,6 @@ class AutoStartCleaner:
         except Exception as exc:
             log(f"Ошибка очистки registry-состояния автозапуска: {exc}", "⚠ WARNING")
             return 0
-
-    @classmethod
-    def _remove_legacy_files(cls) -> int:
-        removed = 0
-        search_roots: list[Path] = []
-        for candidate in (Path.cwd(), Path(APP_CORE_PATH), Path(MAIN_DIRECTORY)):
-            if candidate not in search_roots:
-                search_roots.append(candidate)
-
-        for filename in cls.LEGACY_FILES:
-            for root in search_roots:
-                path = root / filename
-                if not path.exists():
-                    continue
-                try:
-                    path.unlink()
-                    removed += 1
-                    log(f"Удалён legacy-файл автозапуска: {path}", "INFO")
-                except Exception as exc:
-                    log(f"Не удалось удалить файл {path}: {exc}", "⚠ WARNING")
-        return removed
 
     def _remove_service(self, svc_name: str) -> int:
         sc_exe = get_system_exe("sc.exe")
@@ -298,13 +268,4 @@ def has_legacy_autostart() -> bool:
         pass
     except Exception:
         pass
-
-    for filename in cleaner.LEGACY_FILES:
-        for root in (Path.cwd(), Path(APP_CORE_PATH), Path(MAIN_DIRECTORY)):
-            try:
-                if (root / filename).exists():
-                    return True
-            except Exception:
-                pass
-
     return False

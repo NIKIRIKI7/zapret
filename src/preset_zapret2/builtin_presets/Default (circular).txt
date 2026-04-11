@@ -1,7 +1,5 @@
 # Preset: Default (circular)
-# ActivePreset: Default (circular)
 # BuiltinVersion: 2.11
-# Modified: 2026-01-21T17:52:34.648239
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -88,12 +86,12 @@
 --ipset-exclude=lists/ipset-ru.txt
 --ipset-exclude=lists/ipset-dns.txt
 --ipset-exclude=lists/ipset-exclude.txt
---out-range=-d10
---in-range=-s5556
---lua-desync=circular:fails=1:time=300:retrans=3:nld=3
+--out-range=-s9656
+--in-range=-s3508
 --payload=all
---lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2:strategy=1
---lua-desync=send:repeats=2:strategy=2 --lua-desync=syndata:blob=stun_pat:strategy=2 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2:strategy=2
+--lua-desync=circular:fails=3:retrans=3:maxseq=8192:inseq=2048:nld=3
+--lua-desync=send:repeats=2:strategy=1 --lua-desync=syndata:blob=stun_pat:strategy=1 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2:strategy=1
+--lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2:strategy=2
 --lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=tls_google:strategy=3
 --lua-desync=send:repeats=2:strategy=4 --lua-desync=syndata:blob=stun_pat:strategy=4 --lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=tls_google:strategy=4
 --lua-desync=multisplit:pos=1:seqovl=740:seqovl_pattern=stun_pat:strategy=5
@@ -121,16 +119,17 @@
 --lua-desync=multisplit:seqovl=625:seqovl_pattern=tls5:strategy=27
 --lua-desync=multisplit:seqovl=625:seqovl_pattern=tls_google:strategy=28
 --lua-desync=multisplit:seqovl=700:seqovl_pattern=tls_google:strategy=29
-
+--in-range=-s3508
+--payload=all
 --new
 
 --filter-udp=443-65535
 --ipset-exclude=lists/ipset-ru.txt
 --ipset-exclude=lists/ipset-dns.txt
 --ipset-exclude=lists/ipset-exclude.txt
---out-range=-d10
---in-range=-s5556
---lua-desync=circular:fails=1:time=300:retrans=3:nld=2
+--out-range=-n4
+--in-range=-n2
+--lua-desync=circular:fails=1:udp_out=2:udp_in=0:nld=2
 --payload=all
 --lua-desync=fake:blob=quic_google:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:repeats=10:payload=all:strategy=1
 --lua-desync=fake:blob=fake_default_quic:repeats=11:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all:strategy=2

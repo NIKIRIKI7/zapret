@@ -160,10 +160,10 @@ class ConnectionPageController:
         if not thread_running:
             return ConnectionStopPollPlan(
                 action="finish",
-                append_line="✅ Тест остановлен",
+                append_line="",
                 finalize_delay_ms=0,
             )
-        if int(attempt_count) > int(max_attempts):
+        if int(attempt_count) >= int(max_attempts):
             return ConnectionStopPollPlan(
                 action="force_terminate",
                 append_line="⚠️ Принудительная остановка...",

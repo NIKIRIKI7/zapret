@@ -10,7 +10,6 @@ from datetime import datetime
 class DNSCheckStartPlan:
     status_text: str
     status_tone: str
-    disable_save: bool
     check_enabled: bool
     quick_enabled: bool
     save_enabled: bool
@@ -26,7 +25,6 @@ class DNSResultLinePlan:
 class DNSCheckFinishPlan:
     status_text: str
     status_tone: str
-    enable_save: bool
     check_enabled: bool
     quick_enabled: bool
     save_enabled: bool
@@ -37,8 +35,6 @@ class DNSCheckFinishPlan:
 class DNSCheckCleanupPlan:
     should_quit_thread: bool
     wait_timeout_ms: int
-    should_delete_thread: bool
-    should_delete_worker: bool
 
 
 @dataclass(slots=True)
@@ -52,7 +48,6 @@ class DNSSaveResultPlan:
     success: bool
     title: str
     content: str
-    open_folder: str | None
 
 
 class DNSCheckPageController:
@@ -67,7 +62,6 @@ class DNSCheckPageController:
         return DNSCheckStartPlan(
             status_text="🔄 Выполняется проверка DNS...",
             status_tone="accent",
-            disable_save=True,
             check_enabled=False,
             quick_enabled=False,
             save_enabled=False,
@@ -98,7 +92,6 @@ class DNSCheckPageController:
             return DNSCheckFinishPlan(
                 status_text="⚠️ Обнаружена DNS подмена!",
                 status_tone="error",
-                enable_save=True,
                 check_enabled=True,
                 quick_enabled=True,
                 save_enabled=True,
@@ -107,7 +100,6 @@ class DNSCheckPageController:
         return DNSCheckFinishPlan(
             status_text="✅ Проверка завершена",
             status_tone="success",
-            enable_save=True,
             check_enabled=True,
             quick_enabled=True,
             save_enabled=True,
@@ -115,12 +107,10 @@ class DNSCheckPageController:
         )
 
     @staticmethod
-    def build_cleanup_plan(*, has_thread: bool, has_worker: bool, thread_running: bool) -> DNSCheckCleanupPlan:
+    def build_cleanup_plan(*, has_thread: bool, thread_running: bool) -> DNSCheckCleanupPlan:
         return DNSCheckCleanupPlan(
             should_quit_thread=bool(has_thread and thread_running),
             wait_timeout_ms=500,
-            should_delete_thread=bool(has_thread),
-            should_delete_worker=bool(has_worker),
         )
 
     @staticmethod
@@ -166,7 +156,6 @@ class DNSCheckPageController:
                 success=False,
                 title="Ошибка",
                 content="Не указан путь для сохранения файла.",
-                open_folder=None,
             )
 
         try:
@@ -187,12 +176,10 @@ class DNSCheckPageController:
                 success=True,
                 title="Сохранено",
                 content=f"Результаты сохранены в:\n{target_path}",
-                open_folder=folder,
             )
         except Exception as e:
             return DNSSaveResultPlan(
                 success=False,
                 title="Ошибка",
                 content=f"Не удалось сохранить файл:\n{str(e)}",
-                open_folder=None,
             )
