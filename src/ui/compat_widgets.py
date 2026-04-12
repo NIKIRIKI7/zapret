@@ -1,7 +1,7 @@
 # ui/compat_widgets.py
 """
 Compatibility widgets: re-exports old custom widgets or their qfluentwidgets replacements.
-All pages should import SettingsCard, ActionButton, StatusIndicator, SettingsRow, PulsingDot
+All pages should import SettingsCard, ActionButton, SettingsRow, PulsingDot
 from here.
 
 New in this version:
@@ -961,83 +961,6 @@ class PulsingDot(QWidget):
         # Highlight
         painter.setBrush(QColor(255, 255, 255, 90))
         painter.drawEllipse(int(cx - 2), int(cy - 3), 3, 3)
-
-
-# ---------------------------------------------------------------------------
-# StatusIndicator — PulsingDot + label, theme-aware status colors
-# ---------------------------------------------------------------------------
-
-class StatusIndicator(QWidget):
-    """Status indicator (pulsing dot + text) with theme-aware colors."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._current_status = "neutral"
-        self._theme_refresh_scheduled = False
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        self.dot = PulsingDot()
-        layout.addWidget(self.dot)
-
-        if HAS_FLUENT:
-            self.text = BodyLabel("...")
-        else:
-            self.text = QLabel("...")
-            self.text.setStyleSheet("font-size: 13px;")
-        layout.addWidget(self.text)
-        layout.addStretch()
-
-    def set_status(self, text: str, status: str = "neutral"):
-        """Sets status. status: 'running', 'success', 'stopped', 'warning', 'neutral'"""
-        self.text.setText(text)
-        self._current_status = status
-
-        colors = self._get_status_colors()
-        color = colors.get(status, colors["neutral"])
-        self.dot.set_color(color)
-
-        if status == "running":
-            self.dot.start_pulse()
-        else:
-            self.dot.stop_pulse()
-
-    def _get_status_colors(self) -> dict[str, str]:
-        """Returns status->color mapping using semantic palette if available."""
-        try:
-            from ui.theme_semantic import get_semantic_palette
-            palette = get_semantic_palette()
-            return {
-                "running": palette.success,
-                "success": palette.success,
-                "stopped": palette.error,
-                "warning": palette.warning,
-                "neutral": themeColor().name() if HAS_FLUENT else "#5fcffe",
-            }
-        except Exception:
-            return {
-                "running": "#52c477",
-                "success": "#52c477",
-                "stopped": "#e05454",
-                "warning": "#e0a854",
-                "neutral": "#5fcffe",
-            }
-
-    def changeEvent(self, event):  # noqa: N802 (Qt override)
-        try:
-            if event.type() in (QEvent.Type.StyleChange, QEvent.Type.PaletteChange):
-                if not self._theme_refresh_scheduled:
-                    self._theme_refresh_scheduled = True
-                    QTimer.singleShot(0, self._on_debounced_theme_change)
-        except Exception:
-            pass
-        return super().changeEvent(event)
-
-    def _on_debounced_theme_change(self) -> None:
-        self._theme_refresh_scheduled = False
-        self.set_status(self.text.text(), self._current_status)
 
 
 # ---------------------------------------------------------------------------

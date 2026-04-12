@@ -9,6 +9,8 @@ from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, QTimer, Qt, p
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QRadialGradient
 from PyQt6.QtWidgets import QWidget
 
+from ui.animation_policy import register_managed_animation, start_managed_animation
+
 
 class _GarlandLight:
     COLORS = (
@@ -145,8 +147,10 @@ class GarlandOverlay(QWidget):
         if self._fade is not None:
             self._fade.stop()
 
-        anim = QPropertyAnimation(self, b"overlayOpacity", self)
-        anim.setDuration(int(duration_ms))
+        anim = register_managed_animation(
+            QPropertyAnimation(self, b"overlayOpacity", self),
+            int(duration_ms),
+        )
         anim.setStartValue(float(self._opacity))
         anim.setEndValue(float(target))
         anim.setEasingCurve(
@@ -154,7 +158,7 @@ class GarlandOverlay(QWidget):
         )
         if target <= 0.0:
             anim.finished.connect(self._finish_fade_out)
-        anim.start()
+        start_managed_animation(anim)
         self._fade = anim
 
     def _finish_fade_out(self) -> None:
@@ -352,8 +356,10 @@ class SnowflakesOverlay(QWidget):
         if self._fade is not None:
             self._fade.stop()
 
-        anim = QPropertyAnimation(self, b"overlayOpacity", self)
-        anim.setDuration(int(duration_ms))
+        anim = register_managed_animation(
+            QPropertyAnimation(self, b"overlayOpacity", self),
+            int(duration_ms),
+        )
         anim.setStartValue(float(self._opacity))
         anim.setEndValue(float(target))
         anim.setEasingCurve(
@@ -361,7 +367,7 @@ class SnowflakesOverlay(QWidget):
         )
         if target <= 0.0:
             anim.finished.connect(self._finish_fade_out)
-        anim.start()
+        start_managed_animation(anim)
         self._fade = anim
 
     def _finish_fade_out(self) -> None:

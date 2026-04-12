@@ -13,6 +13,7 @@ from ui.theme import (
     get_tinted_surface_gradient_qss,
     to_qcolor,
 )
+from ui.animation_policy import register_managed_animation, start_managed_animation
 from ui.theme_refresh import ThemeRefreshController
 
 try:
@@ -62,9 +63,8 @@ class Win11ToggleSwitch(QCheckBox):
         self._circle_position = 4.0
         self._color_blend = 0.0
 
-        self._animation = QPropertyAnimation(self, b"circle_position", self)
+        self._animation = register_managed_animation(QPropertyAnimation(self, b"circle_position", self), 150)
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._animation.setDuration(150)
 
         self.stateChanged.connect(self._animate)
 
@@ -96,7 +96,7 @@ class Win11ToggleSwitch(QCheckBox):
         else:
             self._animation.setStartValue(self._circle_position)
             self._animation.setEndValue(4.0)
-        self._animation.start()
+        start_managed_animation(self._animation)
 
     def paintEvent(self, event):
         painter = QPainter(self)

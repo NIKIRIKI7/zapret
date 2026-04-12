@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import json
 from pathlib import Path
 import re
 import time
 from typing import Callable
 
+from core.paths import AppPaths
 from log import log
 from core.presets.cache_signatures import path_cache_signature
 from core.presets.models import PresetManifest
+from core.presets.preset_file_store import PresetFileStore
+from core.presets.selection_service import PresetSelectionService
 from core.presets.v1_builtin_templates import is_builtin_preset_file_name_v1
 from core.presets.z2_builtin_templates import is_builtin_preset_file_name_v2
 
@@ -74,10 +76,17 @@ class DirectFlowCoordinator:
     _PRESET_HEADER_RE = re.compile(r"^\s*#\s*Preset:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
     _TEMPLATE_ORIGIN_RE = re.compile(r"^\s*#\s*TemplateOrigin:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        app_paths: AppPaths,
+        preset_selection_service: PresetSelectionService,
+        preset_file_store: PresetFileStore,
+    ) -> None:
+        self._app_paths = app_paths
+        self._preset_selection_service = preset_selection_service
+        self._preset_file_store = preset_file_store
         self._prepared_support_methods: set[str] = set()
         self._selected_manifest_cache: dict[str, tuple[tuple[object, ...], PresetManifest]] = {}
-        self._index_kind_cache: dict[str, tuple[tuple[object, ...], dict[str, str]]] = {}
         self._support_prepare_errors: dict[str, str] = {}
 
     def ensure_support_files_ready(self, launch_method: str) -> None:
@@ -176,10 +185,9 @@ class DirectFlowCoordinator:
 
     def get_selected_source_path(self, launch_method: str) -> Path:
         selected = self.get_selected_source_manifest(launch_method)
-        from app_context import require_app_context
 
         engine = self._METHOD_TO_ENGINE[self._normalize_method(launch_method)]
-        return require_app_context().app_paths.engine_paths(engine).ensure_directories().presets_dir / selected.file_name
+        return self._app_paths.engine_paths(engine).ensure_directories().presets_dir / selected.file_name
 
     def ensure_selected_source_path(self, launch_method: str) -> Path:
         return self.get_startup_snapshot(launch_method, require_filters=False).preset_path
@@ -197,9 +205,7 @@ class DirectFlowCoordinator:
         engine = self._METHOD_TO_ENGINE[method]
         self._ensure_support_files(method)
 
-        from app_context import require_app_context
-
-        selected_file_name = require_app_context().preset_selection_service.select_preset_file_name_fast(engine, file_name)
+        selected_file_name = self._preset_selection_service.select_preset_file_name_fast(engine, file_name)
         selected_manifest = self._remember_manifest_from_file_name(method, engine, selected_file_name)
         selected_path = self._get_source_preset_path(engine, selected_file_name)
         display_name = str(getattr(selected_manifest, "name", "") or "").strip() or Path(selected_file_name).stem
@@ -241,10 +247,8 @@ class DirectFlowCoordinator:
         )
         self._emit_timing(timing_callback, f"{label}.support_files", t_support)
 
-        from app_context import require_app_context
-
         t_selection_service = time.perf_counter()
-        selection = require_app_context().preset_selection_service
+        selection = self._preset_selection_service
         self._emit_timing(timing_callback, f"{label}.selection_service", t_selection_service)
 
         t_selected_name = time.perf_counter()
@@ -344,7 +348,7 @@ class DirectFlowCoordinator:
         try:
             from core.presets.support_files import prepare_direct_support_files
 
-            prepare_direct_support_files(method)
+            prepare_direct_support_files(method, self._app_paths)
             self._prepared_support_methods.add(method)
             self._support_prepare_errors.pop(method, None)
             self._emit_timing(timing_callback, f"{label}.prepare_direct_support_files", started_at)
@@ -375,9 +379,7 @@ class DirectFlowCoordinator:
         if not candidate:
             return None
 
-        from app_context import require_app_context
-
-        engine_paths = require_app_context().app_paths.engine_paths(engine).ensure_directories()
+        engine_paths = self._app_paths.engine_paths(engine).ensure_directories()
         preset_path = engine_paths.presets_dir / candidate
         if not preset_path.exists():
             return None
@@ -387,7 +389,6 @@ class DirectFlowCoordinator:
             engine,
             candidate.lower(),
             *path_cache_signature(engine_paths.selected_state_path),
-            *path_cache_signature(engine_paths.index_path),
             *path_cache_signature(preset_path),
         )
 
@@ -482,14 +483,13 @@ class DirectFlowCoordinator:
         return display_name, template_origin
 
     def _get_source_preset_path(self, engine: str, file_name: str) -> Path:
-        from app_context import require_app_context
-
-        return require_app_context().app_paths.engine_paths(engine).ensure_directories().presets_dir / str(file_name or "").strip()
+        resolved = str(self._preset_file_store.resolve_file_name(engine, file_name) or "").strip()
+        if resolved:
+            return self._app_paths.engine_paths(engine).ensure_directories().presets_dir / resolved
+        return self._app_paths.engine_paths(engine).ensure_directories().presets_dir / str(file_name or "").strip()
 
     def _list_source_preset_paths(self, engine: str) -> list[Path]:
-        from app_context import require_app_context
-
-        presets_dir = require_app_context().app_paths.engine_paths(engine).ensure_directories().presets_dir
+        presets_dir = self._app_paths.engine_paths(engine).ensure_directories().presets_dir
         return sorted(
             (path for path in presets_dir.glob("*.txt") if path.is_file()),
             key=lambda path: path.name.lower(),
@@ -513,6 +513,13 @@ class DirectFlowCoordinator:
         timing_callback: Callable[[str, float], None] | None = None,
         timing_label: str | None = None,
     ) -> PresetManifest:
+        try:
+            manifest = self._preset_file_store.get_manifest(engine, path.name)
+            if manifest is not None:
+                return manifest
+        except Exception:
+            pass
+
         label = str(timing_label or f"direct_flow.{engine}.manifest")
         file_name = path.name
         t_header = time.perf_counter()
@@ -522,56 +529,13 @@ class DirectFlowCoordinator:
         timestamp = self._file_time_to_iso(path)
         self._emit_timing(timing_callback, f"{label}.manifest_timestamp", t_timestamp)
         kind = "builtin" if self._is_builtin_preset(engine, path, template_origin) else "user"
-        t_kind = time.perf_counter()
-        imported_kind = self._get_index_kind_hint(engine, file_name)
-        if imported_kind == "imported":
-            kind = "imported"
-        self._emit_timing(timing_callback, f"{label}.manifest_kind_hint", t_kind)
         return PresetManifest(
             file_name=file_name,
             name=display_name,
             template_origin=template_origin,
-            created_at=timestamp,
             updated_at=timestamp,
             kind=kind,
         )
-
-    def _get_index_kind_hint(self, engine: str, file_name: str) -> str | None:
-        normalized_engine = str(engine or "").strip().lower()
-        target = str(file_name or "").strip().lower()
-        if not normalized_engine or not target:
-            return None
-
-        try:
-            from app_context import require_app_context
-
-            index_path = require_app_context().app_paths.engine_paths(normalized_engine).ensure_directories().index_path
-        except Exception:
-            return None
-
-        signature = path_cache_signature(index_path)
-        cached = self._index_kind_cache.get(normalized_engine)
-        if cached is not None and cached[0] == signature:
-            return cached[1].get(target)
-
-        kinds: dict[str, str] = {}
-        if index_path.exists():
-            try:
-                payload = json.loads(index_path.read_text(encoding="utf-8", errors="replace") or "[]")
-            except Exception:
-                payload = []
-
-            if isinstance(payload, list):
-                for item in payload:
-                    if not isinstance(item, dict):
-                        continue
-                    item_file_name = str(item.get("file_name") or "").strip().lower()
-                    item_kind = str(item.get("kind") or "").strip().lower()
-                    if item_file_name and item_kind:
-                        kinds[item_file_name] = item_kind
-
-        self._index_kind_cache[normalized_engine] = (signature, kinds)
-        return kinds.get(target)
 
     @staticmethod
     def _is_builtin_preset(engine: str, path: Path, template_origin: str | None) -> bool:

@@ -196,7 +196,10 @@ class InitializationManager:
                 if method in ("direct_zapret1", "direct_zapret2"):
                     from core.presets.direct_facade import DirectPresetFacade
 
-                    DirectPresetFacade.from_launch_method(method).get_strategy_selections()
+                    DirectPresetFacade.from_launch_method(
+                        method,
+                        app_context=self.app.app_context,
+                    ).get_strategy_selections()
                 elif method == "orchestra":
                     pass
 
@@ -226,20 +229,16 @@ class InitializationManager:
         try:
             # Убедимся, что выбранные source-пресеты подготовлены до расчёта summary.
             if method == "direct_zapret2":
-                from app_context import require_app_context
-
                 try:
-                    require_app_context().direct_flow_coordinator.get_startup_snapshot("direct_zapret2")
+                    self.app.app_context.direct_flow_coordinator.get_startup_snapshot("direct_zapret2")
                 except Exception as e:
                     log(
                         f"direct_zapret2: не удалось подготовить выбранный source-пресет: {e}",
                         "ERROR",
                     )
             elif method == "direct_zapret1":
-                from app_context import require_app_context
-
                 try:
-                    require_app_context().direct_flow_coordinator.get_startup_snapshot("direct_zapret1")
+                    self.app.app_context.direct_flow_coordinator.get_startup_snapshot("direct_zapret1")
                 except Exception:
                     log("direct_zapret1: не удалось подготовить выбранный source-пресет", "ERROR")
 
@@ -419,10 +418,8 @@ class InitializationManager:
 
         # Для новых direct режимов проверяем сам source preset, а не legacy selections dict.
         if launch_method in ("direct_zapret2", "direct_zapret1"):
-            from app_context import require_app_context
-
             try:
-                require_app_context().direct_flow_coordinator.get_startup_snapshot(launch_method, require_filters=True)
+                self.app.app_context.direct_flow_coordinator.get_startup_snapshot(launch_method, require_filters=True)
             except Exception:
                 self._show_strategy_required_warning(for_bat=False)
                 self.app.set_status("⚠️ Выберите стратегию для запуска")
@@ -587,7 +584,8 @@ class InitializationManager:
             is_premium = False
             if hasattr(self.app, 'donate_checker') and self.app.donate_checker:
                 try:
-                    is_premium, _, _ = self.app.donate_checker.check_subscription_status(use_cache=True)
+                    sub_info = self.app.donate_checker.get_full_subscription_info(use_cache=True)
+                    is_premium = bool(sub_info.get("is_premium"))
                 except Exception:
                     pass
             log(f"🎨 Тема инициализирована: '{current_theme}' (premium={is_premium})", "DEBUG")
@@ -609,7 +607,7 @@ class InitializationManager:
         """Финализация инициализации менеджеров и обновление UI"""
         try:
             # Обновляем UI состояние
-            from autostart.registry_check import is_autostart_enabled
+            from autostart.autostart_exe import is_autostart_enabled
             autostart_exists = is_autostart_enabled()
 
             app_runtime_state = getattr(self.app, "app_runtime_state", None)
@@ -755,8 +753,8 @@ class InitializationManager:
         try:
             import time as _t
             t0 = _t.perf_counter()
-            from autostart.registry_check import verify_autostart_status
-            real_status = verify_autostart_status()
+            from autostart.autostart_exe import is_autostart_enabled
+            real_status = is_autostart_enabled()
             app_runtime_state = getattr(self.app, "app_runtime_state", None)
             if app_runtime_state is not None:
                 app_runtime_state.set_autostart(bool(real_status))

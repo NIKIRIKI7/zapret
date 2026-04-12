@@ -1,7 +1,6 @@
 # Preset: Preset X (game filter)
 # TemplateOrigin: Preset X (game filter)
 # BuiltinVersion: 2.18
-# Created: 2026-02-07T10:02:40.762406
 # Description: 
 
 --lua-init=@lua/zapret-lib.lua
@@ -127,7 +126,6 @@
 
 --filter-udp=443-65535
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt
 --ipset=lists/ipset-cloudflare.txt
 --ipset=lists/cloudflare-ipset.txt
@@ -187,7 +185,6 @@
 
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt
 --ipset=lists/ipset-cloudflare.txt
 --ipset=lists/cloudflare-ipset.txt
@@ -211,7 +208,6 @@
 
 --filter-udp=443,49152-65535
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt
 --ipset=lists/ipset-cloudflare.txt
 --ipset=lists/cloudflare-ipset.txt

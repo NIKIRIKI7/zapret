@@ -120,7 +120,7 @@ def _resolve_navigation_target_for_strategies(
     try:
         from core.presets.direct_facade import DirectPresetFacade
 
-        facade = DirectPresetFacade.from_launch_method("direct_zapret2")
+        facade = DirectPresetFacade.from_launch_method("direct_zapret2", app_context=window.app_context)
         if facade.get_target_ui_item(last_key) and open_zapret2_strategy_detail(
             window,
             last_key,
@@ -176,7 +176,7 @@ def open_zapret1_strategy_detail(window, target_key: str) -> bool:
 
         def _reload_dpi() -> None:
             try:
-                from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
+                from dpi.policy.direct_runtime_apply_policy import request_direct_runtime_content_apply
 
                 request_direct_runtime_content_apply(
                     window,
@@ -189,6 +189,7 @@ def open_zapret1_strategy_detail(window, target_key: str) -> bool:
 
         manager = DirectPresetFacade.from_launch_method(
             "direct_zapret1",
+            app_context=window.app_context,
             on_dpi_reload_needed=_reload_dpi,
         )
     except Exception:

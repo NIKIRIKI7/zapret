@@ -97,6 +97,11 @@ from ui.main_window_display import (
     update_current_strategy_display as update_main_window_current_strategy_display,
     update_subscription_display as update_main_window_subscription_display,
 )
+from ui.animation_policy import (
+    apply_window_animation_policy,
+    apply_window_editor_smooth_scroll_policy,
+    apply_window_smooth_scroll_policy,
+)
 from ui.main_window_refresh import refresh_main_window_pages_after_preset_switch
 from ui.main_window_signals import connect_main_window_page_signals
 from core.runtime.preset_runtime_coordinator import (
@@ -564,94 +569,15 @@ class MainWindowUI:
 
     def _on_animations_changed(self, enabled: bool):
         """Enable/disable all QPropertyAnimation-based animations (qfluentwidgets + Qt native)."""
-        try:
-            from PyQt6.QtCore import QPropertyAnimation, QAbstractAnimation
-
-            if enabled:
-                # Restore original start()
-                if hasattr(QPropertyAnimation, '_zapret_original_start'):
-                    QPropertyAnimation.start = QPropertyAnimation._zapret_original_start
-                    del QPropertyAnimation._zapret_original_start
-            else:
-                # Monkey-patch start() to set duration=0 before every animation run
-                if not hasattr(QPropertyAnimation, '_zapret_original_start'):
-                    _orig = QPropertyAnimation.start
-                    QPropertyAnimation._zapret_original_start = _orig
-
-                    def _instant_start(
-                        self,
-                        policy=QAbstractAnimation.DeletionPolicy.KeepWhenStopped,
-                    ):
-                        self.setDuration(0)
-                        QPropertyAnimation._zapret_original_start(self, policy)
-
-                    QPropertyAnimation.start = _instant_start
-        except Exception:
-            pass
-
-        try:
-            from config.reg import get_editor_smooth_scroll_enabled
-
-            self._on_editor_smooth_scroll_changed(get_editor_smooth_scroll_enabled())
-        except Exception:
-            pass
+        apply_window_animation_policy(self, enabled)
 
     def _on_smooth_scroll_changed(self, enabled: bool):
         """Переключает плавную прокрутку страниц, списков и деревьев, но не редакторов."""
-        try:
-            from PyQt6.QtWidgets import QWidget
-            from ui.smooth_scroll import apply_smooth_scroll_mode, is_editor_smooth_scroll_target
-
-            def _apply_smooth_mode(target) -> None:
-                if is_editor_smooth_scroll_target(target):
-                    return
-
-                apply_smooth_scroll_mode(target, enabled)
-                custom_setter = getattr(target, "set_smooth_scroll_enabled", None)
-                if callable(custom_setter):
-                    try:
-                        custom_setter(enabled)
-                    except Exception:
-                        pass
-
-            for page in list(self.pages.values()):
-                _apply_smooth_mode(page)
-                for child in page.findChildren(QWidget):
-                    _apply_smooth_mode(child)
-        except Exception:
-            pass
+        apply_window_smooth_scroll_policy(self, enabled)
 
     def _on_editor_smooth_scroll_changed(self, enabled: bool):
         """Переключает плавную прокрутку только у текстовых редакторов."""
-        try:
-            from PyQt6.QtWidgets import QWidget
-            from ui.smooth_scroll import (
-                apply_smooth_scroll_mode,
-                get_effective_editor_smooth_scroll_enabled,
-                is_editor_smooth_scroll_target,
-            )
-
-            effective_enabled = get_effective_editor_smooth_scroll_enabled(enabled)
-
-            def _apply_editor_smooth_mode(target) -> None:
-                if not is_editor_smooth_scroll_target(target):
-                    return
-
-                apply_smooth_scroll_mode(target, effective_enabled)
-
-                custom_setter = getattr(target, "set_smooth_scroll_enabled", None)
-                if callable(custom_setter):
-                    try:
-                        custom_setter(effective_enabled)
-                    except Exception:
-                        pass
-
-            for page in list(self.pages.values()):
-                _apply_editor_smooth_mode(page)
-                for child in page.findChildren(QWidget):
-                    _apply_editor_smooth_mode(child)
-        except Exception:
-            pass
+        apply_window_editor_smooth_scroll_policy(self, enabled)
 
     def _refresh_pages_after_preset_switch(self):
         refresh_main_window_pages_after_preset_switch(self)

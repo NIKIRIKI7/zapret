@@ -8,9 +8,9 @@ from importlib import import_module
 _PAGE_EXPORTS: dict[str, tuple[str, str]] = {
     "Zapret1DirectControlPage": (".direct_control_page", "Zapret1DirectControlPage"),
     "Zapret1StrategiesPage": (".direct_zapret1_page", "Zapret1StrategiesPage"),
-    "Zapret1UserPresetsPage": (".user_presets_page", "Zapret1UserPresetsPage"),
+    "Zapret1UserPresetsPage": ("preset_zapret1.ui.user_presets_page", "Zapret1UserPresetsPage"),
     "Zapret1StrategyDetailPage": (".strategy_detail_page_v1", "Zapret1StrategyDetailPage"),
-    "Zapret1PresetDetailPage": (".preset_detail_page", "Zapret1PresetDetailPage"),
+    "Zapret1PresetDetailPage": ("preset_zapret1.ui.preset_detail_page", "Zapret1PresetDetailPage"),
 }
 
 __all__ = list(_PAGE_EXPORTS)

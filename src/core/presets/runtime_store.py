@@ -4,17 +4,10 @@ from typing import Dict, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from app_context import require_app_context
+from .preset_file_store import PresetFileStore
+from .selection_service import PresetSelectionService
 
 from .models import PresetManifest
-
-
-def _get_preset_repository():
-    return require_app_context().preset_repository
-
-
-def _get_selection_service():
-    return require_app_context().preset_selection_service
 
 
 class DirectRuntimePresetStore(QObject):
@@ -29,9 +22,17 @@ class DirectRuntimePresetStore(QObject):
     preset_identity_changed = pyqtSignal(str)
     preset_updated = pyqtSignal(str)
 
-    def __init__(self, engine: str, parent: Optional[QObject] = None):
+    def __init__(
+        self,
+        engine: str,
+        preset_file_store: PresetFileStore,
+        selection_service: PresetSelectionService,
+        parent: Optional[QObject] = None,
+    ):
         super().__init__(parent)
         self._engine = str(engine or "").strip()
+        self._preset_file_store = preset_file_store
+        self._selection_service = selection_service
         self._manifests_by_file_name: Dict[str, PresetManifest] = {}
         self._selected_source_file_name: Optional[str] = None
         self._loaded = False
@@ -82,14 +83,14 @@ class DirectRuntimePresetStore(QObject):
 
     def _reload_metadata(self) -> None:
         manifests_by_file_name: Dict[str, PresetManifest] = {}
-        for manifest in _get_preset_repository().list_manifests(self._engine):
+        for manifest in self._preset_file_store.list_manifests(self._engine):
             file_name = str(getattr(manifest, "file_name", "") or "").strip()
             if file_name:
                 manifests_by_file_name[file_name] = manifest
 
         self._manifests_by_file_name = manifests_by_file_name
         try:
-            self._selected_source_file_name = _get_selection_service().get_selected_file_name(self._engine)
+            self._selected_source_file_name = self._selection_service.get_selected_file_name(self._engine)
         except Exception:
             self._selected_source_file_name = None
         self._loaded = True

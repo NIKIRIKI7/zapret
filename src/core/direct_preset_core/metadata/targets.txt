@@ -794,22 +794,6 @@ base_filter = --filter-tcp=80 --ipset=ipset-all.txt
 strategy_type = http80
 strip_payload = true
 
-[base_tcp]
-full_name = Base
-description = Base (HTTP)
-tooltip = 🌐 Base (HTTP)\nTarget для ipset-base.txt на 80 порту.
-color = #00ffcc
-default_strategy = none
-ports = 80
-protocol = TCP
-needs_new_separator = true
-command_group = hostlists
-icon_name = fa5b.chrome
-icon_color = #2696F1
-base_filter = --filter-tcp=80 --ipset=ipset-base.txt
-strategy_type = http80
-strip_payload = true
-
 [cloudflare_ipset_tcp]
 full_name = Cloudflare Ipset
 description = Сервера CloudFlare (все порты)
@@ -952,22 +936,6 @@ command_group = ipsets
 icon_name = fa5s.gamepad
 icon_color = #D49B00
 base_filter = --filter-udp=80,443-65535 --ipset=ipset-all.txt
-strategy_type = udp
-requires_all_ports = true
-
-[base_udp]
-full_name = Base UDP
-description = Блокировка по IP адресам (UDP для игр)
-tooltip = 🔢 Блокировка по IP адресам (UDP для игр)\nОбходит блокировку сервисов по их IP адресам через UDP.\nРаботает когда провайдер блокирует не домены, а конкретные IP.\nПолезно для сервисов с фиксированными IP адресами.
-color = #006eff
-default_strategy = none
-ports = all ports
-protocol = UDP
-needs_new_separator = false
-command_group = ipsets
-icon_name = fa5s.gamepad
-icon_color = #D49B00
-base_filter = --filter-udp=80,443-65535 --ipset=ipset-base.txt
 strategy_type = udp
 requires_all_ports = true
 

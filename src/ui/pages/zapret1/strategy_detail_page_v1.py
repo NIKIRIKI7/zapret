@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtWidgets import QWidget, QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton
+from PyQt6.QtCore import pyqtSignal, QTimer
+from PyQt6.QtWidgets import QWidget, QFrame, QVBoxLayout, QLabel, QPushButton
 from PyQt6.QtGui import QFont
 
 from core.runtime.direct_ui_snapshot_service import DirectTargetDetailSnapshotWorker
@@ -15,7 +15,6 @@ from ui.compat_widgets import ActionButton, RefreshButton, SettingsCard
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.widgets.direct_zapret2_strategies_tree import DirectZapret2StrategiesTree, StrategyTreeRow
 from ui.text_catalog import tr as tr_catalog
-from ui.smooth_scroll import apply_editor_smooth_scroll_preference
 from ui.pages.strategy_detail_components import (
     build_detail_subtitle_widgets,
     build_strategies_tree_widget,
@@ -26,20 +25,25 @@ from ui.pages.zapret2.strategy_detail_apply import (
     apply_tree_selected_strategy_state,
 )
 from ui.pages.zapret1.strategy_detail_page_v1_controller import StrategyDetailPageV1Controller
+from ui.pages.zapret1.strategy_detail_page_v1_build import build_strategy_detail_v1_main_sections
+from ui.pages.zapret1.strategy_detail_page_v1_args import ArgsEditorDialogV1
+from ui.pages.zapret1.strategy_detail_page_v1_runtime_helpers import (
+    apply_strategy_detail_v1_language,
+    refresh_args_preview,
+    sync_target_controls,
+    update_header_labels,
+    update_selected_label,
+)
 from log import log
 
 try:
     from qfluentwidgets import (
         BodyLabel,
         CaptionLabel,
-        StrongBodyLabel,
         TitleLabel,
-        SubtitleLabel,
         LineEdit,
         ComboBox,
-        TextEdit,
         BreadcrumbBar,
-        MessageBoxBase,
         IndeterminateProgressRing,
         PixmapLabel,
         InfoBar,
@@ -52,13 +56,9 @@ except ImportError:
     from PyQt6.QtWidgets import (  # type: ignore
         QLabel as BodyLabel,
         QLabel as CaptionLabel,
-        QLabel as StrongBodyLabel,
         QLabel as TitleLabel,
-        QLabel as SubtitleLabel,
         QLineEdit as LineEdit,
         QComboBox as ComboBox,
-        QTextEdit as TextEdit,
-        QDialog as MessageBoxBase,
         QCheckBox as SwitchButton,
     )
 
@@ -76,67 +76,6 @@ try:
 except ImportError:
     qta = None  # type: ignore
     _HAS_QTA = False
-
-
-class _ArgsEditorDialog(MessageBoxBase):  # type: ignore[misc, valid-type]
-    """Диалог ручного редактирования аргументов стратегии."""
-
-    def __init__(self, initial_text: str = "", parent=None, language: str = "ru"):
-        super().__init__(parent)
-        self._ui_language = language
-
-        def _tr(key: str, default: str, **kwargs) -> str:
-            text = tr_catalog(key, language=self._ui_language, default=default)
-            if kwargs:
-                try:
-                    return text.format(**kwargs)
-                except Exception:
-                    return text
-            return text
-
-        self._tr = _tr
-
-        if not _HAS_FLUENT:
-            return
-
-        self._title_lbl = SubtitleLabel(
-            self._tr("page.z1_strategy_detail.args_dialog.title", "Аргументы стратегии")
-        )
-        self.viewLayout.addWidget(self._title_lbl)
-
-        hint = CaptionLabel(
-            self._tr(
-                "page.z1_strategy_detail.args_dialog.hint",
-                "Один аргумент на строку. Изменяет только выбранный target.",
-            )
-        )
-        self.viewLayout.addWidget(hint)
-
-        self._text_edit = TextEdit()
-        apply_editor_smooth_scroll_preference(self._text_edit)
-        self._text_edit.setPlaceholderText(
-            self._tr(
-                "page.z1_strategy_detail.args_dialog.placeholder",
-                "Например:\n--dpi-desync=multisplit\n--dpi-desync-split-pos=1",
-            )
-        )
-        self._text_edit.setMinimumWidth(460)
-        self._text_edit.setMinimumHeight(150)
-        self._text_edit.setMaximumHeight(260)
-        self._text_edit.setFont(QFont("Consolas", 10))
-        self._text_edit.setPlainText(initial_text)
-        self.viewLayout.addWidget(self._text_edit)
-
-        self.yesButton.setText(self._tr("page.z1_strategy_detail.args_dialog.button.save", "Сохранить"))
-        self.cancelButton.setText(self._tr("page.z1_strategy_detail.args_dialog.button.cancel", "Отмена"))
-
-    def validate(self) -> bool:
-        return True
-
-    def get_text(self) -> str:
-        if hasattr(self, "_text_edit"):
-            return self._text_edit.toPlainText()
-        return ""
 
 
 class Zapret1StrategyDetailPage(BasePage):
@@ -160,6 +99,7 @@ class Zapret1StrategyDetailPage(BasePage):
         self._preset_refresh_pending = False
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
+        self._cleanup_in_progress = False
 
         self._strategies: dict[str, dict] = {}
         self._current_strategy_id: str = "none"
@@ -265,142 +205,43 @@ class Zapret1StrategyDetailPage(BasePage):
 
         self.add_widget(header)
 
-        # Toolbar card
-        toolbar_card = SettingsCard()
-        toolbar_layout = QVBoxLayout()
-        toolbar_layout.setSpacing(8)
-
-        state_row = QHBoxLayout()
-        state_row.setSpacing(8)
-
-        state_label = BodyLabel(
-            self._tr("page.z1_strategy_detail.state.category_bypass", "Обход для target'а")
-        )
-        self._state_label = state_label
-        state_row.addWidget(state_label)
-
-        self._enable_toggle = SwitchButton(parent=self)
-        if hasattr(self._enable_toggle, "setOnText"):
-            self._enable_toggle.setOnText(self._tr("page.z1_strategy_detail.toggle.on", "Включено"))
-        if hasattr(self._enable_toggle, "setOffText"):
-            self._enable_toggle.setOffText(self._tr("page.z1_strategy_detail.toggle.off", "Выключено"))
-        if hasattr(self._enable_toggle, "checkedChanged"):
-            self._enable_toggle.checkedChanged.connect(self._on_enable_toggled)
-        else:
-            self._enable_toggle.toggled.connect(self._on_enable_toggled)
-        state_row.addWidget(self._enable_toggle)
-
-        self._filter_mode_frame = QWidget()
-        filter_row = QHBoxLayout(self._filter_mode_frame)
-        filter_row.setContentsMargins(0, 0, 0, 0)
-        filter_row.setSpacing(6)
-        self._filter_label = CaptionLabel(self._tr("page.z1_strategy_detail.filter.label", "Фильтр:"))
-        filter_row.addWidget(self._filter_label)
-
-        self._filter_mode_selector = SwitchButton(parent=self)
-        if hasattr(self._filter_mode_selector, "setOnText"):
-            self._filter_mode_selector.setOnText(self._tr("page.z1_strategy_detail.filter.ipset", "IPset"))
-        if hasattr(self._filter_mode_selector, "setOffText"):
-            self._filter_mode_selector.setOffText(self._tr("page.z1_strategy_detail.filter.hostlist", "Hostlist"))
-        if hasattr(self._filter_mode_selector, "checkedChanged"):
-            self._filter_mode_selector.checkedChanged.connect(
-                lambda checked: self._on_filter_mode_changed("ipset" if checked else "hostlist")
-            )
-        else:
-            self._filter_mode_selector.toggled.connect(
-                lambda checked: self._on_filter_mode_changed("ipset" if checked else "hostlist")
-            )
-        filter_row.addWidget(self._filter_mode_selector)
-        self._filter_mode_frame.hide()
-        state_row.addWidget(self._filter_mode_frame)
-        state_row.addStretch(1)
-
-        toolbar_layout.addLayout(state_row)
-
-        controls_row = QHBoxLayout()
-        controls_row.setSpacing(8)
-
-        self._refresh_btn = RefreshButton()
-        self._refresh_btn.clicked.connect(self._reload_target)
-        controls_row.addWidget(self._refresh_btn)
-
-        self._search_edit = LineEdit()
-        self._search_edit.setPlaceholderText(
-            self._tr(
-                "page.z1_strategy_detail.search.placeholder",
-                "Поиск стратегии по названию или аргументам",
-            )
-        )
-        self._search_edit.textChanged.connect(self._on_search_text_changed)
-        controls_row.addWidget(self._search_edit, 1)
-
-        self._sort_combo = ComboBox()
-        self._sort_combo.addItem(
-            self._tr("page.z1_strategy_detail.sort.recommended", "По рекомендации"),
-            userData="recommended",
-        )
-        self._sort_combo.addItem(
-            self._tr("page.z1_strategy_detail.sort.alpha_asc", "По алфавиту A-Z"),
-            userData="alpha_asc",
-        )
-        self._sort_combo.addItem(
-            self._tr("page.z1_strategy_detail.sort.alpha_desc", "По алфавиту Z-A"),
-            userData="alpha_desc",
-        )
-        self._sort_combo.currentIndexChanged.connect(self._on_sort_combo_changed)
-        controls_row.addWidget(self._sort_combo)
-
-        self._edit_args_btn = ActionButton(
-            self._tr("page.z1_strategy_detail.button.edit_args", "Редактировать аргументы"),
-            "fa5s.edit",
-        )
-        self._edit_args_btn.clicked.connect(self._open_args_editor)
-        controls_row.addWidget(self._edit_args_btn)
-
-        toolbar_layout.addLayout(controls_row)
-
-        self._args_preview_label = CaptionLabel(
-            self._tr("page.z1_strategy_detail.args.none", "(нет аргументов)")
-        )
-        self._args_preview_label.setWordWrap(True)
-        self._args_preview_label.setFont(QFont("Consolas", 9))
-        toolbar_layout.addWidget(self._args_preview_label)
-
-        toolbar_card.add_layout(toolbar_layout)
-        self._toolbar_card = toolbar_card
-        self.add_widget(toolbar_card)
-
-        # Strategies tree card
-        list_card = SettingsCard(self._tr("page.z1_strategy_detail.card.strategies", "Стратегии"))
-        list_layout = QVBoxLayout()
-        list_layout.setContentsMargins(0, 0, 0, 0)
-        list_layout.setSpacing(8)
-
-        self._tree = build_strategies_tree_widget(
+        main_widgets = build_strategy_detail_v1_main_sections(
             parent=self,
-            tree_cls=DirectZapret2StrategiesTree,
-            on_row_clicked=self._on_strategy_selected,
-            on_favorite_toggled=lambda *_args: None,
-            on_working_mark_requested=lambda *_args: None,
-            on_preview_requested=lambda *_args: None,
-            on_preview_pinned_requested=lambda *_args: None,
-            on_preview_hide_requested=lambda: None,
+            tr_fn=self._tr,
+            action_button_cls=ActionButton,
+            refresh_button_cls=RefreshButton,
+            settings_card_cls=SettingsCard,
+            body_label_cls=BodyLabel,
+            caption_label_cls=CaptionLabel,
+            line_edit_cls=LineEdit,
+            combo_box_cls=ComboBox,
+            switch_button_cls=SwitchButton,
+            build_tree_widget_fn=build_strategies_tree_widget,
+            direct_tree_cls=DirectZapret2StrategiesTree,
+            on_enable_toggled=self._on_enable_toggled,
+            on_filter_mode_changed=self._on_filter_mode_changed,
+            on_reload_target=self._reload_target,
+            on_search_text_changed=self._on_search_text_changed,
+            on_sort_combo_changed=self._on_sort_combo_changed,
+            on_open_args_editor=self._open_args_editor,
+            on_strategy_selected=self._on_strategy_selected,
         )
-        list_layout.addWidget(self._tree, 1)
-
-        self._empty_label = CaptionLabel(
-            self._tr(
-                "page.z1_strategy_detail.empty.no_strategies",
-                "Нет доступных стратегий. Проверьте %APPDATA%\\zapret\\direct_zapret1\\",
-            )
-        )
-        self._empty_label.setWordWrap(True)
-        self._empty_label.hide()
-        list_layout.addWidget(self._empty_label)
-
-        list_card.add_layout(list_layout)
-        self._list_card = list_card
-        self.add_widget(list_card, 1)
+        self._toolbar_card = main_widgets.toolbar_card
+        self._state_label = main_widgets.state_label
+        self._enable_toggle = main_widgets.enable_toggle
+        self._filter_mode_frame = main_widgets.filter_mode_frame
+        self._filter_label = main_widgets.filter_label
+        self._filter_mode_selector = main_widgets.filter_mode_selector
+        self._refresh_btn = main_widgets.refresh_btn
+        self._search_edit = main_widgets.search_edit
+        self._sort_combo = main_widgets.sort_combo
+        self._edit_args_btn = main_widgets.edit_args_btn
+        self._args_preview_label = main_widgets.args_preview_label
+        self._list_card = main_widgets.list_card
+        self._tree = main_widgets.tree
+        self._empty_label = main_widgets.empty_label
+        self.add_widget(self._toolbar_card)
+        self.add_widget(self._list_card, 1)
 
     def _setup_breadcrumb(self) -> None:
         if _HAS_FLUENT and BreadcrumbBar is not None:
@@ -469,16 +310,18 @@ class Zapret1StrategyDetailPage(BasePage):
             self._target_payload = payload
         return payload
 
-    def _get_direct_ui_snapshot_service(self):
+    def _require_app_context(self):
         app_context = getattr(self.window(), "app_context", None)
-        service = getattr(app_context, "direct_ui_snapshot_service", None)
-        if service is None:
-            from app_context import require_app_context
+        if app_context is None:
+            raise RuntimeError("AppContext is required for Zapret1 strategy detail page")
+        return app_context
 
-            service = require_app_context().direct_ui_snapshot_service
-        return service
+    def _get_direct_ui_snapshot_service(self):
+        return self._require_app_context().direct_ui_snapshot_service
 
     def _request_target_payload(self, target_key: str, *, refresh: bool, reason: str) -> None:
+        if self._cleanup_in_progress:
+            return
         normalized_key = str(target_key or "").strip().lower()
         if not normalized_key:
             return
@@ -489,6 +332,7 @@ class Zapret1StrategyDetailPage(BasePage):
         self.show_loading()
         worker = DirectTargetDetailSnapshotWorker(
             request_id,
+            snapshot_service=self._require_app_context().direct_ui_snapshot_service,
             launch_method="direct_zapret1",
             target_key=normalized_key,
             refresh=refresh,
@@ -505,6 +349,8 @@ class Zapret1StrategyDetailPage(BasePage):
         worker.start()
 
     def _on_target_payload_loaded(self, request_id: int, snapshot, token: int) -> None:
+        if self._cleanup_in_progress:
+            return
         if request_id != self._target_payload_request_id:
             return
         if not self.is_page_load_token_current(token):
@@ -550,6 +396,8 @@ class Zapret1StrategyDetailPage(BasePage):
         self.show_success()
 
     def show_target(self, target_key: str, direct_facade=None) -> None:
+        if self._cleanup_in_progress:
+            return
         normalized_target_key = str(target_key or "").strip().lower()
         if not normalized_target_key:
             return
@@ -559,7 +407,10 @@ class Zapret1StrategyDetailPage(BasePage):
             try:
                 from core.presets.direct_facade import DirectPresetFacade
 
-                self._direct_facade = DirectPresetFacade.from_launch_method("direct_zapret1")
+                self._direct_facade = DirectPresetFacade.from_launch_method(
+                    "direct_zapret1",
+                    app_context=self._require_app_context(),
+                )
             except Exception:
                 self._direct_facade = None
         if not self.isVisible():
@@ -569,6 +420,8 @@ class Zapret1StrategyDetailPage(BasePage):
         self._request_target_payload(normalized_target_key, refresh=False, reason="show_target")
 
     def on_page_activated(self) -> None:
+        if self._cleanup_in_progress:
+            return
         pending_target_key = str(getattr(self, "_pending_target_key", "") or "").strip().lower()
         if pending_target_key:
             self._pending_target_key = ""
@@ -577,7 +430,7 @@ class Zapret1StrategyDetailPage(BasePage):
         self._rebuild_breadcrumb()
         if self._target_key and self._preset_refresh_pending:
             self._preset_refresh_pending = False
-            QTimer.singleShot(0, self.refresh_from_preset_switch)
+            QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self.refresh_from_preset_switch())
 
     # ------------------------------------------------------------------
     # Data mapping / loading
@@ -630,6 +483,8 @@ class Zapret1StrategyDetailPage(BasePage):
 
     def refresh_from_preset_switch(self) -> None:
         """Перечитывает текущий target после смены активного source preset."""
+        if self._cleanup_in_progress:
+            return
         if not self.isVisible():
             self._preset_refresh_pending = True
             return
@@ -703,39 +558,23 @@ class Zapret1StrategyDetailPage(BasePage):
     # ------------------------------------------------------------------
 
     def _update_header_labels(self) -> None:
-        full_name = self._target_info.get("full_name", self._target_key) or self._target_key
-        description = self._target_info.get("description", "")
-        protocol = self._target_info.get("protocol", "")
-        ports = self._target_info.get("ports", "")
-
-        if self._title_label is not None:
-            self._title_label.setText(full_name)
-        if self._desc_label is not None:
-            self._desc_label.setText(description)
-            self._desc_label.setVisible(bool(description))
-
-        subtitle_parts = []
-        if protocol:
-            subtitle_parts.append(str(protocol))
-        if ports:
-            subtitle_parts.append(
-                self._tr("page.z1_strategy_detail.subtitle.ports", "порты: {ports}", ports=ports)
-            )
-
-        if self._subtitle_label is not None:
-            self._subtitle_label.setText(" | ".join(subtitle_parts))
-
-        self._update_selected_label()
+        update_header_labels(
+            title_label=self._title_label,
+            desc_label=self._desc_label,
+            subtitle_label=self._subtitle_label,
+            tr_fn=self._tr,
+            target_info=self._target_info,
+            target_key=self._target_key,
+            update_selected_label_fn=self._update_selected_label,
+        )
 
     def _update_selected_label(self) -> None:
-        if self._selected_label is not None:
-            self._selected_label.setText(
-                self._tr(
-                    "page.z1_strategy_detail.selected.current",
-                    "Текущая стратегия: {strategy}",
-                    strategy=self._strategy_display_name(self._current_strategy_id),
-                )
-            )
+        update_selected_label(
+            selected_label=self._selected_label,
+            tr_fn=self._tr,
+            current_strategy_id=self._current_strategy_id,
+            strategy_display_name_fn=self._strategy_display_name,
+        )
 
     # ------------------------------------------------------------------
     # Search / sort controls
@@ -777,25 +616,16 @@ class Zapret1StrategyDetailPage(BasePage):
         return bool(host and ipset)
 
     def _sync_target_controls(self) -> None:
-        enabled = (self._current_strategy_id or "none") != "none"
-
-        if self._enable_toggle is not None:
-            self._enable_toggle.blockSignals(True)
-            if hasattr(self._enable_toggle, "setChecked"):
-                self._enable_toggle.setChecked(enabled)
-            self._enable_toggle.blockSignals(False)
-
-        if self._edit_args_btn is not None:
-            self._edit_args_btn.setEnabled(enabled)
-
-        if self._filter_mode_frame is not None:
-            can_switch = self._target_supports_filter_switch()
-            self._filter_mode_frame.setVisible(can_switch)
-            if can_switch and self._filter_mode_selector is not None:
-                saved_mode = self._load_target_filter_mode(self._target_key)
-                self._filter_mode_selector.blockSignals(True)
-                self._filter_mode_selector.setChecked(saved_mode == "ipset")
-                self._filter_mode_selector.blockSignals(False)
+        sync_target_controls(
+            enable_toggle=self._enable_toggle,
+            edit_args_btn=self._edit_args_btn,
+            filter_mode_frame=self._filter_mode_frame,
+            filter_mode_selector=self._filter_mode_selector,
+            current_strategy_id=self._current_strategy_id,
+            target_key=self._target_key,
+            target_supports_filter_switch_fn=self._target_supports_filter_switch,
+            load_target_filter_mode_fn=self._load_target_filter_mode,
+        )
 
     def _load_target_filter_mode(self, target_key: str) -> str:
         if not self._direct_facade:
@@ -927,23 +757,11 @@ class Zapret1StrategyDetailPage(BasePage):
     # ------------------------------------------------------------------
 
     def _refresh_args_preview(self) -> None:
-        if self._args_preview_label is None:
-            return
-
-        current_args = self._get_current_args()
-        if not current_args:
-            self._args_preview_label.setText(self._tr("page.z1_strategy_detail.args.none", "(нет аргументов)"))
-            return
-
-        lines = [ln for ln in current_args.splitlines() if ln.strip()]
-        preview = "\n".join(lines[:8])
-        if len(lines) > 8:
-            preview += self._tr(
-                "page.z1_strategy_detail.args.more",
-                "\n... (+{count} строк)",
-                count=len(lines) - 8,
-            )
-        self._args_preview_label.setText(preview)
+        refresh_args_preview(
+            args_preview_label=self._args_preview_label,
+            tr_fn=self._tr,
+            get_current_args_fn=self._get_current_args,
+        )
 
     def _get_current_args(self) -> str:
         if not self._direct_facade or not self._target_key:
@@ -964,7 +782,7 @@ class Zapret1StrategyDetailPage(BasePage):
                 initial_text=self._get_current_args(),
                 parent=self.window(),
                 language=self._ui_language,
-                dialog_cls=_ArgsEditorDialog,
+                dialog_cls=ArgsEditorDialogV1,
             )
             if edited_text is not None:
                 self._save_custom_args(edited_text.strip())
@@ -1030,6 +848,8 @@ class Zapret1StrategyDetailPage(BasePage):
     # ------------------------------------------------------------------
 
     def show_loading(self) -> None:
+        if self._cleanup_in_progress:
+            return
         apply_loading_indicator_state(
             self._spinner,
             self._success_icon,
@@ -1037,10 +857,13 @@ class Zapret1StrategyDetailPage(BasePage):
         )
 
     def show_success(self) -> None:
+        if self._cleanup_in_progress:
+            return
         success_pixmap = None
         if _HAS_QTA and qta is not None:
             try:
-                success_pixmap = qta.icon("fa5s.check-circle", color="#6ccb5f").pixmap(16, 16)
+                from ui.theme import get_cached_qta_pixmap
+                success_pixmap = get_cached_qta_pixmap("fa5s.check-circle", color="#6ccb5f", size=16)
             except Exception:
                 success_pixmap = None
         apply_loading_indicator_state(
@@ -1053,6 +876,8 @@ class Zapret1StrategyDetailPage(BasePage):
         self._success_timer.start(1200)
 
     def _hide_success(self) -> None:
+        if self._cleanup_in_progress:
+            return
         apply_loading_indicator_state(
             self._spinner,
             self._success_icon,
@@ -1079,89 +904,46 @@ class Zapret1StrategyDetailPage(BasePage):
         )
 
     def _on_ui_state_changed(self, _state: AppUiState, changed_fields: frozenset[str]) -> None:
+        if self._cleanup_in_progress:
+            return
         if "active_preset_revision" in changed_fields or "preset_content_revision" in changed_fields:
             self.refresh_from_preset_switch()
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
+        apply_strategy_detail_v1_language(
+            tr_fn=self._tr,
+            target_key=self._target_key,
+            back_btn=self._back_btn,
+            title_label=self._title_label,
+            state_label=self._state_label,
+            enable_toggle=self._enable_toggle,
+            filter_label=self._filter_label,
+            filter_mode_selector=self._filter_mode_selector,
+            search_edit=self._search_edit,
+            sort_combo=self._sort_combo,
+            sort_mode=self._sort_mode,
+            edit_args_btn=self._edit_args_btn,
+            list_card=self._list_card,
+            empty_label=self._empty_label,
+            rebuild_breadcrumb_fn=self._rebuild_breadcrumb,
+            update_header_labels_fn=self._update_header_labels,
+            rebuild_tree_rows_fn=self._rebuild_tree_rows,
+            refresh_args_preview_fn=self._refresh_args_preview,
+        )
 
-        if self._back_btn is not None:
-            self._back_btn.setText(
-                self._tr("page.z1_strategy_detail.back.strategies", "← Стратегии Zapret 1")
-            )
+    def cleanup(self) -> None:
+        self._cleanup_in_progress = True
+        self._pending_target_key = ""
+        self._preset_refresh_pending = False
+        self._target_payload_request_id += 1
+        self._success_timer.stop()
 
-        if self._title_label is not None and not self._target_key:
-            self._title_label.setText(
-                self._tr("page.z1_strategy_detail.header.category_fallback", "Target")
-            )
-
-        if self._state_label is not None:
-            self._state_label.setText(
-                self._tr("page.z1_strategy_detail.state.category_bypass", "Обход для target'а")
-            )
-
-        if self._enable_toggle is not None:
-            if hasattr(self._enable_toggle, "setOnText"):
-                self._enable_toggle.setOnText(self._tr("page.z1_strategy_detail.toggle.on", "Включено"))
-            if hasattr(self._enable_toggle, "setOffText"):
-                self._enable_toggle.setOffText(self._tr("page.z1_strategy_detail.toggle.off", "Выключено"))
-
-        if self._filter_label is not None:
-            self._filter_label.setText(self._tr("page.z1_strategy_detail.filter.label", "Фильтр:"))
-
-        if self._filter_mode_selector is not None:
-            if hasattr(self._filter_mode_selector, "setOnText"):
-                self._filter_mode_selector.setOnText(self._tr("page.z1_strategy_detail.filter.ipset", "IPset"))
-            if hasattr(self._filter_mode_selector, "setOffText"):
-                self._filter_mode_selector.setOffText(
-                    self._tr("page.z1_strategy_detail.filter.hostlist", "Hostlist")
-                )
-
-        if self._search_edit is not None:
-            self._search_edit.setPlaceholderText(
-                self._tr(
-                    "page.z1_strategy_detail.search.placeholder",
-                    "Поиск стратегии по названию или аргументам",
-                )
-            )
-
-        if self._sort_combo is not None:
-            selected_mode = self._sort_combo.currentData() or self._sort_mode
-            self._sort_combo.blockSignals(True)
-            self._sort_combo.clear()
-            self._sort_combo.addItem(
-                self._tr("page.z1_strategy_detail.sort.recommended", "По рекомендации"),
-                userData="recommended",
-            )
-            self._sort_combo.addItem(
-                self._tr("page.z1_strategy_detail.sort.alpha_asc", "По алфавиту A-Z"),
-                userData="alpha_asc",
-            )
-            self._sort_combo.addItem(
-                self._tr("page.z1_strategy_detail.sort.alpha_desc", "По алфавиту Z-A"),
-                userData="alpha_desc",
-            )
-            idx = self._sort_combo.findData(selected_mode)
-            self._sort_combo.setCurrentIndex(idx if idx >= 0 else 0)
-            self._sort_combo.blockSignals(False)
-
-        if self._edit_args_btn is not None:
-            self._edit_args_btn.setText(
-                self._tr("page.z1_strategy_detail.button.edit_args", "Редактировать аргументы")
-            )
-
-        if self._list_card is not None:
-            self._list_card.set_title(self._tr("page.z1_strategy_detail.card.strategies", "Стратегии"))
-
-        if self._empty_label is not None:
-            self._empty_label.setText(
-                self._tr(
-                    "page.z1_strategy_detail.empty.no_strategies",
-                    "Нет доступных стратегий. Проверьте %APPDATA%\\zapret\\direct_zapret1\\",
-                )
-            )
-
-        self._rebuild_breadcrumb()
-        self._update_header_labels()
-        self._rebuild_tree_rows()
-        self._refresh_args_preview()
+        unsubscribe = getattr(self, "_ui_state_unsubscribe", None)
+        if callable(unsubscribe):
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+        self._ui_state_unsubscribe = None
+        self._ui_state_store = None

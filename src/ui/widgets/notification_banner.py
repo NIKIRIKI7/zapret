@@ -8,9 +8,9 @@
 
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QSize
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QGraphicsOpacityEffect
-import qtawesome as qta
 
-from ui.theme import get_theme_tokens
+from ui.animation_policy import register_managed_animation, start_managed_animation
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from ui.theme_refresh import ThemeRefreshController
 
 
@@ -109,7 +109,7 @@ class NotificationBanner(QWidget):
             hover_bg = "rgba(245, 245, 245, 0.14)"
             pressed_bg = "rgba(245, 245, 245, 0.20)"
 
-        self.close_btn.setIcon(qta.icon("mdi.close", color=icon_color))
+        self.close_btn.setIcon(get_themed_qta_icon("mdi.close", color=icon_color))
         self.close_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
@@ -132,15 +132,19 @@ class NotificationBanner(QWidget):
         self.auto_hide_timer.timeout.connect(self.hide_animated)
 
         # Анимация появления (fade in)
-        self.fade_in_animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.fade_in_animation.setDuration(200)
+        self.fade_in_animation = register_managed_animation(
+            QPropertyAnimation(self.opacity_effect, b"opacity"),
+            200,
+        )
         self.fade_in_animation.setStartValue(0.0)
         self.fade_in_animation.setEndValue(1.0)
         self.fade_in_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         # Анимация исчезновения (fade out)
-        self.fade_out_animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.fade_out_animation.setDuration(200)
+        self.fade_out_animation = register_managed_animation(
+            QPropertyAnimation(self.opacity_effect, b"opacity"),
+            200,
+        )
         self.fade_out_animation.setStartValue(1.0)
         self.fade_out_animation.setEndValue(0.0)
         self.fade_out_animation.setEasingCurve(QEasingCurve.Type.InCubic)
@@ -169,8 +173,7 @@ class NotificationBanner(QWidget):
         """)
 
         # Иконка
-        icon = qta.icon(style['icon'], color=style['icon_color'])
-        self.icon_label.setPixmap(icon.pixmap(24, 24))
+        self.icon_label.setPixmap(get_cached_qta_pixmap(style['icon'], color=style['icon_color'], size=24))
 
     def show_message(self, message: str, notification_type: str = 'info', auto_hide_ms: int = 6000):
         """
@@ -195,7 +198,7 @@ class NotificationBanner(QWidget):
         # Показываем с анимацией
         self.opacity_effect.setOpacity(0.0)
         self.show()
-        self.fade_in_animation.start()
+        start_managed_animation(self.fade_in_animation)
 
         # Запускаем таймер автоскрытия
         if auto_hide_ms > 0:
@@ -221,7 +224,7 @@ class NotificationBanner(QWidget):
         """Скрывает уведомление с анимацией"""
         self.auto_hide_timer.stop()
         self.fade_in_animation.stop()
-        self.fade_out_animation.start()
+        start_managed_animation(self.fade_out_animation)
 
     def _on_fade_out_finished(self):
         """Callback после завершения анимации исчезновения"""

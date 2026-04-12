@@ -7,9 +7,8 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QCursor
-import qtawesome as qta
 
-from ui.theme import get_theme_tokens
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 from ui.theme_refresh import ThemeRefreshController
 
 try:
@@ -105,7 +104,7 @@ class CollapsibleServiceHeader(QFrame):
             color = "#666666" if tokens.is_light else "#808080"
         except Exception:
             color = "#808080"
-        self._chevron.setPixmap(qta.icon(icon_name, color=color).pixmap(12, 12))
+        self._chevron.setPixmap(get_cached_qta_pixmap(icon_name, color=color, size=12))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

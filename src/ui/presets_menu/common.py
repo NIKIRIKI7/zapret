@@ -5,10 +5,9 @@ from typing import Optional
 
 from PyQt6.QtGui import QAction, QColor
 from PyQt6.QtWidgets import QListView
-import qtawesome as qta
 
 from ui.text_catalog import tr as tr_catalog
-from ui.theme import get_theme_tokens
+from ui.theme import get_theme_tokens, get_themed_qta_icon
 
 try:
     from qfluentwidgets import Action, FluentIcon
@@ -91,7 +90,7 @@ def cached_icon(name: str, color: str):
     key = f"{name}|{color}"
     icon = _icon_cache.get(key)
     if icon is None:
-        icon = qta.icon(name, color=color)
+        icon = get_themed_qta_icon(name, color=color)
         _icon_cache[key] = icon
     return icon
 

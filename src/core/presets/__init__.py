@@ -1,9 +1,9 @@
 from .models import PresetManifest
-from .repository import PresetRepository
+from .preset_file_store import PresetFileStore
 from .selection_service import PresetSelectionService
 
 __all__ = [
     "PresetManifest",
-    "PresetRepository",
+    "PresetFileStore",
     "PresetSelectionService",
 ]

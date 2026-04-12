@@ -12,6 +12,8 @@ from PyQt6.QtCore import QTimer, QPoint
 from PyQt6.QtGui import QAction, QCursor, QFontMetrics
 from PyQt6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMenu, QWidget
 
+from ui.theme import get_themed_qta_icon
+
 try:
     import qtawesome as qta
 
@@ -37,6 +39,35 @@ except Exception:
         return None
 
 from ui.popup_menu import exec_popup_menu
+
+
+def _toggle_github_api_removal(*, status_callback=None) -> bool:
+    """Переключает флаг удаления api.github.com из hosts при запуске."""
+    from config import get_remove_github_api, set_remove_github_api
+
+    try:
+        current_state = bool(get_remove_github_api())
+        new_state = not current_state
+
+        if set_remove_github_api(new_state):
+            state_text = "включено" if new_state else "отключено"
+            message = f"Удаление api.github.com из hosts {state_text}"
+            log(message, "INFO")
+            if status_callback:
+                status_callback(message)
+            return True
+
+        error_message = "Ошибка при сохранении настройки удаления GitHub API"
+        log(error_message, "❌ ERROR")
+        if status_callback:
+            status_callback(error_message)
+        return False
+    except Exception as exc:
+        error_message = f"Ошибка при переключении удаления GitHub API: {exc}"
+        log(error_message, "❌ ERROR")
+        if status_callback:
+            status_callback(error_message)
+        return False
 
 
 if sys.platform == "win32":
@@ -519,7 +550,7 @@ class SystemTrayManager:
 
         show_window_action = _make_menu_action(
             "Показать",
-            icon=_fluent_icon("PLAY") if _HAS_FLUENT_MENU else (qta.icon("fa5s.window-restore", color="#60cdff") if HAS_QTAWESOME else None),
+            icon=_fluent_icon("PLAY") if _HAS_FLUENT_MENU else (get_themed_qta_icon("fa5s.window-restore", color="#60cdff") if HAS_QTAWESOME else None),
             parent=menu,
         )
         show_window_action.triggered.connect(self._toggle_primary_visibility_action)
@@ -544,7 +575,7 @@ class SystemTrayManager:
             if _HAS_FLUENT_MENU:
                 opacity_menu.setIcon(_fluent_icon("PALETTE"))
             elif HAS_QTAWESOME:
-                opacity_menu.setIcon(qta.icon("fa5s.adjust", color="#60cdff"))
+                opacity_menu.setIcon(get_themed_qta_icon("fa5s.adjust", color="#60cdff"))
         except Exception:
             pass
         menu.addMenu(opacity_menu)
@@ -557,7 +588,7 @@ class SystemTrayManager:
 
         tg_proxy_action = _make_menu_action(
             "Telegram Proxy: выкл",
-            icon=_fluent_icon("SEND") if _HAS_FLUENT_MENU else (qta.icon("fa5s.paper-plane", color="#60cdff") if HAS_QTAWESOME else None),
+            icon=_fluent_icon("SEND") if _HAS_FLUENT_MENU else (get_themed_qta_icon("fa5s.paper-plane", color="#60cdff") if HAS_QTAWESOME else None),
             parent=menu,
         )
         tg_proxy_action.triggered.connect(self._toggle_tg_proxy)
@@ -568,7 +599,7 @@ class SystemTrayManager:
 
         console_action = _make_menu_action(
             "Консоль",
-            icon=_fluent_icon("COMMAND_PROMPT") if _HAS_FLUENT_MENU else (qta.icon("fa5s.terminal", color="#888888") if HAS_QTAWESOME else None),
+            icon=_fluent_icon("COMMAND_PROMPT") if _HAS_FLUENT_MENU else (get_themed_qta_icon("fa5s.terminal", color="#888888") if HAS_QTAWESOME else None),
             parent=menu,
         )
         console_action.triggered.connect(self.show_console)
@@ -578,7 +609,7 @@ class SystemTrayManager:
 
         exit_only_action = _make_menu_action(
             "Выход",
-            icon=_fluent_icon("RETURN") if _HAS_FLUENT_MENU else (qta.icon("fa5s.sign-out-alt", color="#aaaaaa") if HAS_QTAWESOME else None),
+            icon=_fluent_icon("RETURN") if _HAS_FLUENT_MENU else (get_themed_qta_icon("fa5s.sign-out-alt", color="#aaaaaa") if HAS_QTAWESOME else None),
             parent=menu,
         )
         exit_only_action.triggered.connect(self.exit_only)
@@ -586,7 +617,7 @@ class SystemTrayManager:
 
         exit_stop_action = _make_menu_action(
             "Выход и остановить DPI",
-            icon=_fluent_icon("POWER_BUTTON") if _HAS_FLUENT_MENU else (qta.icon("fa5s.power-off", color="#e81123") if HAS_QTAWESOME else None),
+            icon=_fluent_icon("POWER_BUTTON") if _HAS_FLUENT_MENU else (get_themed_qta_icon("fa5s.power-off", color="#e81123") if HAS_QTAWESOME else None),
             parent=menu,
         )
         exit_stop_action.triggered.connect(self.exit_and_stop)
@@ -939,7 +970,6 @@ class SystemTrayManager:
 
     def show_console(self):
         from discord.discord_restart import toggle_discord_restart
-        from github_api_toggle import toggle_github_api_removal
 
         cmd, ok = QInputDialog.getText(
             self.parent,
@@ -959,8 +989,7 @@ class SystemTrayManager:
             return
 
         if cmd.lower() == "апигитхаб":
-            toggle_github_api_removal(
-                self.parent,
+            _toggle_github_api_removal(
                 status_callback=lambda m: self.show_notification("Консоль", m),
             )
 

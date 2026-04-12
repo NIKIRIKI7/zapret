@@ -249,7 +249,6 @@
 
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt
 --ipset=lists/ipset-cloudflare.txt
 --ipset=lists/cloudflare-ipset.txt
@@ -273,7 +272,6 @@
 
 --filter-udp=80,443-65535
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt
 --ipset=lists/ipset-cloudflare.txt
 --ipset=lists/cloudflare-ipset.txt

@@ -1,6 +1,5 @@
 # Preset: 2025_01_06
 # TemplateOrigin: 2025_01_06
-# Created: 2026-02-19T00:00:00
 # IconColor: #60cdff
 # Description: Imported from bat/2025_01_06.txt
 

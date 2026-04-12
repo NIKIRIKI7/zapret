@@ -1,11 +1,17 @@
 from PyQt6.QtWidgets import QToolButton
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 
-from core.services import get_strategy_favorites_store
 from .widgets import CompactStrategyItem
 from ui.theme import get_theme_tokens
 from ui.theme_refresh import ThemeRefreshController
 from ui.compat_widgets import set_tooltip
+
+
+def _resolve_favorites_store(widget):
+    app_context = getattr(widget.window(), "app_context", None)
+    if app_context is None:
+        raise RuntimeError("AppContext is required for favorite strategy widgets")
+    return app_context.strategy_favorites_store
 
 
 def _style_selected(tokens) -> str:
@@ -121,10 +127,9 @@ class FavoriteCompactStrategyItem(CompactStrategyItem):
     def __init__(self, strategy_id, strategy_data, target_key=None, parent=None):
         self.target_key = target_key
         self._current_fav_style = None  # Кэш стиля кнопки избранного
-        self._favorites_store = get_strategy_favorites_store()
-        self.is_favorite = self._favorites_store.is_favorite(target_key, strategy_id)
-
         super().__init__(strategy_id, strategy_data, parent)
+        self._favorites_store = _resolve_favorites_store(self)
+        self.is_favorite = self._favorites_store.is_favorite(target_key, strategy_id)
         self._add_favorite_button()
 
         # Включаем отслеживание мыши для hover tooltip

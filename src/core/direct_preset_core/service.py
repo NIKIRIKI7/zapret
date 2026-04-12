@@ -10,6 +10,12 @@ from log import log
 
 from .common.preset_editor import replace_profile_action_lines, replace_profile_selector_line, split_profile_for_target
 from .common.projector import build_target_views
+from .common.circular_preset_support import (
+    editable_raw_args_text,
+    is_circular_source_preset,
+    normalize_action_lines_for_preset,
+    resolve_transport_settings,
+)
 from .common.source_preset_models import (
     OutRangeSettings,
     PresetTargetDetails,
@@ -51,6 +57,7 @@ class TargetDetailPayload:
     strategy_entries: dict[str, dict[str, str]]
     raw_args_text: str
     filter_mode: str
+    is_circular_preset: bool = False
 
 
 def _log_startup_payload_metric(scope: str | None, section: str, elapsed_ms: float, *, extra: str | None = None) -> None:
@@ -90,10 +97,15 @@ class DirectPresetService:
         labels: list[str] = []
         seen: set[str] = set()
         contexts = self.collect_target_contexts(source)
+        source_is_circular = is_circular_source_preset(source)
 
         for index, profile in enumerate(list(source.profiles or [])):
             current_action_lines = [str(line).strip() for line in getattr(profile, "action_lines", ()) or () if str(line).strip()]
-            normalized_action_lines, fixes, _resolved = self._rules().normalize_action_lines(current_action_lines)
+            normalized_action_lines, fixes, _resolved = normalize_action_lines_for_preset(
+                current_action_lines,
+                rules_module=self._rules(),
+                source_is_circular=source_is_circular,
+            )
             if not fixes or normalized_action_lines == current_action_lines:
                 continue
 
@@ -330,13 +342,19 @@ class DirectPresetService:
         if state is None:
             return None
         catalogs = self._strategy_catalogs()
+        source_is_circular = is_circular_source_preset(source)
         return TargetDetailPayload(
             target_key=normalized_key,
             target_item=self._target_metadata.build_ui_item(normalized_key),
             details=state.details,
             strategy_entries=self._strategy_entries_from_candidates(ctx.strategy_candidates, catalogs=catalogs),
-            raw_args_text="\n".join(self._rules().strip_helper_lines(list(state.raw_action_lines))).strip(),
+            raw_args_text=editable_raw_args_text(
+                list(state.raw_action_lines),
+                rules_module=self._rules(),
+                source_is_circular=source_is_circular,
+            ),
             filter_mode=ctx.filter_mode,
+            is_circular_preset=source_is_circular,
         )
 
     def get_target_details(
@@ -385,6 +403,8 @@ class DirectPresetService:
         *,
         strategy_set: str | None = None,
     ) -> bool:
+        if is_circular_source_preset(source):
+            return False
         normalized_key = str(target_key or "").strip().lower()
         contexts = self.collect_target_contexts(source)
         ctx = contexts.get(normalized_key)
@@ -440,9 +460,15 @@ class DirectPresetService:
         state = self._resolve_target_state(source, target_key)
         if state is None:
             return ""
-        return "\n".join(self._rules().strip_helper_lines(list(state.raw_action_lines))).strip()
+        return editable_raw_args_text(
+            list(state.raw_action_lines),
+            rules_module=self._rules(),
+            source_is_circular=is_circular_source_preset(source),
+        )
 
     def update_syndata(self, source: SourcePreset, target_key: str, syndata: SyndataSettings) -> bool:
+        if is_circular_source_preset(source):
+            return False
         normalized_key = str(target_key or "").strip().lower()
         state = self._resolve_target_state(source, normalized_key)
         if state is None:
@@ -466,6 +492,8 @@ class DirectPresetService:
         send: SendSettings | None = None,
         syndata: SyndataSettings | None = None,
     ) -> bool:
+        if is_circular_source_preset(source):
+            return False
         normalized_key = str(target_key or "").strip().lower()
         state = self._resolve_target_state(source, normalized_key)
         if state is None:
@@ -532,12 +560,17 @@ class DirectPresetService:
         labels: list[str] = []
         seen: set[str] = set()
         contexts = self.collect_target_contexts(source)
+        source_is_circular = is_circular_source_preset(source)
 
         for index, profile in enumerate(source.profiles):
             current_action_lines = [str(line).strip() for line in getattr(profile, "action_lines", ()) or () if str(line).strip()]
             if not current_action_lines:
                 continue
-            _normalized, fixes, _resolved = self._rules().normalize_action_lines(current_action_lines)
+            _normalized, fixes, _resolved = normalize_action_lines_for_preset(
+                current_action_lines,
+                rules_module=self._rules(),
+                source_is_circular=source_is_circular,
+            )
             if not fixes:
                 continue
             label = self._warning_label_for_profile(profile, contexts, index)
@@ -588,9 +621,11 @@ class DirectPresetService:
             strategy_set=strategy_set,
             match_lines=profile.match_lines,
         )
-        out_range = self._rules().parse_out_range(profile.action_lines)
-        send = self._rules().parse_send(profile.action_lines)
-        syndata = self._rules().parse_syndata(profile.action_lines)
+        out_range, send, syndata = resolve_transport_settings(
+            profile.action_lines,
+            rules_module=self._rules(),
+            source_is_circular=is_circular_source_preset(source),
+        )
 
         warnings: list[str] = []
         if len(ctx.related_profiles) > 1:

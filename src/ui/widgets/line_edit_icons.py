@@ -28,6 +28,7 @@ class _ClearButtonUpdater(QObject):
         self._icon_name = icon_name
         self._explicit_color = color
         self._size = size
+        self._cleanup_in_progress = False
 
     def update_params(self, *, icon_name: str, color: str | None, size: int) -> None:
         self._icon_name = icon_name
@@ -35,14 +36,18 @@ class _ClearButtonUpdater(QObject):
         self._size = size
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt override)
+        if self._cleanup_in_progress or obj is not self._line_edit:
+            return False
         try:
             if event.type() in (QEvent.Type.StyleChange, QEvent.Type.PaletteChange):
-                QTimer.singleShot(0, self.apply)
+                QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self.apply())
         except Exception:
             pass
         return False
 
     def apply(self) -> None:
+        if self._cleanup_in_progress or self._line_edit is None:
+            return
         try:
             btn = self._line_edit.findChild(QToolButton, "qt_clear_button")
             if not btn:
@@ -79,6 +84,24 @@ class _ClearButtonUpdater(QObject):
         except Exception:
             return
 
+    def cleanup(self) -> None:
+        if self._cleanup_in_progress:
+            return
+        self._cleanup_in_progress = True
+        line_edit = self._line_edit
+        self._line_edit = None
+        if line_edit is None:
+            return
+        try:
+            line_edit.removeEventFilter(self)
+        except Exception:
+            pass
+        try:
+            if getattr(line_edit, "_clear_button_updater", None) is self:
+                delattr(line_edit, "_clear_button_updater")
+        except Exception:
+            pass
+
 
 def set_line_edit_clear_button_icon(
     line_edit: QLineEdit,
@@ -94,7 +117,7 @@ def set_line_edit_clear_button_icon(
     """
 
     updater = getattr(line_edit, "_clear_button_updater", None)
-    if updater is None or not isinstance(updater, _ClearButtonUpdater):
+    if updater is None or not isinstance(updater, _ClearButtonUpdater) or getattr(updater, "_cleanup_in_progress", False):
         updater = _ClearButtonUpdater(
             line_edit,
             icon_name=icon_name,
@@ -106,8 +129,12 @@ def set_line_edit_clear_button_icon(
             line_edit.installEventFilter(updater)
         except Exception:
             pass
+        try:
+            line_edit.destroyed.connect(lambda *_args, u=updater: u.cleanup())
+        except Exception:
+            pass
     else:
         updater.update_params(icon_name=icon_name, color=color, size=size)
 
     # The clear button can be created lazily by Qt; apply on next event loop tick.
-    QTimer.singleShot(0, updater.apply)
+    QTimer.singleShot(0, lambda: (not getattr(updater, "_cleanup_in_progress", False)) and updater.apply())

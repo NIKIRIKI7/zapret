@@ -1185,7 +1185,7 @@ class StrategyScanPageController:
     @staticmethod
     def generate_blob_lines_for_apply(strategy_args: str) -> list[str]:
         try:
-            from launcher_common.blobs import find_used_blobs, get_blobs
+            from blobs.service import find_used_blobs, get_blobs
 
             used = find_used_blobs(strategy_args)
             if not used:
@@ -1241,6 +1241,7 @@ class StrategyScanPageController:
     def apply_strategy(
         cls,
         *,
+        app_context,
         strategy_args: str,
         strategy_name: str,
         scan_target: str,
@@ -1248,9 +1249,11 @@ class StrategyScanPageController:
         scan_udp_games_scope: str,
     ) -> StrategyApplyResult:
         from core.presets.direct_facade import DirectPresetFacade
-        from core.presets.direct_runtime_events import notify_direct_preset_saved
 
-        facade = DirectPresetFacade.from_launch_method("direct_zapret2")
+        facade = DirectPresetFacade.from_launch_method(
+            "direct_zapret2",
+            app_context=app_context,
+        )
         selected_file_name = str(facade.get_selected_file_name() or "").strip()
         if not selected_file_name:
             raise RuntimeError("Не удалось определить выбранный пресет")
@@ -1309,7 +1312,7 @@ class StrategyScanPageController:
         )
 
         facade.save_source_text_by_file_name(selected_file_name, updated_content)
-        notify_direct_preset_saved("direct_zapret2", selected_file_name)
+        facade.notify_preset_saved(selected_file_name)
 
         return StrategyApplyResult(
             strategy_name=strategy_name,

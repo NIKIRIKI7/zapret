@@ -6,13 +6,13 @@ from pathlib import Path
 from core.paths import AppPaths
 
 from .models import PresetManifest
-from .repository import PresetRepository
+from .preset_file_store import PresetFileStore
 
 
 class PresetSelectionService:
-    def __init__(self, paths: AppPaths, repository: PresetRepository):
+    def __init__(self, paths: AppPaths, preset_file_store: PresetFileStore):
         self._paths = paths
-        self._repository = repository
+        self._preset_file_store = preset_file_store
 
     def get_selected_file_name(self, engine: str) -> str | None:
         path = self._selection_path(engine)
@@ -22,16 +22,30 @@ class PresetSelectionService:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             return None
-        return str(payload.get("selected_file_name") or "").strip() or None
+        raw_value = str(payload.get("selected_file_name") or "").strip()
+        if not raw_value:
+            return None
+
+        resolved = str(self._preset_file_store.resolve_file_name(engine, raw_value) or "").strip()
+        if resolved and resolved != raw_value:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    json.dumps({"selected_file_name": resolved}, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+        return resolved or raw_value or None
 
     def get_selected_manifest(self, engine: str) -> PresetManifest | None:
         file_name = self.get_selected_file_name(engine)
         if not file_name:
             return None
-        return self._repository.get_manifest(engine, file_name)
+        return self._preset_file_store.get_manifest(engine, file_name)
 
     def select_preset(self, engine: str, file_name: str) -> PresetManifest:
-        preset = self._repository.get_manifest(engine, file_name)
+        preset = self._preset_file_store.get_manifest(engine, file_name)
         if preset is None:
             raise ValueError(f"Preset not found: {file_name}")
         path = self._selection_path(engine)
@@ -44,7 +58,7 @@ class PresetSelectionService:
 
     def select_preset_file_name_fast(self, engine: str, file_name: str) -> str:
         """Direct selection path that does not depend on preset index.json."""
-        candidate = str(file_name or "").strip()
+        candidate = str(self._preset_file_store.resolve_file_name(engine, file_name) or "").strip()
         if not candidate:
             raise ValueError("Preset file name is required")
 
@@ -69,7 +83,8 @@ class PresetSelectionService:
 
     def ensure_can_delete(self, engine: str, file_name: str) -> None:
         selected_file_name = self.get_selected_file_name(engine)
-        if selected_file_name and selected_file_name.strip().lower() == str(file_name or "").strip().lower():
+        candidate = str(self._preset_file_store.resolve_file_name(engine, file_name) or file_name or "").strip()
+        if selected_file_name and selected_file_name.strip().lower() == candidate.lower():
             raise ValueError("Cannot delete the selected source preset")
 
     def ensure_selected_manifest(self, engine: str, preferred_file_name: str | None = None) -> PresetManifest | None:
@@ -79,11 +94,11 @@ class PresetSelectionService:
 
         preferred_key = str(preferred_file_name or "").strip()
         if preferred_key:
-            preferred = self._repository.get_manifest(engine, preferred_key)
+            preferred = self._preset_file_store.get_manifest(engine, preferred_key)
             if preferred is not None:
                 return self.select_preset(engine, preferred.file_name)
 
-        manifests = self._repository.list_manifests(engine)
+        manifests = self._preset_file_store.list_manifests(engine)
         if not manifests:
             return None
         return self.select_preset(engine, manifests[0].file_name)

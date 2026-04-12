@@ -8,10 +8,8 @@ from .z2_template_runtime import (
     get_default_template_content,
     get_deleted_preset_names,
     get_template_content,
-    invalidate_templates_cache,
     overwrite_templates_to_presets,
 )
-from .z2_builtin_templates import sync_repo_builtins_to_runtime_templates_v2
 from .v1_template_runtime import (
     clear_all_deleted_presets_v1,
     get_builtin_base_from_copy_name_v1,
@@ -21,7 +19,6 @@ from .v1_template_runtime import (
     get_template_content_v1,
     overwrite_v1_templates_to_presets,
 )
-from .v1_builtin_templates import sync_repo_builtins_to_runtime_templates_v1
 
 
 def _resolve_reset_template_v2_from_runtime(preset_name: str) -> str:
@@ -52,29 +49,17 @@ def resolve_reset_template(launch_method: str, preset_name: str) -> str:
     method = str(launch_method or "").strip().lower()
     if method == "direct_zapret2":
         content = _resolve_reset_template_v2_from_runtime(preset_name)
-        if content:
-            return content
-
-        sync_repo_builtins_to_runtime_templates_v2()
-        invalidate_templates_cache()
-        return _resolve_reset_template_v2_from_runtime(preset_name)
+        return content if content else ""
 
     content = _resolve_reset_template_v1_from_runtime(preset_name)
-    if content:
-        return content
-
-    sync_repo_builtins_to_runtime_templates_v1()
-    return _resolve_reset_template_v1_from_runtime(preset_name)
+    return content if content else ""
 
 
 def reset_all_templates(launch_method: str) -> tuple[int, int, list[str]]:
     method = str(launch_method or "").strip().lower()
     if method == "direct_zapret2":
-        sync_repo_builtins_to_runtime_templates_v2()
-        invalidate_templates_cache()
         return overwrite_templates_to_presets()
 
-    sync_repo_builtins_to_runtime_templates_v1()
     return overwrite_v1_templates_to_presets()
 
 
@@ -83,15 +68,12 @@ def restore_deleted_templates(launch_method: str) -> None:
     if method == "direct_zapret2":
         from .z2_template_runtime import ensure_templates_copied_to_presets
 
-        sync_repo_builtins_to_runtime_templates_v2()
-        invalidate_templates_cache()
         clear_all_deleted_presets()
         ensure_templates_copied_to_presets()
         return
 
     from .v1_template_runtime import ensure_v1_templates_copied_to_presets
 
-    sync_repo_builtins_to_runtime_templates_v1()
     clear_all_deleted_presets_v1()
     ensure_v1_templates_copied_to_presets()
 

@@ -168,11 +168,11 @@ class PremiumPageController:
     @staticmethod
     def resolve_checker_bundle() -> PremiumCheckerInitResult:
         try:
-            from donater.donate import DonateChecker
+            from donater.service import get_premium_service
             from donater.storage import PremiumStorage
 
             return PremiumCheckerInitResult(
-                checker=DonateChecker(),
+                checker=get_premium_service(),
                 storage=PremiumStorage,
                 init_ok=True,
             )
@@ -567,7 +567,7 @@ class PremiumPageController:
     def reset_premium_storage(checker, storage) -> None:
         try:
             if checker:
-                checker.clear_saved_key()
+                checker.clear_activation()
                 return
         except Exception:
             pass

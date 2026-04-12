@@ -1,6 +1,5 @@
 # Preset: Default
 # TemplateOrigin: Default
-# Created: 2026-01-01T00:00:00
 # IconColor: #a8c5ff
 # Description: Default Zapret 1 preset
 

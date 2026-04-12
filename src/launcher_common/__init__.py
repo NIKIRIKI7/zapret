@@ -33,25 +33,25 @@ def apply_all_filters(*args, **kwargs):
 
 
 def build_args_with_deduped_blobs(*args, **kwargs):
-    from .blobs import build_args_with_deduped_blobs as _impl
+    from blobs.service import build_args_with_deduped_blobs as _impl
     return _impl(*args, **kwargs)
 
 
 def get_blobs_info(*args, **kwargs):
-    from .blobs import get_blobs_info as _impl
+    from blobs.service import get_blobs_info as _impl
     return _impl(*args, **kwargs)
 
 
 def save_user_blob(*args, **kwargs):
-    from .blobs import save_user_blob as _impl
+    from blobs.service import save_user_blob as _impl
     return _impl(*args, **kwargs)
 
 
 def delete_user_blob(*args, **kwargs):
-    from .blobs import delete_user_blob as _impl
+    from blobs.service import delete_user_blob as _impl
     return _impl(*args, **kwargs)
 
 
 def reload_blobs(*args, **kwargs):
-    from .blobs import reload_blobs as _impl
+    from blobs.service import reload_blobs as _impl
     return _impl(*args, **kwargs)

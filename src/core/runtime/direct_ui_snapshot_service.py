@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -58,6 +58,7 @@ class DirectBasicUiSnapshotWorker(QThread):
         self,
         request_id: int,
         *,
+        snapshot_service: "DirectUiSnapshotService",
         launch_method: str,
         refresh: bool = False,
         startup_scope: str | None = None,
@@ -65,14 +66,13 @@ class DirectBasicUiSnapshotWorker(QThread):
     ) -> None:
         super().__init__(parent)
         self._request_id = int(request_id)
+        self._snapshot_service = snapshot_service
         self._launch_method = str(launch_method or "").strip().lower()
         self._refresh = bool(refresh)
         self._startup_scope = startup_scope
 
     def run(self) -> None:
-        from app_context import require_app_context
-
-        snapshot = require_app_context().direct_ui_snapshot_service.get_basic_ui_snapshot(
+        snapshot = self._snapshot_service.get_basic_ui_snapshot(
             self._launch_method,
             refresh=self._refresh,
             startup_scope=self._startup_scope,
@@ -87,6 +87,7 @@ class DirectTargetDetailSnapshotWorker(QThread):
         self,
         request_id: int,
         *,
+        snapshot_service: "DirectUiSnapshotService",
         launch_method: str,
         target_key: str,
         refresh: bool = False,
@@ -94,14 +95,13 @@ class DirectTargetDetailSnapshotWorker(QThread):
     ) -> None:
         super().__init__(parent)
         self._request_id = int(request_id)
+        self._snapshot_service = snapshot_service
         self._launch_method = str(launch_method or "").strip().lower()
         self._target_key = str(target_key or "").strip().lower()
         self._refresh = bool(refresh)
 
     def run(self) -> None:
-        from app_context import require_app_context
-
-        snapshot = require_app_context().direct_ui_snapshot_service.get_target_detail_snapshot(
+        snapshot = self._snapshot_service.get_target_detail_snapshot(
             self._launch_method,
             self._target_key,
             refresh=self._refresh,
@@ -117,7 +117,8 @@ class DirectUiSnapshotService:
     source preset и текущему режиму direct UI.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, facade_factory: Callable[[str], DirectPresetFacade]) -> None:
+        self._facade_factory = facade_factory
         self._lock = RLock()
         self._basic_payload_cache: dict[str, _SnapshotCache[BasicUiPayload]] = {}
         self._target_detail_cache: dict[tuple[str, str], _SnapshotCache[TargetDetailPayload | None]] = {}
@@ -140,7 +141,7 @@ class DirectUiSnapshotService:
         return str(launch_method or "").strip().lower()
 
     def _facade(self, launch_method: str) -> DirectPresetFacade:
-        return DirectPresetFacade.from_launch_method(self._normalize_launch_method(launch_method))
+        return self._facade_factory(self._normalize_launch_method(launch_method))
 
     def _resolve_selected_source_revision(self, launch_method: str) -> tuple[object, ...]:
         method = self._normalize_launch_method(launch_method)

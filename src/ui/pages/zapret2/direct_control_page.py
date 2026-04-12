@@ -6,27 +6,35 @@ import time as _time
 import webbrowser
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QSizePolicy,
-)
 
 from ui.pages.base_page import BasePage
+from ui.pages.zapret2.direct_control_page_build import (
+    build_z2_direct_management_section,
+    build_z2_direct_preset_section,
+    build_z2_direct_status_section,
+)
+from ui.pages.zapret2.direct_control_page_deferred_build import (
+    build_z2_direct_deferred_sections,
+)
+from ui.pages.zapret2.direct_control_page_runtime_helpers import (
+    apply_advanced_settings_plan,
+    apply_direct_language,
+    apply_program_settings_snapshot,
+    apply_status_plan,
+    run_confirmation_dialog,
+    set_toggle_checked,
+    show_action_result_plan,
+    sync_direct_mode_label,
+)
 from ui.compat_widgets import (
     ActionButton,
-    build_advanced_settings_section,
     PrimaryActionButton,
-    PulsingDot,
     ResetActionButton,
     SettingsCard,
     enable_setting_card_group_auto_height,
     set_tooltip,
 )
 from ui.main_window_state import AppUiState, MainWindowStateStore
-from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from ui.text_catalog import tr as tr_catalog
 from ui.window_action_controller import (
     open_connection_test,
@@ -193,6 +201,8 @@ class Zapret2DirectControlPage(BasePage):
 
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
+        self._program_settings_runtime_unsubscribe = None
+        self._cleanup_in_progress = False
         self._program_settings_runtime_attached = False
         self._startup_showevent_profile_logged = False
         self._deferred_sections_built = False
@@ -257,6 +267,8 @@ class Zapret2DirectControlPage(BasePage):
         open_folder(self)
 
     def _apply_pending_direct_refresh_if_ready(self) -> None:
+        if self._cleanup_in_progress:
+            return
         if not self.is_page_ready():
             return
         _t_show = _time.perf_counter()
@@ -282,14 +294,14 @@ class Zapret2DirectControlPage(BasePage):
         display_name = os.path.splitext(os.path.basename(file_name))[0].strip() or file_name
         return display_name, display_name
 
-    def _get_selection_service(self):
+    def _require_app_context(self):
         app_context = getattr(self.window(), "app_context", None)
-        service = getattr(app_context, "preset_selection_service", None)
-        if service is None:
-            from app_context import require_app_context
+        if app_context is None:
+            raise RuntimeError("AppContext is required for Zapret2 direct control page")
+        return app_context
 
-            service = require_app_context().preset_selection_service
-        return service
+    def _get_selection_service(self):
+        return self._require_app_context().preset_selection_service
 
     def _apply_selected_preset_name_fast(self) -> None:
         default_text = tr_catalog(
@@ -310,6 +322,8 @@ class Zapret2DirectControlPage(BasePage):
         set_tooltip(self.preset_name_label, tooltip)
 
     def _run_deferred_show_work(self) -> None:
+        if self._cleanup_in_progress:
+            return
         if not self.isVisible():
             return
 
@@ -321,7 +335,7 @@ class Zapret2DirectControlPage(BasePage):
                 "showEvent.build_deferred_sections",
                 (_time.perf_counter() - _t_build) * 1000,
             )
-            QTimer.singleShot(0, self._run_deferred_show_work)
+            QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self._run_deferred_show_work())
             return
 
         if not self._deferred_sections_hydrated:
@@ -353,197 +367,73 @@ class Zapret2DirectControlPage(BasePage):
         _t_total = _time.perf_counter()
         # Статус работы
         _t_status = _time.perf_counter()
-        self.status_section_label = self.add_section_title(
-            return_widget=True,
-            text_key="page.z2_control.section.status",
+        status_widgets = build_z2_direct_status_section(
+            add_section_title=self.add_section_title,
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            has_fluent_labels=_HAS_FLUENT_LABELS,
+            strong_body_label_cls=StrongBodyLabel,
+            caption_label_cls=CaptionLabel,
         )
-
-        status_card = SettingsCard()
-        self.status_card = status_card
-        status_layout = QHBoxLayout()
-        status_layout.setSpacing(16)
-
-        self.status_dot = PulsingDot()
-        status_layout.addWidget(self.status_dot)
-
-        status_text = QVBoxLayout()
-        status_text.setContentsMargins(0, 0, 0, 0)
-        status_text.setSpacing(2)
-
-        if _HAS_FLUENT_LABELS:
-            self.status_title = StrongBodyLabel(tr_catalog("page.z2_control.status.checking", language=self._ui_language, default="Проверка..."))
-            self.status_desc = CaptionLabel(tr_catalog("page.z2_control.status.detecting", language=self._ui_language, default="Определение состояния процесса"))
-        else:
-            self.status_title = QLabel(tr_catalog("page.z2_control.status.checking", language=self._ui_language, default="Проверка..."))
-            self.status_title.setStyleSheet("QLabel { font-size: 15px; font-weight: 600; }")
-            self.status_desc = QLabel(tr_catalog("page.z2_control.status.detecting", language=self._ui_language, default="Определение состояния процесса"))
-            self.status_desc.setStyleSheet("QLabel { font-size: 12px; }")
-        status_text.addWidget(self.status_title)
-        status_text.addWidget(self.status_desc)
-
-        status_layout.addLayout(status_text, 1)
-        status_card.add_layout(status_layout)
-        self.add_widget(status_card)
+        self.status_section_label = status_widgets.section_label
+        self.status_card = status_widgets.card
+        self.status_dot = status_widgets.status_dot
+        self.status_title = status_widgets.status_title
+        self.status_desc = status_widgets.status_desc
+        self.add_widget(status_widgets.card)
         _log_startup_z2_control_metric("_build_ui.status_card", (_time.perf_counter() - _t_status) * 1000)
 
         self.add_spacing(16)
 
         # Управление
         _t_control = _time.perf_counter()
-        self.control_section_label = self.add_section_title(
-            return_widget=True,
-            text_key="page.z2_control.section.management",
+        management_widgets = build_z2_direct_management_section(
+            add_section_title=self.add_section_title,
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            has_fluent_labels=_HAS_FLUENT_LABELS,
+            caption_label_cls=CaptionLabel,
+            indeterminate_progress_bar_cls=IndeterminateProgressBar,
+            big_action_button_cls=BigActionButton,
+            stop_button_cls=StopButton,
+            on_start=self._start_dpi,
+            on_stop=self._stop_dpi,
+            on_stop_and_exit=self._stop_and_exit,
+            parent=self,
         )
-
-        control_card = SettingsCard()
-        self.control_card_card = control_card
-
-        buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(12)
-
-        self.start_btn = BigActionButton(tr_catalog("page.z2_control.button.start", language=self._ui_language, default="Запустить Zapret"), "fa5s.play", accent=True)
-        self.start_btn.clicked.connect(self._start_dpi)
-        buttons_layout.addWidget(self.start_btn)
-
-        self.stop_winws_btn = StopButton(tr_catalog("page.z2_control.button.stop_only_winws", language=self._ui_language, default="Остановить только winws.exe"), "fa5s.stop")
-        self.stop_winws_btn.clicked.connect(self._stop_dpi)
-        self.stop_winws_btn.setVisible(False)
-        buttons_layout.addWidget(self.stop_winws_btn)
-
-        self.stop_and_exit_btn = StopButton(tr_catalog("page.z2_control.button.stop_and_exit", language=self._ui_language, default="Остановить и закрыть программу"), "fa5s.power-off")
-        self.stop_and_exit_btn.clicked.connect(self._stop_and_exit)
-        self.stop_and_exit_btn.setVisible(False)
-        buttons_layout.addWidget(self.stop_and_exit_btn)
-
-        buttons_layout.addStretch()
-        control_card.add_layout(buttons_layout)
-
-        # Индикатор загрузки держим под кнопками, чтобы при показе
-        # не сдвигать основной ряд действий вниз.
-        self.progress_bar = IndeterminateProgressBar(self)
-        self.progress_bar.setVisible(False)
-        control_card.add_widget(self.progress_bar)
-
-        if _HAS_FLUENT_LABELS:
-            self.loading_label = CaptionLabel("")
-        else:
-            self.loading_label = QLabel("")
-            self.loading_label.setStyleSheet("QLabel { font-size: 12px; padding-top: 4px; }")
-        self.loading_label.setVisible(False)
-        control_card.add_widget(self.loading_label)
-        self.add_widget(control_card)
+        self.control_section_label = management_widgets.section_label
+        self.control_card_card = management_widgets.card
+        self.start_btn = management_widgets.start_btn
+        self.stop_winws_btn = management_widgets.stop_winws_btn
+        self.stop_and_exit_btn = management_widgets.stop_and_exit_btn
+        self.progress_bar = management_widgets.progress_bar
+        self.loading_label = management_widgets.loading_label
+        self.add_widget(management_widgets.card)
         _log_startup_z2_control_metric("_build_ui.control_card", (_time.perf_counter() - _t_control) * 1000)
 
         self.add_spacing(16)
 
         # ── Запуск: две вертикальные WinUI-карточки ──────────────────────
         _t_preset = _time.perf_counter()
-        self.preset_section_label = self.add_section_title(
-            return_widget=True,
-            text_key="page.z2_control.section.preset_switch",
+        preset_widgets = build_z2_direct_preset_section(
+            add_section_title=self.add_section_title,
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            card_widget_cls=CardWidget,
+            strong_body_label_cls=StrongBodyLabel,
+            caption_label_cls=CaptionLabel,
+            push_button_cls=PushButton,
+            fluent_icon=FluentIcon,
+            on_open_presets=self.navigate_to_presets.emit,
         )
-
-        # Card A — Выбранный source-пресет (single-row: icon | text | button)
-        preset_card = CardWidget()
-        self.preset_card = preset_card
-        preset_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        preset_row = QHBoxLayout(preset_card)
-        preset_row.setContentsMargins(16, 14, 16, 14)
-        preset_row.setSpacing(12)
-
-        preset_icon_lbl = QLabel()
-        preset_icon_lbl.setPixmap(get_cached_qta_pixmap("fa5s.star", color="#ffc107", size=20))
-        preset_icon_lbl.setFixedSize(24, 24)
-        preset_row.addWidget(preset_icon_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
-
-        preset_col = QVBoxLayout()
-        preset_col.setSpacing(2)
-        self.preset_name_label = StrongBodyLabel(tr_catalog("page.z2_control.preset.not_selected", language=self._ui_language, default="Не выбран"))
-        preset_col.addWidget(self.preset_name_label)
-        self.current_preset_caption = CaptionLabel(tr_catalog("page.z2_control.preset.current", language=self._ui_language, default="Текущий активный пресет"))
-        preset_col.addWidget(self.current_preset_caption)
-        preset_row.addLayout(preset_col, 1)
-
-        presets_btn = PushButton()
-        presets_btn.setText(tr_catalog("page.z2_control.button.my_presets", language=self._ui_language, default="Мои пресеты"))
-        presets_btn.setIcon(FluentIcon.FOLDER)
-        presets_btn.clicked.connect(self.navigate_to_presets.emit)
-        preset_row.addWidget(presets_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.presets_btn = presets_btn
-        self.add_widget(preset_card)
+        self.preset_section_label = preset_widgets.section_label
+        self.preset_card = preset_widgets.card
+        self.preset_name_label = preset_widgets.preset_name_label
+        self.current_preset_caption = preset_widgets.current_preset_caption
+        self.presets_btn = preset_widgets.presets_btn
+        self.add_widget(preset_widgets.card)
         _log_startup_z2_control_metric("_build_ui.preset_card", (_time.perf_counter() - _t_preset) * 1000)
         _log_startup_z2_control_metric("_build_ui.total", (_time.perf_counter() - _t_total) * 1000)
 
     def _build_deferred_sections(self) -> None:
         self.add_spacing(8)
-
-        _t_direct = _time.perf_counter()
-        self.direct_section_label = self.add_section_title(
-            return_widget=True,
-            text_key="page.z2_control.section.direct_tuning",
-        )
-
-        direct_card = CardWidget()
-        self.direct_card = direct_card
-        direct_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        direct_row = QHBoxLayout(direct_card)
-        direct_row.setContentsMargins(16, 14, 16, 14)
-        direct_row.setSpacing(12)
-
-        direct_icon_lbl = QLabel()
-        direct_icon_lbl.setPixmap(get_cached_qta_pixmap("fa5s.play", color="#60cdff", size=20))
-        direct_icon_lbl.setFixedSize(24, 24)
-        direct_row.addWidget(direct_icon_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
-
-        direct_col = QVBoxLayout()
-        direct_col.setSpacing(2)
-        self.direct_mode_label = StrongBodyLabel(
-            tr_catalog("page.z2_control.mode.basic", language=self._ui_language, default="Basic")
-        )
-        direct_col.addWidget(self.direct_mode_label)
-        self.direct_mode_caption = CaptionLabel(
-            tr_catalog("page.z2_control.direct_mode.caption", language=self._ui_language, default="Режим прямого запуска")
-        )
-        direct_col.addWidget(self.direct_mode_caption)
-        direct_row.addLayout(direct_col, 1)
-
-        direct_btns = QHBoxLayout()
-        direct_btns.setSpacing(4)
-        open_btn = PushButton()
-        open_btn.setText(tr_catalog("page.z2_control.button.open", language=self._ui_language, default="Открыть"))
-        open_btn.setIcon(FluentIcon.PLAY)
-        open_btn.clicked.connect(self._open_direct_launch_page)
-        mode_btn = TransparentPushButton()
-        mode_btn.setText(tr_catalog("page.z2_control.button.change_mode", language=self._ui_language, default="Изменить режим"))
-        mode_btn.clicked.connect(self._open_direct_mode_dialog)
-        direct_btns.addWidget(open_btn)
-        direct_btns.addWidget(mode_btn)
-        self.direct_open_btn = open_btn
-        self.direct_mode_btn = mode_btn
-        direct_row.addLayout(direct_btns)
-        self.add_widget(direct_card)
-        _log_startup_z2_control_metric("_build_ui.direct_card.deferred", (_time.perf_counter() - _t_direct) * 1000)
-
-        self.add_spacing(8)
-        self.add_spacing(16)
-
-        _t_program = _time.perf_counter()
-        program_settings_title = tr_catalog(
-            "page.z2_control.section.program_settings",
-            language=self._ui_language,
-            default="Настройки программы",
-        )
-        if SettingCardGroup is not None and PushSettingCard is not None and _HAS_FLUENT_LABELS:
-            self.program_settings_section_label = None
-            program_settings_card = SettingCardGroup(program_settings_title, self.content)
-        else:
-            self.program_settings_section_label = self.add_section_title(
-                return_widget=True,
-                text_key="page.z2_control.section.program_settings",
-            )
-            program_settings_card = SettingsCard()
-        self.program_settings_card = program_settings_card
-
         try:
             from ui.widgets.win11_controls import Win11ToggleRow
         except Exception:
@@ -551,227 +441,88 @@ class Zapret2DirectControlPage(BasePage):
 
         if Win11ToggleRow is None:
             raise RuntimeError("Win11ToggleRow недоступен для страницы управления Zapret 2")
-
-        self.auto_dpi_toggle = Win11ToggleRow(
-            "fa5s.bolt",
-            tr_catalog("page.z2_control.setting.autostart.title", language=self._ui_language, default="Автозапуск DPI после старта программы"),
-            tr_catalog(
-                "page.z2_control.setting.autostart.desc",
-                language=self._ui_language,
-                default="После запуска ZapretGUI автоматически запускать текущий DPI-режим",
-            ),
+        deferred_widgets = build_z2_direct_deferred_sections(
+            add_section_title=self.add_section_title,
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            content_parent=self.content,
+            has_fluent_labels=_HAS_FLUENT_LABELS,
+            strong_body_label_cls=StrongBodyLabel,
+            caption_label_cls=CaptionLabel,
+            push_button_cls=PushButton,
+            transparent_push_button_cls=TransparentPushButton,
+            setting_card_group_cls=SettingCardGroup,
+            push_setting_card_cls=PushSettingCard,
+            card_widget_cls=CardWidget,
+            fluent_icon=FluentIcon,
+            reset_action_button_cls=ResetActionButton,
+            settings_card_cls=SettingsCard,
+            win11_toggle_row_cls=Win11ToggleRow,
+            on_open_direct_launch_page=self._open_direct_launch_page,
+            on_open_direct_mode_dialog=self._open_direct_mode_dialog,
+            on_auto_dpi_toggled=self._on_auto_dpi_toggled,
+            on_defender_toggled=self._on_defender_toggled,
+            on_max_blocker_toggled=self._on_max_blocker_toggled,
+            on_confirm_reset_program_clicked=self._confirm_reset_program_clicked,
+            on_reset_program_clicked=self._on_reset_program_clicked,
+            on_discord_restart_changed=self._on_discord_restart_changed,
+            on_wssize_toggled=self._on_wssize_toggled,
+            on_debug_log_toggled=self._on_debug_log_toggled,
+            on_navigate_to_blobs=self.navigate_to_blobs.emit,
+            on_open_connection_test=self._open_connection_test,
+            on_open_folder=self._open_folder,
+            on_open_docs=self._open_docs,
         )
-        self.auto_dpi_toggle.toggled.connect(self._on_auto_dpi_toggled)
 
-        self.defender_toggle = Win11ToggleRow(
-            "fa5s.shield-alt",
-            tr_catalog(
-                "page.z2_control.setting.defender.title",
-                language=self._ui_language,
-                default="Отключить Windows Defender",
-            ),
-            tr_catalog(
-                "page.z2_control.setting.defender.desc",
-                language=self._ui_language,
-                default="Требуются права администратора",
-            ),
-        )
-        self.defender_toggle.toggled.connect(self._on_defender_toggled)
+        self.direct_section_label = deferred_widgets.direct_section_label
+        self.direct_card = deferred_widgets.direct_card
+        self.direct_mode_label = deferred_widgets.direct_mode_label
+        self.direct_mode_caption = deferred_widgets.direct_mode_caption
+        self.direct_open_btn = deferred_widgets.direct_open_btn
+        self.direct_mode_btn = deferred_widgets.direct_mode_btn
+        self.add_widget(self.direct_card)
 
-        self.max_block_toggle = Win11ToggleRow(
-            "fa5s.ban",
-            tr_catalog(
-                "page.z2_control.setting.max_block.title",
-                language=self._ui_language,
-                default="Блокировать установку MAX",
-            ),
-            tr_catalog(
-                "page.z2_control.setting.max_block.desc",
-                language=self._ui_language,
-                default="Блокирует запуск/установку MAX и домены в hosts",
-            ),
-        )
-        self.max_block_toggle.toggled.connect(self._on_max_blocker_toggled)
-
-        add_setting_card = getattr(program_settings_card, "addSettingCard", None)
-        if callable(add_setting_card):
-            add_setting_card(self.auto_dpi_toggle)
-            add_setting_card(self.defender_toggle)
-            add_setting_card(self.max_block_toggle)
-        else:
-            program_settings_card.add_widget(self.auto_dpi_toggle)
-            program_settings_card.add_widget(self.defender_toggle)
-            program_settings_card.add_widget(self.max_block_toggle)
-
-        if callable(add_setting_card) and PushSettingCard is not None:
-            self.reset_program_card = PushSettingCard(
-                tr_catalog("page.z2_control.button.reset", language=self._ui_language, default="Сбросить"),
-                get_themed_qta_icon("fa5s.undo", color="#ff9800"),
-                tr_catalog("page.z2_control.setting.reset.title", language=self._ui_language, default="Сбросить программу"),
-                tr_catalog(
-                    "page.z2_control.setting.reset.desc",
-                    language=self._ui_language,
-                    default="Очистить кэш проверок запуска (без удаления пресетов/настроек)",
-                ),
-            )
-            self.reset_program_card.clicked.connect(self._confirm_reset_program_clicked)
-            add_setting_card(self.reset_program_card)
-            self.add_widget(program_settings_card)
-        else:
-            self.reset_program_btn = ResetActionButton(
-                tr_catalog("page.z2_control.button.reset", language=self._ui_language, default="Сбросить"),
-                confirm_text=tr_catalog("page.z2_control.button.reset_confirm", language=self._ui_language, default="Сбросить?"),
-            )
-            self.reset_program_btn.setProperty("noDrag", True)
-            self.reset_program_btn.reset_confirmed.connect(self._on_reset_program_clicked)
-            reset_card = SettingsCard(
-                tr_catalog("page.z2_control.setting.reset.title", language=self._ui_language, default="Сбросить программу")
-            )
-            reset_desc_label = CaptionLabel(
-                tr_catalog(
-                    "page.z2_control.setting.reset.desc",
-                    language=self._ui_language,
-                    default="Очистить кэш проверок запуска (без удаления пресетов/настроек)",
-                )
-            ) if _HAS_FLUENT_LABELS else QLabel(
-                tr_catalog(
-                    "page.z2_control.setting.reset.desc",
-                    language=self._ui_language,
-                    default="Очистить кэш проверок запуска (без удаления пресетов/настроек)",
-                )
-            )
-            reset_desc_label.setWordWrap(True)
-            self._reset_program_desc_label = reset_desc_label
-            reset_card.add_widget(reset_desc_label)
-            reset_layout = QHBoxLayout()
-            reset_layout.setSpacing(8)
-            reset_layout.addWidget(self.reset_program_btn)
-            reset_layout.addStretch()
-            reset_card.add_layout(reset_layout)
-            self.reset_program_card = reset_card
-            self.add_widget(program_settings_card)
-            self.add_widget(reset_card)
-        enable_setting_card_group_auto_height(self.program_settings_card)
-        _log_startup_z2_control_metric("_build_ui.program_settings_rows.deferred", (_time.perf_counter() - _t_program) * 1000)
-
+        self.program_settings_section_label = deferred_widgets.program_settings_section_label
+        self.program_settings_card = deferred_widgets.program_settings_card
+        self.auto_dpi_toggle = deferred_widgets.auto_dpi_toggle
+        self.defender_toggle = deferred_widgets.defender_toggle
+        self.max_block_toggle = deferred_widgets.max_block_toggle
+        self.reset_program_card = deferred_widgets.reset_program_card
+        self.reset_program_btn = deferred_widgets.reset_program_btn
+        self._reset_program_desc_label = deferred_widgets.reset_program_desc_label
+        self.add_spacing(8)
         self.add_spacing(16)
+        self.add_widget(self.program_settings_card)
+        if deferred_widgets.program_settings_section_label is not None:
+            pass
+        if deferred_widgets.reset_program_btn is not None:
+            self.add_widget(self.reset_program_card)
+        enable_setting_card_group_auto_height(self.program_settings_card)
 
-        _t_advanced = _time.perf_counter()
         self.advanced_settings_section_label = None
-
-        try:
-            from ui.widgets.win11_controls import Win11ToggleRow
-        except Exception:
-            Win11ToggleRow = None  # type: ignore[assignment]
-
-        self.discord_restart_toggle = (
-            Win11ToggleRow(
-                "mdi.discord",
-                "Перезапуск Discord",
-                "Автоперезапуск при смене стратегии",
-                "#7289da",
-            )
-            if Win11ToggleRow
-            else None
-        )
-        if self.discord_restart_toggle:
-            self.discord_restart_toggle.toggled.connect(self._on_discord_restart_changed)
-
-        self.wssize_toggle = (
-            Win11ToggleRow(
-                "fa5s.ruler-horizontal",
-                "Включить --wssize",
-                "Добавляет параметр размера окна TCP",
-            )
-            if Win11ToggleRow
-            else None
-        )
-        if self.wssize_toggle:
-            self.wssize_toggle.toggled.connect(self._on_wssize_toggled)
-
-        self.debug_log_toggle = (
-            Win11ToggleRow(
-                "mdi.file-document-outline",
-                "Включить лог-файл (--debug)",
-                "Записывает логи winws в папку logs",
-            )
-            if Win11ToggleRow
-            else None
-        )
-        if self.debug_log_toggle:
-            self.debug_log_toggle.toggled.connect(self._on_debug_log_toggled)
-
-        self.blobs_action_card = PushSettingCard(
-            tr_catalog("page.z2_control.button.open", language=self._ui_language, default="Открыть"),
-            get_themed_qta_icon("fa5s.file-archive", color=get_theme_tokens().accent_hex),
-            tr_catalog("page.z2_control.blobs.title", language=self._ui_language, default="Блобы"),
-            tr_catalog("page.z2_control.blobs.desc", language=self._ui_language, default="Бинарные данные (.bin / hex) для стратегий"),
-        )
-        self.blobs_action_card.clicked.connect(self.navigate_to_blobs.emit)
-        self.blobs_open_btn = self.blobs_action_card.button
-
-        self.advanced_card, self.advanced_notice = build_advanced_settings_section(
-            title=tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"),
-            warning_text=tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="Изменяйте только если знаете что делаете"),
-            parent=self.content,
-            toggle_rows=[
-                self.discord_restart_toggle,
-                self.wssize_toggle,
-                self.debug_log_toggle,
-            ],
-            action_rows=[self.blobs_action_card],
-        )
-
+        self.discord_restart_toggle = deferred_widgets.discord_restart_toggle
+        self.wssize_toggle = deferred_widgets.wssize_toggle
+        self.debug_log_toggle = deferred_widgets.debug_log_toggle
+        self.blobs_action_card = deferred_widgets.blobs_action_card
+        self.blobs_open_btn = deferred_widgets.blobs_open_btn
+        self.advanced_card = deferred_widgets.advanced_card
+        self.advanced_notice = deferred_widgets.advanced_notice
+        self.add_spacing(16)
         self.add_widget(self.advanced_card)
-        _log_startup_z2_control_metric("_build_ui.advanced_settings_block.deferred", (_time.perf_counter() - _t_advanced) * 1000)
 
-        _t_extra = _time.perf_counter()
-        self.extra_section_label = self.add_section_title(
-            return_widget=True,
-            text_key="page.z2_control.section.additional",
-        )
-        extra_card = SettingsCard()
-        self.extra_card = extra_card
-        extra_layout = QHBoxLayout()
-        extra_layout.setSpacing(8)
-        self.test_btn = ActionButton(tr_catalog("page.z2_control.button.connection_test", language=self._ui_language, default="Тест соединения"), "fa5s.wifi")
-        self.test_btn.clicked.connect(self._open_connection_test)
-        extra_layout.addWidget(self.test_btn)
-        self.folder_btn = ActionButton(tr_catalog("page.z2_control.button.open_folder", language=self._ui_language, default="Открыть папку"), "fa5s.folder-open")
-        self.folder_btn.clicked.connect(self._open_folder)
-        extra_layout.addWidget(self.folder_btn)
-        self.docs_btn = ActionButton(tr_catalog("page.z2_control.button.documentation", language=self._ui_language, default="Документация"), "fa5s.book")
-        self.docs_btn.clicked.connect(self._open_docs)
-        extra_layout.addWidget(self.docs_btn)
-        extra_layout.addStretch()
-        extra_card.add_layout(extra_layout)
-        self.add_widget(extra_card)
-        _log_startup_z2_control_metric("_build_ui.extra_actions.deferred", (_time.perf_counter() - _t_extra) * 1000)
+        self.extra_section_label = deferred_widgets.extra_section_label
+        self.extra_card = deferred_widgets.extra_card
+        self.test_btn = deferred_widgets.test_btn
+        self.folder_btn = deferred_widgets.folder_btn
+        self.docs_btn = deferred_widgets.docs_btn
+        self.add_widget(self.extra_card)
 
     def _apply_advanced_settings_plan(self, plan) -> None:
-        try:
-            toggle = getattr(self, "discord_restart_toggle", None)
-            set_checked = getattr(toggle, "setChecked", None)
-            if callable(set_checked):
-                set_checked(bool(plan.discord_restart), block_signals=True)
-        except Exception:
-            pass
-
-        try:
-            wssize_toggle = getattr(self, "wssize_toggle", None)
-            set_checked = getattr(wssize_toggle, "setChecked", None)
-            if callable(set_checked):
-                set_checked(bool(plan.wssize_enabled), block_signals=True)
-        except Exception:
-            pass
-
-        try:
-            debug_toggle = getattr(self, "debug_log_toggle", None)
-            set_checked = getattr(debug_toggle, "setChecked", None)
-            if callable(set_checked):
-                set_checked(bool(plan.debug_log_enabled), block_signals=True)
-        except Exception:
-            pass
+        apply_advanced_settings_plan(
+            plan,
+            discord_restart_toggle=self.discord_restart_toggle,
+            wssize_toggle=self.wssize_toggle,
+            debug_log_toggle=self.debug_log_toggle,
+        )
 
     def _schedule_advanced_settings_reload(self, *, force: bool = False) -> None:
         runtime = self._refresh_runtime
@@ -790,7 +541,11 @@ class Zapret2DirectControlPage(BasePage):
                 pass
 
         request_id = runtime.next_advanced_settings_request_id()
-        worker = Zapret2DirectControlPageController.create_advanced_settings_worker(request_id, self)
+        worker = Zapret2DirectControlPageController.create_advanced_settings_worker(
+            request_id,
+            self._require_app_context().direct_ui_snapshot_service,
+            self,
+        )
         runtime.advanced_settings_worker = worker
         worker.loaded.connect(self._on_advanced_settings_loaded)
         worker.finished.connect(worker.deleteLater)
@@ -808,19 +563,22 @@ class Zapret2DirectControlPage(BasePage):
 
     def _on_wssize_toggled(self, enabled: bool) -> None:
         self._refresh_runtime.mark_advanced_settings_written()
-        Zapret2DirectControlPageController.save_wssize_enabled(enabled)
+        Zapret2DirectControlPageController.save_wssize_enabled(
+            enabled,
+            app_context=self._require_app_context(),
+        )
 
     def _on_debug_log_toggled(self, enabled: bool) -> None:
         self._refresh_runtime.mark_advanced_settings_written()
-        Zapret2DirectControlPageController.save_debug_log_enabled(enabled)
+        Zapret2DirectControlPageController.save_debug_log_enabled(
+            enabled,
+            app_context=self._require_app_context(),
+        )
 
     # ==================== Direct mode UI: Basic/Advanced ====================
 
     def _sync_direct_launch_mode_from_settings(self) -> None:
-        if self.direct_mode_label is None:
-            return
-        plan = Zapret2DirectControlPageController.build_direct_mode_label_plan(language=self._ui_language)
-        self.direct_mode_label.setText(plan.label_text)
+        sync_direct_mode_label(language=self._ui_language, direct_mode_label=self.direct_mode_label)
 
     def _open_direct_mode_dialog(self) -> None:
         current = Zapret2DirectControlPageController.get_direct_launch_mode_setting()
@@ -852,35 +610,7 @@ class Zapret2DirectControlPage(BasePage):
             self._sync_direct_launch_mode_from_settings()
 
     def _set_toggle_checked(self, toggle, checked: bool) -> None:
-        try:
-            toggle.setChecked(bool(checked), block_signals=True)
-            return
-        except TypeError:
-            pass
-        except Exception:
-            pass
-
-        try:
-            toggle.blockSignals(True)
-        except Exception:
-            pass
-
-        try:
-            if hasattr(toggle, "setChecked"):
-                toggle.setChecked(bool(checked))
-        except Exception:
-            pass
-
-        try:
-            toggle._circle_position = (toggle.width() - 18) if checked else 4.0  # type: ignore[attr-defined]
-            toggle.update()
-        except Exception:
-            pass
-
-        try:
-            toggle.blockSignals(False)
-        except Exception:
-            pass
+        set_toggle_checked(toggle, checked)
 
     def _confirm_reset_program_clicked(self) -> None:
         title = tr_catalog("page.z2_control.button.reset", language=self._ui_language, default="Сбросить")
@@ -908,27 +638,23 @@ class Zapret2DirectControlPage(BasePage):
         if self.auto_dpi_toggle is None:
             return
         self._program_settings_runtime_attached = True
-        self._require_app_context().program_settings_runtime_service.subscribe(
+        self._program_settings_runtime_unsubscribe = self._require_app_context().program_settings_runtime_service.subscribe(
             self._apply_program_settings_snapshot,
             emit_initial=True,
         )
 
     def _apply_program_settings_snapshot(self, snapshot) -> None:
-        if self.auto_dpi_toggle is not None:
-            self._set_toggle_checked(self.auto_dpi_toggle, getattr(snapshot, "auto_dpi_enabled", False))
-        if self.defender_toggle is not None:
-            self._set_toggle_checked(self.defender_toggle, getattr(snapshot, "defender_disabled", False))
-        if self.max_block_toggle is not None:
-            self._set_toggle_checked(self.max_block_toggle, getattr(snapshot, "max_blocked", False))
+        if self._cleanup_in_progress:
+            return
+        apply_program_settings_snapshot(
+            snapshot,
+            auto_dpi_toggle=self.auto_dpi_toggle,
+            defender_toggle=self.defender_toggle,
+            max_block_toggle=self.max_block_toggle,
+        )
 
     def _get_program_settings_runtime_service(self):
-        app_context = getattr(self.window(), "app_context", None)
-        service = getattr(app_context, "program_settings_runtime_service", None)
-        if service is None:
-            from app_context import require_app_context
-
-            service = require_app_context().program_settings_runtime_service
-        return service
+        return self._require_app_context().program_settings_runtime_service
 
     def _set_status(self, msg: str) -> None:
         try:
@@ -938,26 +664,21 @@ class Zapret2DirectControlPage(BasePage):
             pass
 
     def _show_action_result_plan(self, plan, toggle=None) -> None:
-        if plan.revert_checked is not None and toggle is not None:
-            self._set_toggle_checked(toggle, plan.revert_checked)
-
-        if plan.final_status:
-            self._set_status(plan.final_status)
-
-        if plan.level == "success":
-            InfoBar.success(title=plan.title, content=plan.content, parent=self.window())
-        elif plan.level == "warning":
-            InfoBar.warning(title=plan.title, content=plan.content, parent=self.window())
-        else:
-            InfoBar.error(title=plan.title, content=plan.content, parent=self.window())
+        show_action_result_plan(
+            plan,
+            window=self.window(),
+            set_status=self._set_status,
+            info_bar_cls=InfoBar,
+            toggle=toggle,
+        )
 
     def _run_confirmation_dialog(self, dialog_plan, toggle=None) -> bool:
-        box = MessageBox(dialog_plan.title, dialog_plan.content, self.window())
-        if box.exec():
-            return True
-        if dialog_plan.revert_checked is not None and toggle is not None:
-            self._set_toggle_checked(toggle, dialog_plan.revert_checked)
-        return False
+        return run_confirmation_dialog(
+            dialog_plan,
+            message_box_cls=MessageBox,
+            window=self.window(),
+            toggle=toggle,
+        )
 
     def _on_auto_dpi_toggled(self, enabled: bool) -> None:
         try:
@@ -1077,6 +798,8 @@ class Zapret2DirectControlPage(BasePage):
         )
 
     def _on_ui_state_changed(self, state: AppUiState, changed_fields: frozenset[str]) -> None:
+        if self._cleanup_in_progress:
+            return
         changed = set(changed_fields or ())
         presets_changed = "active_preset_revision" in changed
         if "mode_revision" in changed:
@@ -1104,17 +827,16 @@ class Zapret2DirectControlPage(BasePage):
             last_error=last_error,
             language=self._ui_language,
         )
-        self.status_title.setText(plan.title)
-        self.status_desc.setText(plan.description)
-        self.status_dot.set_color(plan.dot_color)
-        if plan.pulsing:
-            self.status_dot.start_pulse()
-        else:
-            self.status_dot.stop_pulse()
-        self.start_btn.setVisible(plan.show_start)
-        self._update_stop_winws_button_text()
-        self.stop_winws_btn.setVisible(plan.show_stop_only)
-        self.stop_and_exit_btn.setVisible(plan.show_stop_and_exit)
+        apply_status_plan(
+            plan,
+            status_title=self.status_title,
+            status_desc=self.status_desc,
+            status_dot=self.status_dot,
+            start_btn=self.start_btn,
+            stop_winws_btn=self.stop_winws_btn,
+            stop_and_exit_btn=self.stop_and_exit_btn,
+            update_stop_button_text=self._update_stop_winws_button_text,
+        )
 
     def update_strategy(self, name: str):
         _ = name
@@ -1122,161 +844,35 @@ class Zapret2DirectControlPage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
-
-        self.start_btn.setText(tr_catalog("page.z2_control.button.start", language=self._ui_language, default="Запустить Zapret"))
-        self.stop_and_exit_btn.setText(tr_catalog("page.z2_control.button.stop_and_exit", language=self._ui_language, default="Остановить и закрыть программу"))
-        self.presets_btn.setText(tr_catalog("page.z2_control.button.my_presets", language=self._ui_language, default="Мои пресеты"))
-        if self.direct_open_btn is not None:
-            self.direct_open_btn.setText(tr_catalog("page.z2_control.button.open", language=self._ui_language, default="Открыть"))
-        if self.direct_mode_btn is not None:
-            self.direct_mode_btn.setText(tr_catalog("page.z2_control.button.change_mode", language=self._ui_language, default="Изменить режим"))
-        if self.blobs_open_btn is not None:
-            self.blobs_open_btn.setText(tr_catalog("page.z2_control.button.open", language=self._ui_language, default="Открыть"))
-        if self.test_btn is not None:
-            self.test_btn.setText(tr_catalog("page.z2_control.button.connection_test", language=self._ui_language, default="Тест соединения"))
-        if self.folder_btn is not None:
-            self.folder_btn.setText(tr_catalog("page.z2_control.button.open_folder", language=self._ui_language, default="Открыть папку"))
-        if self.docs_btn is not None:
-            self.docs_btn.setText(tr_catalog("page.z2_control.button.documentation", language=self._ui_language, default="Документация"))
-
-        self.current_preset_caption.setText(tr_catalog("page.z2_control.preset.current", language=self._ui_language, default="Текущий активный пресет"))
-        if self.direct_mode_caption is not None:
-            self.direct_mode_caption.setText(tr_catalog("page.z2_control.direct_mode.caption", language=self._ui_language, default="Режим прямого запуска"))
-        if getattr(self, "advanced_notice", None) is not None:
-            self.advanced_notice.setText(
-                tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="Изменяйте только если знаете что делаете")
-            )
-        try:
-            title_label = getattr(getattr(self, "program_settings_card", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText(
-                    tr_catalog("page.z2_control.section.program_settings", language=self._ui_language, default="Настройки программы")
-                )
-        except Exception:
-            pass
-        try:
-            if self.auto_dpi_toggle is not None:
-                self.auto_dpi_toggle.set_texts(
-                    tr_catalog("page.z2_control.setting.autostart.title", language=self._ui_language, default="Автозапуск DPI после старта программы"),
-                    tr_catalog(
-                        "page.z2_control.setting.autostart.desc",
-                        language=self._ui_language,
-                        default="После запуска ZapretGUI автоматически запускать текущий DPI-режим",
-                    ),
-                )
-        except Exception:
-            pass
-        try:
-            if self.defender_toggle is not None:
-                self.defender_toggle.set_texts(
-                    tr_catalog(
-                        "page.z2_control.setting.defender.title",
-                        language=self._ui_language,
-                        default="Отключить Windows Defender",
-                    ),
-                    tr_catalog(
-                        "page.z2_control.setting.defender.desc",
-                        language=self._ui_language,
-                        default="Требуются права администратора",
-                    ),
-                )
-        except Exception:
-            pass
-        try:
-            if self.max_block_toggle is not None:
-                self.max_block_toggle.set_texts(
-                    tr_catalog(
-                        "page.z2_control.setting.max_block.title",
-                        language=self._ui_language,
-                        default="Блокировать установку MAX",
-                    ),
-                    tr_catalog(
-                        "page.z2_control.setting.max_block.desc",
-                        language=self._ui_language,
-                        default="Блокирует запуск/установку MAX и домены в hosts",
-                    ),
-                )
-        except Exception:
-            pass
-        try:
-            if self.reset_program_card is not None and hasattr(self.reset_program_card, "setTitle"):
-                self.reset_program_card.setTitle(
-                    tr_catalog("page.z2_control.setting.reset.title", language=self._ui_language, default="Сбросить программу")
-                )
-                self.reset_program_card.setContent(
-                    tr_catalog(
-                        "page.z2_control.setting.reset.desc",
-                        language=self._ui_language,
-                        default="Очистить кэш проверок запуска (без удаления пресетов/настроек)",
-                    )
-                )
-                button = getattr(self.reset_program_card, "button", None)
-                if button is not None:
-                    button.setText(
-                        tr_catalog("page.z2_control.button.reset", language=self._ui_language, default="Сбросить")
-                    )
-            elif self.reset_program_btn is not None:
-                self.reset_program_btn._default_text = tr_catalog("page.z2_control.button.reset", language=self._ui_language, default="Сбросить")
-                self.reset_program_btn._confirm_text = tr_catalog("page.z2_control.button.reset_confirm", language=self._ui_language, default="Сбросить?")
-                self.reset_program_btn.setText(self.reset_program_btn._default_text)
-                if self._reset_program_desc_label is not None:
-                    self._reset_program_desc_label.setText(
-                        tr_catalog(
-                            "page.z2_control.setting.reset.desc",
-                            language=self._ui_language,
-                            default="Очистить кэш проверок запуска (без удаления пресетов/настроек)",
-                        )
-                    )
-        except Exception:
-            pass
-        try:
-            if getattr(self, "advanced_card", None) is not None and hasattr(self.advanced_card, "set_title"):
-                self.advanced_card.set_title(
-                    tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ")
-                )
-            title_label = getattr(getattr(self, "advanced_card", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText(tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"))
-        except Exception:
-            pass
-        if getattr(self, "blobs_action_card", None) is not None:
-            self.blobs_action_card.setTitle(
-                tr_catalog("page.z2_control.blobs.title", language=self._ui_language, default="Блобы")
-            )
-            self.blobs_action_card.setContent(
-                tr_catalog("page.z2_control.blobs.desc", language=self._ui_language, default="Бинарные данные (.bin / hex) для стратегий")
-            )
-            if self.blobs_open_btn is not None:
-                self.blobs_open_btn.setText(
-                    tr_catalog("page.z2_control.button.open", language=self._ui_language, default="Открыть")
-                )
-
-        self._update_stop_winws_button_text()
-        self._sync_direct_launch_mode_from_settings()
-        try:
-            if self.discord_restart_toggle is not None:
-                self.discord_restart_toggle.set_texts(
-                    tr_catalog("page.dpi_settings.discord_restart.title", language=self._ui_language, default="Перезапуск Discord"),
-                    tr_catalog("page.dpi_settings.discord_restart.desc", language=self._ui_language, default="Автоперезапуск при смене стратегии"),
-                )
-        except Exception:
-            pass
-        try:
-            if self.wssize_toggle is not None:
-                self.wssize_toggle.set_texts(
-                    tr_catalog("page.dpi_settings.advanced.wssize.title", language=self._ui_language, default="Включить --wssize"),
-                    tr_catalog("page.dpi_settings.advanced.wssize.desc", language=self._ui_language, default="Добавляет параметр размера окна TCP"),
-                )
-        except Exception:
-            pass
-        try:
-            if self.debug_log_toggle is not None:
-                self.debug_log_toggle.set_texts(
-                    tr_catalog("page.dpi_settings.advanced.debug_log.title", language=self._ui_language, default="Включить лог-файл (--debug)"),
-                    tr_catalog("page.dpi_settings.advanced.debug_log.desc", language=self._ui_language, default="Записывает логи winws в папку logs"),
-                )
-        except Exception:
-            pass
+        apply_direct_language(
+            language=self._ui_language,
+            start_btn=self.start_btn,
+            stop_and_exit_btn=self.stop_and_exit_btn,
+            presets_btn=self.presets_btn,
+            direct_open_btn=self.direct_open_btn,
+            direct_mode_btn=self.direct_mode_btn,
+            blobs_open_btn=self.blobs_open_btn,
+            test_btn=self.test_btn,
+            folder_btn=self.folder_btn,
+            docs_btn=self.docs_btn,
+            current_preset_caption=self.current_preset_caption,
+            direct_mode_caption=self.direct_mode_caption,
+            advanced_notice=self.advanced_notice,
+            program_settings_card=self.program_settings_card,
+            auto_dpi_toggle=self.auto_dpi_toggle,
+            defender_toggle=self.defender_toggle,
+            max_block_toggle=self.max_block_toggle,
+            reset_program_card=self.reset_program_card,
+            reset_program_btn=self.reset_program_btn,
+            reset_program_desc_label=self._reset_program_desc_label,
+            advanced_card=self.advanced_card,
+            blobs_action_card=self.blobs_action_card,
+            discord_restart_toggle=self.discord_restart_toggle,
+            wssize_toggle=self.wssize_toggle,
+            debug_log_toggle=self.debug_log_toggle,
+            update_stop_button_text=self._update_stop_winws_button_text,
+            sync_direct_launch_mode_from_settings=self._sync_direct_launch_mode_from_settings,
+        )
 
     def _open_docs(self) -> None:
         try:
@@ -1285,3 +881,23 @@ class Zapret2DirectControlPage(BasePage):
             webbrowser.open(DOCS_URL)
         except Exception as e:
             InfoBar.warning(title="Документация", content=f"Не удалось открыть документацию: {e}", parent=self.window())
+
+    def cleanup(self) -> None:
+        self._cleanup_in_progress = True
+
+        unsubscribe = getattr(self, "_ui_state_unsubscribe", None)
+        if callable(unsubscribe):
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+        self._ui_state_unsubscribe = None
+        self._ui_state_store = None
+
+        unsubscribe_runtime = getattr(self, "_program_settings_runtime_unsubscribe", None)
+        if callable(unsubscribe_runtime):
+            try:
+                unsubscribe_runtime()
+            except Exception:
+                pass
+        self._program_settings_runtime_unsubscribe = None

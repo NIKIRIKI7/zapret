@@ -1,6 +1,5 @@
 # Preset: split_pos
 # TemplateOrigin: split_pos
-# Created: 2026-02-19T00:00:00
 # IconColor: #60cdff
 # Description: Imported from bat/split_pos.txt
 

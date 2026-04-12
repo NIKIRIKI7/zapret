@@ -47,24 +47,6 @@ def get_zapret_presets_v2_dir() -> str:
     return os.path.join(get_zapret_userdata_dir(), "presets_v2")
 
 
-def get_zapret_presets_v2_template_dir() -> str:
-    """Returns V2 preset templates directory: <userdata>/zapret/presets_v2_template.
-
-    Templates are the source-of-truth for preset reset.
-    User presets in presets_v2/ are editable copies of these templates.
-    """
-    return os.path.join(get_zapret_userdata_dir(), "presets_v2_template")
-
-
-def get_zapret_presets_v1_template_dir() -> str:
-    """Returns V1 preset templates directory: <userdata>/zapret/presets_v1_template.
-
-    Templates are installed by the Inno Setup installer.
-    At startup the app copies missing templates to presets_v1/.
-    """
-    return os.path.join(get_zapret_userdata_dir(), "presets_v1_template")
-
-
 def get_zapret_lists_template_dir() -> str:
     """Returns lists templates directory: <userdata>/zapret/lists_template."""
     return os.path.join(get_zapret_userdata_dir(), "lists_template")
@@ -76,11 +58,6 @@ def get_zapret_lists_backup_dir() -> str:
     Used to persist user-edited list files across app updates.
     """
     return os.path.join(get_zapret_userdata_dir(), "lists_backup")
-
-
-def get_other_backup_path() -> str:
-    """Returns backup path for user-edited other.txt."""
-    return os.path.join(get_zapret_lists_backup_dir(), "other.txt")
 
 
 def get_other_user_backup_path() -> str:

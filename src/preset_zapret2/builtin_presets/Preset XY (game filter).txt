@@ -1,7 +1,6 @@
 # Preset: Preset XY (game filter)
 # TemplateOrigin: Preset XY (game filter)
 # BuiltinVersion: 2.18
-# Created: 2026-02-12T21:07:19.651846
 # IconColor: #ff6666
 # Description: 
 
@@ -136,7 +135,6 @@
 --filter-tcp=80,443-65535
 --ipset=lists/russia-youtube-rtmps.txt
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt
 --out-range=-n8
 --lua-desync=send:repeats=2
@@ -156,7 +154,6 @@
 
 --filter-udp=80,443-65535
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/cloudflare-ipset.txt
 --ipset=lists/cloudflare-ipset_v6.txt
 --ipset=lists/ipset-cloudflare1.txt

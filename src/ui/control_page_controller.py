@@ -253,7 +253,10 @@ class ControlPageController:
 
                 from core.presets.direct_facade import DirectPresetFacade
 
-                selections = DirectPresetFacade.from_launch_method(method).get_strategy_selections() or {}
+                selections = DirectPresetFacade.from_launch_method(
+                    method,
+                    app_context=window.app_context,
+                ).get_strategy_selections() or {}
                 active_count = sum(
                     1 for strategy_id in selections.values() if (strategy_id or "none") != "none"
                 )

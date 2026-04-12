@@ -60,13 +60,13 @@ def setup_autostart_for_exe(
             status_cb(message)
 
     try:
-        from .autostart_remove import clear_existing_autostart
+        from .autostart_remove import clear_autostart_task
 
         exe_path = sys.executable
         _log("Включаем канонический автозапуск GUI", "INFO")
 
-        # Перед созданием новой задачи убираем и её прежнюю версию, и legacy-хвосты.
-        clear_existing_autostart(status_cb=_status)
+        # Перед созданием новой задачи убираем только её текущую каноническую версию.
+        clear_autostart_task(status_cb=_status)
 
         create_args = [
             "/Create",

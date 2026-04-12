@@ -1,7 +1,6 @@
 # Preset: complex multidisorder (game filter)
 # TemplateOrigin: complex multidisorder (game filter)
 # BuiltinVersion: 2.18
-# Created: 2026-01-30T00:20:29.599857
 # Description: 
 
 --lua-init=@lua/zapret-lib.lua
@@ -139,7 +138,6 @@
 
 --filter-tcp=443-65535
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt
 --ipset=lists/ipset-cloudflare.txt
 --ipset=lists/cloudflare-ipset.txt
@@ -163,7 +161,6 @@
 
 --filter-udp=443-65535
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt
 --ipset=lists/ipset-cloudflare.txt
 --ipset=lists/cloudflare-ipset.txt

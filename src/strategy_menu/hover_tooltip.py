@@ -11,6 +11,7 @@ from PyQt6.QtCore import (Qt, QTimer, QPropertyAnimation, QEasingCurve,
 from PyQt6.QtGui import (QColor, QPainter, QPainterPath, QBrush, 
                          QPen, QLinearGradient, QCursor)
 
+from ui.animation_policy import register_managed_animation, start_managed_animation
 from ui.theme import get_theme_tokens
 from ui.theme_refresh import ThemeRefreshController
 
@@ -97,8 +98,10 @@ class StrategyHoverTooltip(QWidget):
         self._opacity = 0.0
         self._spinner = None
         
-        self._fade_animation = QPropertyAnimation(self, b"opacity_value")
-        self._fade_animation.setDuration(150)
+        self._fade_animation = register_managed_animation(
+            QPropertyAnimation(self, b"opacity_value"),
+            150,
+        )
         self._fade_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         
         self._init_ui()
@@ -262,7 +265,7 @@ class StrategyHoverTooltip(QWidget):
         
         self._fade_animation.setStartValue(0.0)
         self._fade_animation.setEndValue(1.0)
-        self._fade_animation.start()
+        start_managed_animation(self._fade_animation)
     
     def _hide_spinner(self):
         """Скрывает спиннер"""
@@ -276,7 +279,7 @@ class StrategyHoverTooltip(QWidget):
         self._fade_animation.setStartValue(1.0)
         self._fade_animation.setEndValue(0.0)
         self._fade_animation.finished.connect(self._on_hide_finished)
-        self._fade_animation.start()
+        start_managed_animation(self._fade_animation)
     
     def _on_hide_finished(self):
         try:

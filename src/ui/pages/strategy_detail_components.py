@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from log import log
 from ui.smooth_scroll import apply_editor_smooth_scroll_preference
 from ui.text_catalog import tr as tr_catalog
+from ui.theme import get_themed_qta_icon
 
 try:
     from qfluentwidgets import CaptionLabel, MessageBoxBase, SubtitleLabel, TextEdit
@@ -436,7 +437,7 @@ def build_strategy_toolbar_widgets(
         edit_args_btn = transparent_tool_button_cls(_FIF.EDIT, parent=parent)
     except Exception:
         edit_args_btn = transparent_tool_button_cls(parent=parent)
-        edit_args_btn.setIcon(qta.icon("fa5s.edit", color=tokens.fg_faint))
+        edit_args_btn.setIcon(get_themed_qta_icon("fa5s.edit", color=tokens.fg_faint))
 
     edit_args_btn.setIconSize(QSize(16, 16))
     edit_args_btn.setFixedSize(36, 36)
@@ -679,4 +680,3 @@ def build_detail_subtitle_widgets(
         subtitle_label=subtitle_label,
         subtitle_strategy_label=subtitle_strategy_label,
     )
-

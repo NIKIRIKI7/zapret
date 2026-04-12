@@ -96,6 +96,7 @@ class BasePage(_FluentScrollArea):
         self._page_lifecycle_generation = 0
         self._page_load_generation = 0
         self._ready_callbacks: list[object] = []
+        self._cleanup_in_progress = False
         self._page_theme_refresh = ThemeRefreshController(
             self,
             self._apply_page_theme,
@@ -201,10 +202,12 @@ class BasePage(_FluentScrollArea):
         self._cancel_page_loads(reason=reason)
 
     def is_page_ready(self) -> bool:
-        return bool(self.isVisible())
+        return bool(self.isVisible()) and not bool(getattr(self, "_cleanup_in_progress", False))
 
     def run_when_page_ready(self, callback) -> bool:
         if not callable(callback):
+            return False
+        if bool(getattr(self, "_cleanup_in_progress", False)):
             return False
         if self.is_page_ready():
             self._schedule_lifecycle_action(callback)
@@ -361,6 +364,16 @@ class BasePage(_FluentScrollArea):
         for callback in callbacks:
             if callable(callback):
                 self._schedule_lifecycle_action(callback)
+
+    def cleanup(self) -> None:
+        self._cleanup_in_progress = True
+        self._ready_callbacks.clear()
+        self._cancel_page_lifecycle(reason="cleanup")
+        self.cancel_page_loads(reason="cleanup")
+        try:
+            self._page_theme_refresh.cleanup()
+        except Exception:
+            pass
 
     def _retranslate_base_texts(self) -> None:
         if self._title_key and hasattr(self, "title_label") and self.title_label is not None:

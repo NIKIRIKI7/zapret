@@ -10,9 +10,12 @@ class GlobalComboPopupCloser(QObject):
     def __init__(self, app: QApplication):
         super().__init__(app)
         self._app = app
+        self._cleanup_in_progress = False
         app.installEventFilter(self)
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt override)
+        if self._cleanup_in_progress:
+            return False
         try:
             if event is not None and event.type() == QEvent.Type.ApplicationDeactivate:
                 self.close_all_popups()
@@ -41,6 +44,24 @@ class GlobalComboPopupCloser(QObject):
                     widget.hidePopup()
             except Exception:
                 pass
+
+    def cleanup(self) -> None:
+        if self._cleanup_in_progress:
+            return
+        self._cleanup_in_progress = True
+        app = self._app
+        self._app = None
+        if app is None:
+            return
+        try:
+            app.removeEventFilter(self)
+        except Exception:
+            pass
+        try:
+            if getattr(app, "_zapret_global_combo_popup_closer", None) is self:
+                setattr(app, "_zapret_global_combo_popup_closer", None)
+        except Exception:
+            pass
 
 
 def install_global_combo_popup_closer(app: QApplication | None = None) -> GlobalComboPopupCloser | None:

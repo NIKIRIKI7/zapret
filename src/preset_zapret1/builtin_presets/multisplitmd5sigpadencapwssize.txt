@@ -1,6 +1,5 @@
 # Preset: multisplitmd5sigpadencapwssize
 # TemplateOrigin: multisplitmd5sigpadencapwssize
-# Created: 2026-02-19T00:00:00
 # IconColor: #60cdff
 # Description: Imported from bat/multisplitmd5sigpadencapwssize.txt
 

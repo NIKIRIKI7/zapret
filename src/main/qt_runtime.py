@@ -88,9 +88,8 @@ def ensure_qt_runtime() -> QApplication:
     install_global_combo_popup_closer(app)
     _install_animation_py314_compat()
 
-    from ui.theme import install_qtawesome_icon_theme_patch, connect_qfluent_accent_signal
+    from ui.theme import connect_qfluent_accent_signal
 
-    install_qtawesome_icon_theme_patch()
     connect_qfluent_accent_signal()
 
     _QT_RUNTIME_READY = True

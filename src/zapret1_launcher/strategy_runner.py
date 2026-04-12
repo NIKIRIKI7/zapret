@@ -31,7 +31,7 @@ from launcher_common.preset_runner_support import (
     wait_for_process_exit,
     wait_for_process_stable_start,
 )
-from dpi.process_health_check import (
+from dpi.health.process_health_check import (
     check_common_crash_causes,
     diagnose_startup_error
 )
@@ -321,7 +321,7 @@ class StrategyRunnerV1(StrategyRunnerBase):
                 reason="process_exited_during_start",
             )
 
-            from dpi.process_health_check import diagnose_winws_exit
+            from dpi.health.process_health_check import diagnose_winws_exit
 
             diag = diagnose_winws_exit(exit_code, stderr_output)
             if diag:

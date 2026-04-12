@@ -1,36 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime
 from pathlib import Path
 import re
 import time as _time
 from typing import Callable, Optional
 
+from core.direct_flow import DirectFlowCoordinator
 from core.direct_preset_core.common.source_preset_models import OutRangeSettings, SendSettings, SyndataSettings
 from core.direct_preset_core.service import BasicUiPayload, DirectPresetService, TargetDetailPayload
+from core.paths import AppPaths
+from core.presets.preset_file_store import PresetFileStore
+from core.presets.runtime_store import DirectRuntimePresetStore
+from core.presets.selection_service import PresetSelectionService
 from core.presets.template_support import resolve_reset_template as _template_support_resolve_reset_template
 from core.presets.template_support import reset_all_templates as _template_support_reset_all_templates
 from core.presets.template_support import restore_deleted_templates as _template_support_restore_deleted_templates
-from app_context import require_app_context
 
 from .models import PresetManifest
 from log import log
-
-def _get_app_paths():
-    return require_app_context().app_paths
-
-
-def _get_direct_flow_coordinator():
-    return require_app_context().direct_flow_coordinator
-
-
-def _get_preset_repository():
-    return require_app_context().preset_repository
-
-
-def _get_selection_service():
-    return require_app_context().preset_selection_service
 
 
 def _normalize_strategy_selection_value(value: object) -> str:
@@ -93,7 +81,7 @@ def _rewrite_preset_headers(
     target_name: str,
     *,
     template_origin: str | None = None,
-    created: str | None = None,
+    preset_kind: str | None = None,
 ) -> str:
     text = (source_text or "").replace("\r\n", "\n").replace("\r", "\n")
     lines = text.splitlines()
@@ -112,7 +100,7 @@ def _rewrite_preset_headers(
     out_header: list[str] = []
     saw_preset = False
     saw_template_origin = False
-    saw_created = False
+    saw_preset_kind = False
 
     for raw in header:
         stripped = raw.strip()
@@ -129,13 +117,13 @@ def _rewrite_preset_headers(
                 out_header.append(raw.rstrip("\n"))
                 saw_template_origin = True
             continue
-        if lowered.startswith("# created:"):
-            if created is not None:
-                out_header.append(f"# Created: {created}")
-                saw_created = True
+        if lowered.startswith("# presetkind:"):
+            if preset_kind is not None:
+                out_header.append(f"# PresetKind: {preset_kind}")
+                saw_preset_kind = True
             else:
                 out_header.append(raw.rstrip("\n"))
-                saw_created = True
+                saw_preset_kind = True
             continue
         if lowered.startswith("# modified:"):
             continue
@@ -151,11 +139,18 @@ def _rewrite_preset_headers(
         out_header.insert(insert_idx, f"# TemplateOrigin: {template_origin}")
         insert_idx += 1
 
-    if created is not None and not saw_created:
-        out_header.insert(insert_idx, f"# Created: {created}")
+    if preset_kind is not None and not saw_preset_kind:
+        out_header.insert(insert_idx, f"# PresetKind: {preset_kind}")
 
     rewritten = "\n".join(out_header + body).rstrip("\n")
     return rewritten + "\n"
+
+
+def _header_preset_kind(kind: str | None) -> str | None:
+    normalized = str(kind or "").strip().lower()
+    if normalized == "imported":
+        return "imported"
+    return None
 
 
 def _normalize_direct_preset_source_text(source_text: str) -> str:
@@ -376,10 +371,23 @@ def _resolve_reset_template(launch_method: str, preset_name: str) -> str:
 class DirectPresetFacadeBackend:
     engine: str
     launch_method: str
+    app_paths: AppPaths
+    direct_flow_coordinator: DirectFlowCoordinator
+    preset_file_store: PresetFileStore
+    preset_selection_service: PresetSelectionService
+    preset_store: DirectRuntimePresetStore
+    preset_store_v1: DirectRuntimePresetStore
     on_dpi_reload_needed: Optional[Callable[[], None]] = None
 
+    def _runtime_store(self):
+        if self.launch_method == "direct_zapret2":
+            return self.preset_store
+        if self.launch_method == "direct_zapret1":
+            return self.preset_store_v1
+        raise ValueError(f"Unsupported direct launch method for runtime notifications: {self.launch_method}")
+
     def _service(self) -> DirectPresetService:
-        return DirectPresetService(get_app_paths(), self.engine)
+        return DirectPresetService(self.app_paths, self.engine)
 
     def _current_direct_strategy_set(self) -> str:
         if self.launch_method != "direct_zapret2":
@@ -398,7 +406,7 @@ class DirectPresetFacadeBackend:
         selected_file_name = str(getattr(selected_manifest, "file_name", "") or "").strip()
         if not selected_file_name:
             raise ValueError("Selected source preset file name is required")
-        return get_app_paths().engine_paths(self.engine).ensure_directories().presets_dir / selected_file_name
+        return self.app_paths.engine_paths(self.engine).ensure_directories().presets_dir / selected_file_name
 
     def _load_selected_preset_model(self, selected_manifest: PresetManifest | None = None):
         if selected_manifest is None:
@@ -411,7 +419,31 @@ class DirectPresetFacadeBackend:
         return self._service().read_source_preset(self._selected_source_path_from_manifest(selected_manifest))
 
     def list_manifests(self) -> list[PresetManifest]:
-        return _get_preset_repository().list_manifests(self.engine)
+        return self.preset_file_store.list_manifests(self.engine)
+
+    def notify_preset_saved(self, file_name: str) -> None:
+        candidate = str(file_name or "").strip()
+        if candidate:
+            self._runtime_store().notify_preset_saved(candidate)
+
+    def notify_preset_switched(self, file_name: str) -> None:
+        candidate = str(file_name or "").strip()
+        if candidate:
+            self._runtime_store().notify_preset_switched(candidate)
+
+    def notify_preset_identity_changed(self, file_name: str) -> None:
+        candidate = str(file_name or "").strip()
+        if candidate:
+            self._runtime_store().notify_preset_identity_changed(candidate)
+
+    def activate_preset_file(self, file_name: str):
+        candidate = str(file_name or "").strip()
+        if not candidate:
+            raise ValueError("Preset file name is required")
+
+        profile = self.direct_flow_coordinator.select_preset_file_name(self.launch_method, candidate)
+        self.notify_preset_switched(profile.preset_file_name)
+        return profile
 
     def get_basic_ui_payload(
         self,
@@ -472,7 +504,7 @@ class DirectPresetFacadeBackend:
     def get_basic_ui_empty_state(self) -> dict[str, str] | None:
         """Explains why the direct categories page is empty, if it is empty."""
         try:
-            presets_dir = get_app_paths().engine_paths(self.engine).ensure_directories().presets_dir
+            presets_dir = self.app_paths.engine_paths(self.engine).ensure_directories().presets_dir
             has_any_preset = any(
                 path.is_file() and path.suffix.lower() == ".txt" and not path.name.startswith("_")
                 for path in presets_dir.glob("*.txt")
@@ -556,21 +588,23 @@ class DirectPresetFacadeBackend:
 
     def get_selected_manifest(self) -> PresetManifest | None:
         try:
-            return require_app_context().direct_flow_coordinator.get_selected_source_manifest(self.launch_method)
+            return self.direct_flow_coordinator.get_selected_source_manifest(self.launch_method)
         except Exception:
             return None
 
     def is_selected_file_name(self, file_name: str) -> bool:
-        return (self.get_selected_file_name() or "").strip().lower() == str(file_name or "").strip().lower()
+        current = str(self.get_selected_file_name() or "").strip()
+        candidate = str(self.preset_file_store.resolve_file_name(self.engine, file_name) or file_name or "").strip()
+        return bool(current and candidate and current.lower() == candidate.lower())
 
     def get_manifest_by_file_name(self, file_name: str) -> PresetManifest | None:
-        return _get_preset_repository().get_manifest(self.engine, file_name)
+        return self.preset_file_store.get_manifest(self.engine, file_name)
 
     def read_source_text_by_file_name(self, file_name: str) -> str:
         manifest = self.get_manifest_by_file_name(file_name)
         if manifest is None:
             raise ValueError(f"Preset not found: {file_name}")
-        return _get_preset_repository().read_source_text(self.engine, manifest.file_name)
+        return self.preset_file_store.read_source_text(self.engine, manifest.file_name)
 
     def read_selected_source_text(self) -> str:
         selected_file_name = self.get_selected_file_name()
@@ -636,16 +670,16 @@ class DirectPresetFacadeBackend:
         manifest = self.get_manifest_by_file_name(file_name)
         if manifest is None:
             raise ValueError(f"Preset not found: {file_name}")
-        return get_app_paths().engine_paths(self.engine).ensure_directories().presets_dir / manifest.file_name
+        return self.app_paths.engine_paths(self.engine).ensure_directories().presets_dir / manifest.file_name
 
     def save_source_text_by_file_name(self, file_name: str, source_text: str) -> PresetManifest:
         manifest = self.get_manifest_by_file_name(file_name)
         if manifest is None:
             raise ValueError(f"Preset not found: {file_name}")
         normalized = _normalize_direct_preset_source_text(source_text)
-        updated = _get_preset_repository().update_preset(self.engine, manifest.file_name, normalized, None)
+        updated = self.preset_file_store.update_preset(self.engine, manifest.file_name, normalized, None)
         if self.is_selected_file_name(updated.file_name):
-            require_app_context().direct_flow_coordinator.refresh_selected_launch_profile(self.launch_method)
+            self.direct_flow_coordinator.refresh_selected_launch_profile(self.launch_method)
         return updated
 
     def get_debug_log_file(self) -> str:
@@ -788,10 +822,10 @@ class DirectPresetFacadeBackend:
         selected_file_name = self.get_selected_file_name()
         if not selected_file_name or self.get_manifest_by_file_name(selected_file_name) is None:
             return
-        require_app_context().direct_flow_coordinator.refresh_selected_launch_profile(self.launch_method)
+        self.direct_flow_coordinator.refresh_selected_launch_profile(self.launch_method)
 
     def select_file_name(self, file_name: str):
-        return require_app_context().direct_flow_coordinator.select_preset_file_name(self.launch_method, file_name)
+        return self.direct_flow_coordinator.select_preset_file_name(self.launch_method, file_name)
 
     def rename_by_file_name(self, file_name: str, new_name: str) -> PresetManifest:
         manifest = self.get_manifest_by_file_name(file_name)
@@ -801,13 +835,14 @@ class DirectPresetFacadeBackend:
             raise ValueError(f"Built-in preset cannot be renamed: {manifest.name}")
         was_selected = self.is_selected_file_name(manifest.file_name)
         source_text = self.read_source_text_by_file_name(manifest.file_name)
-        renamed = _get_preset_repository().rename_preset(self.engine, manifest.file_name, new_name)
+        renamed = self.preset_file_store.rename_preset(self.engine, manifest.file_name, new_name)
         rewritten = _rewrite_preset_headers(
             source_text,
             new_name,
             template_origin=manifest.template_origin,
+            preset_kind=_header_preset_kind(manifest.kind),
         )
-        updated = _get_preset_repository().update_preset(self.engine, renamed.file_name, rewritten, None)
+        updated = self.preset_file_store.update_preset(self.engine, renamed.file_name, rewritten, None)
         self._rename_library_meta(
             manifest.file_name,
             updated.file_name,
@@ -815,7 +850,7 @@ class DirectPresetFacadeBackend:
             new_display_name=updated.name,
         )
         if was_selected:
-            _get_selection_service().select_preset(self.engine, updated.file_name)
+            self.preset_selection_service.select_preset(self.engine, updated.file_name)
             self._refresh_selected_launch_profile_from_source()
         return updated
 
@@ -824,14 +859,13 @@ class DirectPresetFacadeBackend:
         if manifest is None:
             raise ValueError(f"Preset not found: {file_name}")
         source_text = self.read_source_text_by_file_name(manifest.file_name)
-        now = datetime.now().isoformat()
         rewritten = _rewrite_preset_headers(
             source_text,
             new_name,
             template_origin=manifest.template_origin,
-            created=now,
+            preset_kind=_header_preset_kind(manifest.kind),
         )
-        duplicated = _get_preset_repository().create_preset(self.engine, new_name, rewritten)
+        duplicated = self.preset_file_store.create_preset(self.engine, new_name, rewritten)
         self._copy_library_meta(
             manifest.file_name,
             duplicated.file_name,
@@ -842,9 +876,8 @@ class DirectPresetFacadeBackend:
 
     def create(self, name: str, *, from_current: bool = True) -> PresetManifest:
         source_text = self.read_selected_source_text() if from_current else _resolve_reset_template(self.launch_method, "Default")
-        now = datetime.now().isoformat()
-        rewritten = _rewrite_preset_headers(source_text, name, created=now)
-        return _get_preset_repository().create_preset(self.engine, name, rewritten)
+        rewritten = _rewrite_preset_headers(source_text, name)
+        return self.preset_file_store.create_preset(self.engine, name, rewritten)
 
     def import_from_file(self, src_path: Path, name: str | None = None) -> PresetManifest:
         src = Path(src_path)
@@ -852,8 +885,12 @@ class DirectPresetFacadeBackend:
             raise ValueError(f"Import source not found: {src}")
         target_name = str(name or src.stem or "Imported").strip() or "Imported"
         source_text = src.read_text(encoding="utf-8", errors="replace")
-        rewritten = _rewrite_preset_headers(source_text, target_name)
-        imported = _get_preset_repository().create_preset(self.engine, target_name, rewritten, kind="imported")
+        rewritten = _rewrite_preset_headers(
+            source_text,
+            target_name,
+            preset_kind="imported",
+        )
+        imported = self.preset_file_store.create_preset(self.engine, target_name, rewritten, kind="imported")
         self._delete_library_meta(imported.file_name, display_name=imported.name)
         return imported
 
@@ -878,8 +915,9 @@ class DirectPresetFacadeBackend:
             template_content,
             manifest.name,
             template_origin=str(manifest.template_origin or "").strip() or None,
+            preset_kind=_header_preset_kind(manifest.kind),
         )
-        updated = _get_preset_repository().update_preset(self.engine, manifest.file_name, rewritten, None)
+        updated = self.preset_file_store.update_preset(self.engine, manifest.file_name, rewritten, None)
         if self.is_selected_file_name(manifest.file_name):
             self._refresh_selected_launch_profile_from_source()
         return updated
@@ -903,8 +941,8 @@ class DirectPresetFacadeBackend:
             raise ValueError(f"Preset not found: {file_name}")
         if str(manifest.kind or "").strip().lower() == "builtin":
             raise ValueError(f"Built-in preset cannot be deleted: {manifest.name}")
-        _get_selection_service().ensure_can_delete(self.engine, manifest.file_name)
-        _get_preset_repository().delete_preset(self.engine, manifest.file_name)
+        self.preset_selection_service.ensure_can_delete(self.engine, manifest.file_name)
+        self.preset_file_store.delete_preset(self.engine, manifest.file_name)
         self._delete_library_meta(manifest.file_name, display_name=manifest.name)
 
     def get_strategy_selections(self) -> dict:
@@ -1060,7 +1098,7 @@ class DirectPresetFacadeBackend:
         if selected_manifest is None:
             return False
         source_text = _normalize_direct_preset_source_text(self._service()._serializer().serialize(preset))
-        _get_preset_repository().update_preset(self.engine, selected_manifest.file_name, source_text, selected_manifest.name)
+        self.preset_file_store.update_preset(self.engine, selected_manifest.file_name, source_text, selected_manifest.name)
         self._refresh_selected_launch_profile_from_source()
         if self.on_dpi_reload_needed:
             self.on_dpi_reload_needed()

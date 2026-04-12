@@ -1,6 +1,5 @@
 # Preset: faketlsautoalt
 # TemplateOrigin: faketlsautoalt
-# Created: 2026-02-19T00:00:00
 # IconColor: #60cdff
 # Description: Imported from bat/faketlsautoalt.txt
 

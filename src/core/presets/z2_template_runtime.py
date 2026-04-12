@@ -8,6 +8,7 @@ from typing import Optional
 
 from safe_construct import safe_construct
 
+from core.direct_preset_core.common.circular_preset_support import resolve_transport_settings
 from core.direct_preset_core.common.source_preset_models import SendSettings, SyndataSettings
 from core.direct_preset_core.engines import winws2_parser, winws2_rules
 from log import log
@@ -139,7 +140,6 @@ def clear_all_deleted_presets() -> bool:
 def ensure_templates_copied_to_presets() -> bool:
     try:
         from config import get_zapret_presets_v2_dir
-        from .z2_builtin_templates import list_builtin_catalog_names_v2
 
         templates = _load_template_contents()
         if not templates:
@@ -149,11 +149,8 @@ def ensure_templates_copied_to_presets() -> bool:
         presets_dir.mkdir(parents=True, exist_ok=True)
         backups_dir = presets_dir / "_builtin_version_backups"
         deleted_lower = {name.lower() for name in get_deleted_preset_names()}
-        builtin_names = {str(name or "").strip().casefold() for name in list_builtin_catalog_names_v2()}
 
         for name, content in templates.items():
-            if str(name or "").strip().casefold() not in builtin_names:
-                continue
             dest = presets_dir / f"{name}.txt"
             template_version = _extract_builtin_version(content)
             was_deleted = name.lower() in deleted_lower
@@ -209,7 +206,6 @@ def ensure_templates_copied_to_presets() -> bool:
 def overwrite_templates_to_presets() -> tuple[int, int, list[str]]:
     try:
         from config import get_zapret_presets_v2_dir
-        from .z2_builtin_templates import list_builtin_catalog_names_v2
     except Exception:
         return (0, 0, [])
 
@@ -222,13 +218,10 @@ def overwrite_templates_to_presets() -> tuple[int, int, list[str]]:
     templates = _load_template_contents()
     if not templates:
         return (0, 0, [])
-    builtin_names = {str(name or "").strip().casefold() for name in list_builtin_catalog_names_v2()}
 
     copied = 0
     failed: list[str] = []
     for name in sorted(templates.keys(), key=lambda value: value.lower()):
-        if str(name or "").strip().casefold() not in builtin_names:
-            continue
         dest = presets_dir / f"{name}.txt"
         try:
             dest.write_text(templates[name], encoding="utf-8")
@@ -379,9 +372,12 @@ def _detect_filter_port(match_lines: list[str], protocol: str) -> str:
 
 def _extract_syndata_overrides(action_lines: list[str], protocol: str) -> dict:
     proto = str(protocol or "").strip().lower()
-    syndata = winws2_rules.parse_syndata(action_lines)
-    out_range = winws2_rules.parse_out_range(action_lines)
-    send = winws2_rules.parse_send(action_lines) if proto == "tcp" else SendSettings(enabled=False)
+    out_range, send, syndata = resolve_transport_settings(
+        action_lines,
+        rules_module=winws2_rules,
+    )
+    if proto != "tcp":
+        send = SendSettings(enabled=False)
 
     defaults = {
         "enabled": False if proto in ("udp", "quic", "l7", "raw") else True,
@@ -427,22 +423,9 @@ def _extract_syndata_overrides(action_lines: list[str], protocol: str) -> dict:
 
 
 def _load_template_contents() -> dict[str, str]:
-    from .z2_builtin_templates import list_builtin_catalog_names_v2
+    from .z2_builtin_templates import list_repo_builtin_templates_v2
 
-    contents: dict[str, str] = {}
-    builtin_names = {str(name or "").strip().casefold() for name in list_builtin_catalog_names_v2()}
-    for path in _template_paths():
-        name = (path.stem or "").strip()
-        if not name:
-            continue
-        if name.casefold() not in builtin_names:
-            continue
-        try:
-            content = path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-        contents[name] = _normalize_template_header_v2(content, name)
-    return contents
+    return dict(list_repo_builtin_templates_v2())
 
 
 def _normalize_template_header_v2(content: str, preset_name: str) -> str:
@@ -475,7 +458,7 @@ def _normalize_template_header_v2(content: str, preset_name: str) -> str:
             out_header.append(f"# TemplateOrigin: {name}")
             saw_template_origin = True
             continue
-        if stripped.startswith("# modified:") or stripped.startswith("# activepreset:"):
+        if stripped.startswith("# modified:") or stripped.startswith("# activepreset:") or stripped.startswith("# created:"):
             continue
         out_header.append(raw.rstrip("\n"))
 
@@ -486,23 +469,6 @@ def _normalize_template_header_v2(content: str, preset_name: str) -> str:
         out_header.insert(insert_at, f"# TemplateOrigin: {name}")
 
     return "\n".join(out_header + body).rstrip("\n") + "\n"
-
-
-def _template_paths() -> list[Path]:
-    try:
-        from config import get_zapret_presets_v2_template_dir
-
-        templates_dir = Path(get_zapret_presets_v2_template_dir())
-    except Exception:
-        return []
-
-    try:
-        return [
-            path for path in sorted(templates_dir.glob("*.txt"), key=lambda item: item.name.lower())
-            if path.is_file() and not path.name.startswith("_")
-        ]
-    except Exception:
-        return []
 
 
 def _deleted_presets_ini_path() -> Path:

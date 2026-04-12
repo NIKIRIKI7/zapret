@@ -14,7 +14,7 @@ needs_new_separator = true
 command_group = ipsets
 icon_name = fa5s.network-wired
 icon_color = #FFA500
-base_filter = --filter-tcp=80,443-65535 --ipset=russia-youtube-rtmps.txt --ipset=ipset-all.txt --ipset=ipset-base.txt --ipset=ipset-discord.txt
+base_filter = --filter-tcp=80,443-65535 --ipset=russia-youtube-rtmps.txt --ipset=ipset-all.txt --ipset=ipset-discord.txt
 strategy_type = tcp
 requires_all_ports = true
 strip_payload = true

@@ -51,6 +51,7 @@ def build_strategy_detail_mode_policy(
     target_info,
     *,
     strategy_set: str | None = None,
+    is_circular_preset: bool = False,
 ) -> StrategyDetailModePolicy:
     resolved_strategy_set = normalize_direct_zapret2_ui_mode(
         strategy_set if strategy_set is not None else get_current_direct_zapret2_ui_mode()
@@ -66,7 +67,7 @@ def build_strategy_detail_mode_policy(
     )
     has_ipset = bool(str(getattr(target_info, "base_filter_ipset", "") or "").strip())
     has_hostlist = bool(str(getattr(target_info, "base_filter_hostlist", "") or "").strip())
-    show_advanced_transport_controls = (not is_basic_direct) and (not is_udp_like)
+    show_advanced_transport_controls = (not is_basic_direct) and (not is_udp_like) and (not is_circular_preset)
 
     return StrategyDetailModePolicy(
         strategy_set=resolved_strategy_set,

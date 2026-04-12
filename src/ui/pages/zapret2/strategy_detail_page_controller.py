@@ -480,9 +480,7 @@ class StrategyDetailPageController:
         updated = facade.rename_by_file_name(old_file_name, new_name)
         switched_file_name = updated.file_name if facade.is_selected_file_name(updated.file_name) else None
         if switched_file_name:
-            from core.presets.direct_runtime_events import notify_direct_preset_identity_changed
-
-            notify_direct_preset_identity_changed("direct_zapret2", updated.file_name)
+            facade.notify_preset_identity_changed(updated.file_name)
 
         return StrategyDetailPresetActionResult(
             ok=True,
@@ -640,7 +638,10 @@ class StrategyDetailPageController:
         from ui.pages.zapret2.strategy_detail_mode_policy import build_strategy_detail_mode_policy
 
         target_info = getattr(payload, "target_item", None)
-        policy = build_strategy_detail_mode_policy(target_info)
+        policy = build_strategy_detail_mode_policy(
+            target_info,
+            is_circular_preset=bool(getattr(payload, "is_circular_preset", False)),
+        )
         details = getattr(payload, "details", None)
         current_strategy_id = str(getattr(details, "current_strategy", "none") or "none").strip() or "none"
         protocol = str(getattr(target_info, "protocol", "") or "").strip()
@@ -699,7 +700,10 @@ class StrategyDetailPageController:
     ) -> StrategyDetailStrategiesLoadPlan:
         from ui.pages.zapret2.strategy_detail_mode_policy import build_strategy_detail_mode_policy
 
-        resolved_policy = policy or build_strategy_detail_mode_policy(target_info)
+        resolved_policy = policy or build_strategy_detail_mode_policy(
+            target_info,
+            is_circular_preset=bool(getattr(payload, "is_circular_preset", False)),
+        )
         strategies = dict(getattr(payload, "strategy_entries", {}) or {}) if payload is not None else {}
         pending_items: list[StrategyDetailPendingStrategyItem] = []
         is_empty = not strategies

@@ -260,18 +260,56 @@ class WindowLifecycleMixin:
         except Exception as e:
             log(f"Ошибка при очистке страницы {page_name}: {e}", "DEBUG")
 
+    def _iter_loaded_pages_for_close(self):
+        loaded_pages = getattr(self, "pages", {}) or {}
+        for page_name, page in loaded_pages.items():
+            if page is None:
+                continue
+            yield page_name, page
+
     def _cleanup_threaded_pages_for_close(self) -> None:
         try:
-            for page_name in (
+            seen: set[PageName] = set()
+            priority_pages = (
                 PageName.AUTOSTART,
+                PageName.BLOBS,
+                PageName.CONTROL,
+                PageName.CUSTOM_DOMAINS,
+                PageName.CUSTOM_IPSET,
+                PageName.ZAPRET2_DIRECT_CONTROL,
+                PageName.ZAPRET2_DIRECT,
+                PageName.ZAPRET2_STRATEGY_DETAIL,
+                PageName.ZAPRET2_USER_PRESETS,
+                PageName.ZAPRET1_DIRECT_CONTROL,
+                PageName.ZAPRET1_DIRECT,
+                PageName.ZAPRET1_STRATEGY_DETAIL,
+                PageName.ZAPRET1_USER_PRESETS,
+                PageName.NETROGAT,
+                PageName.IPSET,
                 PageName.LOGS,
                 PageName.SERVERS,
+                PageName.ABOUT,
                 PageName.BLOCKCHECK,
                 PageName.HOSTS,
+                PageName.NETWORK,
+                PageName.ORCHESTRA,
+                PageName.ORCHESTRA_SETTINGS,
+                PageName.APPEARANCE,
                 PageName.PREMIUM,
                 PageName.TELEGRAM_PROXY,
-            ):
+            )
+
+            for page_name in priority_pages:
                 self._cleanup_loaded_page(page_name)
+                seen.add(page_name)
+
+            for page_name, page in self._iter_loaded_pages_for_close():
+                if page_name in seen or not hasattr(page, "cleanup"):
+                    continue
+                try:
+                    page.cleanup()
+                except Exception as e:
+                    log(f"Ошибка при очистке страницы {page_name}: {e}", "DEBUG")
         except Exception as e:
             log(f"Ошибка при очистке страниц: {e}", "DEBUG")
 
@@ -306,7 +344,15 @@ class WindowLifecycleMixin:
 
     def _cleanup_visual_and_proxy_resources_for_close(self) -> None:
         try:
-            from ui.pages.telegram_proxy_page import _get_proxy_manager
+            app = QApplication.instance()
+            closer = getattr(app, "_zapret_global_combo_popup_closer", None) if app is not None else None
+            if closer is not None and hasattr(closer, "cleanup"):
+                closer.cleanup()
+        except Exception:
+            pass
+
+        try:
+            from telegram_proxy.ui.page import _get_proxy_manager
 
             _get_proxy_manager().cleanup()
         except Exception:

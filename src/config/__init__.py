@@ -16,11 +16,10 @@ from .config import (
     get_window_maximized, set_window_maximized,
     # Функции определения exe по методу
     ZAPRET2_MODES, get_winws_exe_for_method, is_zapret2_mode,
-    # Paths for per-user presets/lists templates
-    get_zapret_presets_v2_dir, get_zapret_userdata_dir, get_zapret_channel_dir_name, get_zapret_presets_v2_template_dir,
-    get_zapret_presets_v1_template_dir,
+    # Paths for per-user presets and lists
+    get_zapret_presets_v2_dir, get_zapret_userdata_dir, get_zapret_channel_dir_name,
     get_zapret_lists_template_dir, get_other_template_path,
-    get_zapret_lists_backup_dir, get_other_backup_path, get_other_user_backup_path
+    get_zapret_lists_backup_dir, get_other_user_backup_path
 )
 from .build_info import APP_VERSION, CHANNEL
 from .reg import reg, HKCU, get_dpi_autostart, set_dpi_autostart, get_subscription_check_interval, get_remove_github_api, get_active_hosts_domains, set_active_hosts_domains, get_auto_update_enabled, set_auto_update_enabled, get_tray_hint_shown, set_tray_hint_shown
@@ -45,12 +44,9 @@ __all__ = [
     'get_zapret_channel_dir_name',
     'get_zapret_userdata_dir',
     'get_zapret_presets_v2_dir',
-    'get_zapret_presets_v2_template_dir',
-    'get_zapret_presets_v1_template_dir',
     'get_zapret_lists_template_dir',
     'get_other_template_path',
     'get_zapret_lists_backup_dir',
-    'get_other_backup_path',
     'get_other_user_backup_path',
     # config.py - пути реестра
     'REGISTRY_PATH',

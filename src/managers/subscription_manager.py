@@ -57,9 +57,9 @@ class SubscriptionManager:
                 try:
                     self.progress.emit("Инициализация системы подписок...")
                     
-                    # Создаем DonateChecker
-                    from donater.donate import DonateChecker
-                    donate_checker = DonateChecker()
+                    # Создаем канонический PremiumService
+                    from donater.service import get_premium_service
+                    donate_checker = get_premium_service()
                     
                     self.progress.emit("Проверка статуса подписки...")
                     
@@ -138,7 +138,7 @@ class SubscriptionManager:
         if self._cleanup_in_progress:
             return
         if not success or not donate_checker:
-            log("DonateChecker не инициализирован", "⚠ WARNING")
+            log("PremiumService не инициализирован", "⚠ WARNING")
             # ✅ ИСПОЛЬЗУЕМ UI MANAGER
             if hasattr(self.app, 'ui_manager'):
                 self.app.ui_manager.update_title_with_subscription_status(False, None, 0)

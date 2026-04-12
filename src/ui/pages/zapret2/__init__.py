@@ -9,8 +9,8 @@ _PAGE_EXPORTS: dict[str, tuple[str, str]] = {
     "Zapret2DirectControlPage": (".direct_control_page", "Zapret2DirectControlPage"),
     "Zapret2StrategiesPageNew": (".direct_zapret2_page", "Zapret2StrategiesPageNew"),
     "StrategyDetailPage": (".strategy_detail_page", "StrategyDetailPage"),
-    "Zapret2PresetDetailPage": (".preset_detail_page", "Zapret2PresetDetailPage"),
-    "Zapret2UserPresetsPage": (".user_presets_page", "Zapret2UserPresetsPage"),
+    "Zapret2PresetDetailPage": ("preset_zapret2.ui.preset_detail_page", "Zapret2PresetDetailPage"),
+    "Zapret2UserPresetsPage": ("preset_zapret2.ui.user_presets_page", "Zapret2UserPresetsPage"),
 }
 
 __all__ = list(_PAGE_EXPORTS)

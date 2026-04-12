@@ -345,19 +345,6 @@ class PremiumStorage:
 
         return bool(PremiumStorage.update(_upd))
 
-    # Back-compat aliases (old UI used RegistryManager.get_key/save_key/delete_key)
-    @staticmethod
-    def get_key() -> Optional[str]:
-        return PremiumStorage.get_activation_key()
-
-    @staticmethod
-    def save_key(key: str) -> bool:
-        return PremiumStorage.set_activation_key(key)
-
-    @staticmethod
-    def delete_key() -> bool:
-        return PremiumStorage.clear_activation_key()
-
     @staticmethod
     def get_premium_cache() -> Optional[Dict[str, Any]]:
         try:
@@ -460,7 +447,3 @@ class PremiumStorage:
             p.remove_option(_INI_SECTION, "premium_cache_json")
 
         return bool(PremiumStorage.update(_upd))
-
-
-# Back-compat alias (old UI imported RegistryManager)
-RegistryManager = PremiumStorage

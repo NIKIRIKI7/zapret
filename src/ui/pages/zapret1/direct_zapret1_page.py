@@ -7,8 +7,6 @@ import time as _time
 
 from typing import Any
 
-import qtawesome as qta
-
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QWidget, QHBoxLayout
 
@@ -18,6 +16,7 @@ from ui.compat_widgets import QuickActionsBar, RefreshButton
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
 from ui.widgets.preset_targets_list import PresetTargetsList
+from ui.theme import get_themed_qta_icon
 from log import log
 
 from qfluentwidgets import (
@@ -53,6 +52,14 @@ class Zapret1StrategiesPage(BasePage):
     target_clicked = pyqtSignal(str, dict)  # target_key, target_info
     back_clicked = pyqtSignal()
 
+    def _require_app_context(self):
+        app_context = getattr(self.parent(), "app_context", None)
+        if app_context is None:
+            app_context = getattr(self.window(), "app_context", None)
+        if app_context is None:
+            raise RuntimeError("AppContext is required for Zapret1 strategies page")
+        return app_context
+
     def __init__(self, parent=None):
         super().__init__(
             title="Прямой запуск Zapret 1",
@@ -76,6 +83,7 @@ class Zapret1StrategiesPage(BasePage):
         self._loading_label = None
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
+        self._cleanup_in_progress = False
         self._basic_payload_worker = None
         self._basic_payload_request_id = 0
         self._payload_load_started_at = None
@@ -137,11 +145,13 @@ class Zapret1StrategiesPage(BasePage):
         )
 
     def on_page_activated(self) -> None:
+        if self._cleanup_in_progress:
+            return
         if self._breadcrumb is not None:
             self._rebuild_breadcrumb()
         if self._built and self._preset_refresh_pending:
             self._preset_refresh_pending = False
-            QTimer.singleShot(0, self._refresh_from_preset_switch)
+            QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self._refresh_from_preset_switch())
             return
 
     @staticmethod
@@ -157,6 +167,8 @@ class Zapret1StrategiesPage(BasePage):
         return tuple(target_items.keys()) != tuple((self._targets or {}).keys())
 
     def _refresh_from_preset_switch(self) -> None:
+        if self._cleanup_in_progress:
+            return
         if not self.isVisible():
             self._preset_refresh_pending = True
             return
@@ -218,7 +230,7 @@ class Zapret1StrategiesPage(BasePage):
         self._expand_btn.setText(
             tr_catalog("page.z1_direct.toolbar.expand", language=self._ui_language, default="Развернуть")
         )
-        self._expand_btn.setIcon(qta.icon("fa5s.expand-alt", color="#4CAF50"))
+        self._expand_btn.setIcon(get_themed_qta_icon("fa5s.expand-alt", color="#4CAF50"))
         self._expand_btn.setToolTip(
             tr_catalog(
                 "page.z1_direct.toolbar.expand.description",
@@ -233,7 +245,7 @@ class Zapret1StrategiesPage(BasePage):
         self._collapse_btn.setText(
             tr_catalog("page.z1_direct.toolbar.collapse", language=self._ui_language, default="Свернуть")
         )
-        self._collapse_btn.setIcon(qta.icon("fa5s.compress-alt", color="#ff9800"))
+        self._collapse_btn.setIcon(get_themed_qta_icon("fa5s.compress-alt", color="#ff9800"))
         self._collapse_btn.setToolTip(
             tr_catalog(
                 "page.z1_direct.toolbar.collapse.description",
@@ -248,7 +260,7 @@ class Zapret1StrategiesPage(BasePage):
         self._info_btn.setText(
             tr_catalog("page.z1_direct.toolbar.info", language=self._ui_language, default="Что это?")
         )
-        self._info_btn.setIcon(qta.icon("fa5s.question-circle", color="#60cdff"))
+        self._info_btn.setIcon(get_themed_qta_icon("fa5s.question-circle", color="#60cdff"))
         self._info_btn.setToolTip(
             tr_catalog(
                 "page.z1_direct.toolbar.info.description",
@@ -356,6 +368,7 @@ class Zapret1StrategiesPage(BasePage):
         self._set_payload_loading(True)
         worker = DirectBasicUiSnapshotWorker(
             request_id,
+            snapshot_service=self._require_app_context().direct_ui_snapshot_service,
             launch_method="direct_zapret1",
             refresh=refresh,
             startup_scope=startup_scope,
@@ -446,9 +459,7 @@ class Zapret1StrategiesPage(BasePage):
             return
 
         if payload is None:
-            from app_context import require_app_context
-
-            payload = require_app_context().direct_ui_snapshot_service.load_basic_ui_payload("direct_zapret1", refresh=True)
+            payload = self._require_app_context().direct_ui_snapshot_service.load_basic_ui_payload("direct_zapret1", refresh=True)
         self.target_selections = payload.strategy_selections or {}
         self.target_selections = {
             key: self.target_selections.get(key, "none")
@@ -549,6 +560,8 @@ class Zapret1StrategiesPage(BasePage):
         )
 
     def _on_ui_state_changed(self, _state: AppUiState, changed_fields: frozenset[str]) -> None:
+        if self._cleanup_in_progress:
+            return
         if (
             "active_preset_revision" in changed_fields
             or "preset_content_revision" in changed_fields
@@ -609,3 +622,15 @@ class Zapret1StrategiesPage(BasePage):
 
         if self._built:
             self._refresh_subtitles()
+
+    def cleanup(self) -> None:
+        self._cleanup_in_progress = True
+
+        unsubscribe = getattr(self, "_ui_state_unsubscribe", None)
+        if callable(unsubscribe):
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+        self._ui_state_unsubscribe = None
+        self._ui_state_store = None

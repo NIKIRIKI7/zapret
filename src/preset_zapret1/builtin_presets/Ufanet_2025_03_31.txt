@@ -1,6 +1,5 @@
 # Preset: Ufanet_2025_03_31
 # TemplateOrigin: Ufanet_2025_03_31
-# Created: 2026-02-19T00:00:00
 # IconColor: #60cdff
 # Description: Imported from bat/Ufanet_2025_03_31.txt
 

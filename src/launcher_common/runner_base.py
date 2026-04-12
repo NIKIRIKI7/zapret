@@ -12,7 +12,7 @@ from config import LOGS_FOLDER
 from .args_filters import apply_all_filters
 from .constants import SW_HIDE, CREATE_NO_WINDOW, STARTF_USESHOWWINDOW
 from .preset_runner_support import wait_for_process_exit
-from dpi.process_health_check import (
+from dpi.health.process_health_check import (
     check_process_health, get_last_crash_info, check_common_crash_causes,
     check_conflicting_processes, get_conflicting_processes_report, diagnose_startup_error
 )

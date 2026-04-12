@@ -3,11 +3,17 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QVBoxLayout, QLabel,
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QBrush
 
-from core.services import get_strategy_marks_store
 from launcher_common.constants import LABEL_TEXTS, LABEL_COLORS
 from ui.theme import get_theme_tokens
 from ui.theme_refresh import ThemeRefreshController
 from ui.compat_widgets import set_tooltip
+
+
+def _resolve_marks_store(widget):
+    app_context = getattr(widget.window(), "app_context", None)
+    if app_context is None:
+        raise RuntimeError("AppContext is required for strategy widgets")
+    return app_context.strategy_marks_store
 
 def _style_selected(tokens) -> str:
     return f"""
@@ -102,7 +108,7 @@ class CompactStrategyItem(QFrame):
         self.strategy_data = strategy_data
         self.is_selected = False
         self._current_style = None  # Кэш текущего стиля
-        self._marks_store = get_strategy_marks_store()
+        self._marks_store = _resolve_marks_store(self)
 
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)

@@ -1,7 +1,6 @@
 # Preset: Preset X v3 (game filter)
 # TemplateOrigin: Preset X v3 (game filter)
 # BuiltinVersion: 2.18
-# Created: 2026-02-15T15:36:04.305281
 # IconColor: #60cdff
 # Description: 
 
@@ -197,7 +196,6 @@
 --filter-tcp=80,443-65535
 --ipset=lists/russia-youtube-rtmps.txt
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt
 --out-range=-n8
 --lua-desync=send:repeats=2

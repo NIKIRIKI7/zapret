@@ -10,7 +10,7 @@ from PyQt6.QtGui import (
     QIcon, QPixmap, QPainter, QColor, QLinearGradient, 
     QPen, QBrush, QPainterPath, QRadialGradient
 )
-import qtawesome as qta
+from ui.theme import get_themed_qta_icon
 
 
 class FluentIcon:
@@ -137,7 +137,7 @@ class FluentIcon:
         gradient.setColorAt(1.0, QColor(bottom_color))
         
         # Получаем базовую иконку
-        base_icon = qta.icon(icon_name, color='white')
+        base_icon = get_themed_qta_icon(icon_name, color='white')
         base_pixmap = base_icon.pixmap(QSize(safe_size, safe_size))
         
         # Рисуем иконку с градиентом используя маску
@@ -185,7 +185,7 @@ class FluentIcon:
             return cls.create_icon(icon_name, size)
         else:
             # Для невыбранного - полупрозрачный белый
-            return qta.icon(icon_name, color='#cccccc')
+            return get_themed_qta_icon(icon_name, color='#cccccc')
     
     @classmethod
     def create_status_icon(cls, status: str, size: int = 16) -> QPixmap:
@@ -277,11 +277,11 @@ def safe_qta_icon(icon_name: str, color: str = '#f5f5f5', fallback: str = 'fa5s.
         icon_name = fallback
     
     try:
-        return qta.icon(icon_name, color=color)
+        return get_themed_qta_icon(icon_name, color=color)
     except Exception as e:
         from log import log
         log(f"Ошибка создания иконки {icon_name}: {e}", "⚠ WARNING")
         try:
-            return qta.icon(fallback, color=color)
+            return get_themed_qta_icon(fallback, color=color)
         except:
             return QIcon()

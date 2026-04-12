@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QProgressBar, QGraphic
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer
 from PyQt6.QtGui import QFont
 
+from ui.animation_policy import register_managed_animation, start_managed_animation
 from ui.theme import get_theme_tokens
 from ui.theme_refresh import ThemeRefreshController
 
@@ -45,13 +46,17 @@ class AnimatedProgressBar(QWidget):
         self.opacity_effect.setOpacity(0)
         
         # Анимация появления/скрытия
-        self.fade_animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.fade_animation.setDuration(300)
+        self.fade_animation = register_managed_animation(
+            QPropertyAnimation(self.opacity_effect, b"opacity"),
+            300,
+        )
         self.fade_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
         
         # Анимация прогресса
-        self.progress_animation = QPropertyAnimation(self.progress_bar, b"value")
-        self.progress_animation.setDuration(200)
+        self.progress_animation = register_managed_animation(
+            QPropertyAnimation(self.progress_bar, b"value"),
+            200,
+        )
         self.progress_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         
         # Таймер для пульсации при долгой загрузке
@@ -127,7 +132,7 @@ class AnimatedProgressBar(QWidget):
             self.show()
             self.fade_animation.setStartValue(0)
             self.fade_animation.setEndValue(1)
-            self.fade_animation.start()
+            start_managed_animation(self.fade_animation)
             
             # Запускаем пульсацию через 3 секунды
             QTimer.singleShot(3000, self.start_pulse)
@@ -140,14 +145,14 @@ class AnimatedProgressBar(QWidget):
             self.fade_animation.setStartValue(1)
             self.fade_animation.setEndValue(0)
             self.fade_animation.finished.connect(self.hide)
-            self.fade_animation.start()
+            start_managed_animation(self.fade_animation)
     
     def set_progress(self, value: int, text: str = None):
         """Установить прогресс с анимацией"""
         # Анимированное изменение значения
         self.progress_animation.setStartValue(self.progress_bar.value())
         self.progress_animation.setEndValue(value)
-        self.progress_animation.start()
+        start_managed_animation(self.progress_animation)
         
         # Обновляем текст
         if text:

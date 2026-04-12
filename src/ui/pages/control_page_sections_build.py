@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy
-import qtawesome as qta
 
 from ui.compat_widgets import SettingsCard, QuickActionsBar, PulsingDot
+from ui.theme import get_cached_qta_pixmap
 
 
 @dataclass(slots=True)
@@ -180,7 +180,7 @@ def build_control_strategy_section(
 
         strategy_icon.setPixmap(fluent_pixmap('fa5s.cog', 20))
     except Exception:
-        strategy_icon.setPixmap(qta.icon('fa5s.cog', color=accent_hex).pixmap(20, 20))
+        strategy_icon.setPixmap(get_cached_qta_pixmap('fa5s.cog', color=accent_hex, size=20))
     strategy_icon.setFixedSize(24, 24)
     strategy_layout.addWidget(strategy_icon)
 

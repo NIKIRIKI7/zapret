@@ -8,7 +8,7 @@ import time
 from PyQt6.QtCore import QTimer
 from strategy_menu import get_strategy_launch_method
 from log import log
-from dpi.process_health_check import (
+from dpi.health.process_health_check import (
     check_conflicting_processes,
     try_kill_conflicting_processes,
     get_conflicting_processes_report,
@@ -333,7 +333,11 @@ class DPIController:
         self._dpi_start_verify_generation += 1
 
         try:
-            request, warnings = prepare_start_request(selected_mode, launch_method)
+            request, warnings = prepare_start_request(
+                selected_mode,
+                launch_method,
+                app_context=self.app.app_context,
+            )
             self._pending_launch_warnings = list(warnings or [])
         except Exception as e:
             self._fail_start_preparation(str(e))

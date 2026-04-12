@@ -3,19 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 import shutil
 
+from core.paths import AppPaths
 from log import log
 from .strategy_catalog_sanitizer import sanitize_strategy_catalog_dir
 from .package_assets import package_dir
-from .v1_builtin_templates import sync_repo_builtins_to_runtime_templates_v1
-from .z2_builtin_templates import sync_repo_builtins_to_runtime_templates_v2
-from .z2_template_runtime import ensure_templates_copied_to_presets, invalidate_templates_cache
+from .z2_template_runtime import ensure_templates_copied_to_presets
 from .v1_template_runtime import ensure_v1_templates_copied_to_presets, update_changed_v1_templates_in_presets
 
 
-def prepare_direct_support_files(launch_method: str) -> None:
+def prepare_direct_support_files(launch_method: str, app_paths: AppPaths) -> None:
     method = str(launch_method or "").strip().lower()
     if method == "direct_zapret2":
-        _prepare_direct_zapret2_support_files()
+        _prepare_direct_zapret2_support_files(app_paths)
         return
     if method == "direct_zapret1":
         _prepare_direct_zapret1_support_files()
@@ -23,26 +22,16 @@ def prepare_direct_support_files(launch_method: str) -> None:
     raise ValueError(f"Unsupported direct launch method: {launch_method}")
 
 
-def _prepare_direct_zapret2_support_files() -> None:
-    from app_context import require_app_context
-
-    app_paths = require_app_context().app_paths
+def _prepare_direct_zapret2_support_files(app_paths: AppPaths) -> None:
     user_root = app_paths.user_root
     presets_dir = app_paths.engine_paths("winws2").ensure_directories().presets_dir
-    templates_dir = user_root / "presets_v2_template"
     basic_dir = user_root / "direct_zapret2" / "basic_strategies"
     advanced_dir = user_root / "direct_zapret2" / "advanced_strategies"
 
-    templates_dir.mkdir(parents=True, exist_ok=True)
     basic_dir.mkdir(parents=True, exist_ok=True)
     advanced_dir.mkdir(parents=True, exist_ok=True)
     presets_dir.mkdir(parents=True, exist_ok=True)
 
-    sync_repo_builtins_to_runtime_templates_v2()
-    try:
-        invalidate_templates_cache()
-    except Exception:
-        pass
     ensure_templates_copied_to_presets()
 
     z2_package_dir = package_dir("preset_zapret2")
@@ -59,7 +48,6 @@ def _prepare_direct_zapret1_support_files() -> None:
             "continuing with already installed APPDATA state",
             "DEBUG",
         )
-    sync_repo_builtins_to_runtime_templates_v1()
     update_changed_v1_templates_in_presets()
     ensure_v1_templates_copied_to_presets()
 

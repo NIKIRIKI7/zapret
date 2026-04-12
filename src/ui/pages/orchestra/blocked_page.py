@@ -241,6 +241,7 @@ class OrchestraBlockedPage(BasePage):
         self._direct_blocked_by_askey = {askey: {} for askey in ASKEY_ALL}
         self._runtime_initialized = False
         self._refresh_loading = False
+        self._cleanup_in_progress = False
 
         self._setup_ui()
         self._apply_page_theme(force=True)
@@ -276,6 +277,8 @@ class OrchestraBlockedPage(BasePage):
         return card, card_layout
 
     def _set_refresh_loading(self, loading: bool) -> None:
+        if self._cleanup_in_progress:
+            return
         self._refresh_loading = loading
         if hasattr(self, "refresh_btn") and self.refresh_btn is not None:
             self.refresh_btn.setEnabled(not loading)
@@ -501,9 +504,13 @@ class OrchestraBlockedPage(BasePage):
 
     def _refresh_data(self):
         """Обновляет все данные на странице"""
+        if self._cleanup_in_progress:
+            return
         self._refresh_blocked_list()
 
     def _show_ignored_target_warning(self, domain: str) -> None:
+        if self._cleanup_in_progress:
+            return
         if InfoBar is not None:
             InfoBar.warning(
                 title=self._tr("page.orchestra.blocked.infobar.ignored_proxy.title", "Игнорируется"),
@@ -520,9 +527,13 @@ class OrchestraBlockedPage(BasePage):
 
     def _reload_from_registry(self):
         """Перезагружает данные из реестра и обновляет список"""
+        if self._cleanup_in_progress:
+            return
         self._set_refresh_loading(True)
 
         def _do_reload():
+            if self._cleanup_in_progress:
+                return
             try:
                 runner = self._get_runner()
                 if runner and hasattr(runner, 'blocked_manager'):
@@ -533,10 +544,11 @@ class OrchestraBlockedPage(BasePage):
                     log("Список заблокированных перезагружен из реестра (direct)", "INFO")
                 self._refresh_data()
             finally:
-                self._set_refresh_loading(False)
+                if not self._cleanup_in_progress:
+                    self._set_refresh_loading(False)
 
         from PyQt6.QtCore import QTimer
-        QTimer.singleShot(0, _do_reload)
+        QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and _do_reload())
 
     def _load_directly_from_registry(self):
         """Загружает данные напрямую из реестра (без активного runner)"""
@@ -552,6 +564,8 @@ class OrchestraBlockedPage(BasePage):
 
     def _refresh_blocked_list(self):
         """Обновляет список заблокированных стратегий"""
+        if self._cleanup_in_progress:
+            return
         # Очищаем старые ряды
         self._blocked_rows.clear()
         while self.rows_layout.count():
@@ -763,6 +777,8 @@ class OrchestraBlockedPage(BasePage):
 
     def _block_strategy(self):
         """Блокирует стратегию"""
+        if self._cleanup_in_progress:
+            return
         runner = self._get_runner()
         if not runner:
             return
@@ -804,6 +820,8 @@ class OrchestraBlockedPage(BasePage):
 
     def _unblock_all(self):
         """Очищает пользовательский чёрный список (системные блокировки остаются)"""
+        if self._cleanup_in_progress:
+            return
         runner = self._get_runner()
         if not runner:
             return
@@ -860,3 +878,7 @@ class OrchestraBlockedPage(BasePage):
                         duration=3000,
                         parent=self.window(),
                     )
+
+    def cleanup(self) -> None:
+        self._cleanup_in_progress = True
+        self._refresh_loading = False

@@ -44,6 +44,7 @@ class ThemeRefreshController(QObject):
         self._pending_force = False
         self._applying_refresh = False
         self._last_theme_key = None
+        self._cleanup_in_progress = False
 
         try:
             target.installEventFilter(self)
@@ -61,6 +62,8 @@ class ThemeRefreshController(QObject):
                 pass
 
     def eventFilter(self, watched, event):  # noqa: N802 (Qt override)
+        if self._cleanup_in_progress:
+            return False
         try:
             if watched is self._target and event.type() in (
                 QEvent.Type.StyleChange,
@@ -75,6 +78,8 @@ class ThemeRefreshController(QObject):
         self._last_theme_key = None
 
     def request_refresh(self, *, force: bool = False) -> None:
+        if self._cleanup_in_progress or self._target is None:
+            return
         if self._applying_refresh:
             self._pending_force = self._pending_force or bool(force)
             return
@@ -103,6 +108,8 @@ class ThemeRefreshController(QObject):
         QTimer.singleShot(0, self._apply_debounced)
 
     def flush_pending(self) -> None:
+        if self._cleanup_in_progress:
+            return
         if not self._refresh_pending_when_hidden and not self._pending_force:
             return
         self._refresh_pending_when_hidden = False
@@ -111,9 +118,14 @@ class ThemeRefreshController(QObject):
         self.request_refresh(force=pending_force)
 
     def _on_theme_signal(self, *_args) -> None:
+        if self._cleanup_in_progress:
+            return
         self.request_refresh()
 
     def _apply_debounced(self) -> None:
+        if self._cleanup_in_progress or self._target is None:
+            self._refresh_scheduled = False
+            return
         self._refresh_scheduled = False
         force = bool(self._pending_force)
         self._pending_force = False
@@ -168,3 +180,30 @@ class ThemeRefreshController(QObject):
             callback(force=force)
             return
         callback()
+
+    def cleanup(self) -> None:
+        if self._cleanup_in_progress:
+            return
+        self._cleanup_in_progress = True
+        self._refresh_scheduled = False
+        self._refresh_pending_when_hidden = False
+        self._pending_force = False
+
+        target = self._target
+        if target is not None:
+            try:
+                target.removeEventFilter(self)
+            except Exception:
+                pass
+
+        if qconfig is not None:
+            try:
+                qconfig.themeChanged.disconnect(self._on_theme_signal)
+            except Exception:
+                pass
+            try:
+                qconfig.themeColorChanged.disconnect(self._on_theme_signal)
+            except Exception:
+                pass
+
+        self._target = None

@@ -13,7 +13,7 @@ def get_direct_strategy_summary(window, max_items: int = 2) -> str:
         if method not in ("direct_zapret1", "direct_zapret2"):
             return "Прямой запуск"
 
-        facade = DirectPresetFacade.from_launch_method(method)
+        facade = DirectPresetFacade.from_launch_method(method, app_context=window.app_context)
         selections = facade.get_strategy_selections() or {}
         target_items = facade.get_target_ui_items() or {}
         ordered_targets = sorted(

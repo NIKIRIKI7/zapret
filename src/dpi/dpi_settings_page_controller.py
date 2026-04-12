@@ -77,7 +77,6 @@ class DpiSettingsPageController:
 
     @staticmethod
     def apply_launch_method(method: str) -> str:
-        from core.services import reset_cached_services
         from strategy_menu import get_strategy_launch_method, set_strategy_launch_method
 
         previous_method = str(get_strategy_launch_method() or "").strip().lower()
@@ -88,8 +87,7 @@ class DpiSettingsPageController:
         direct_methods = ("direct_zapret2", "direct_zapret1")
         if previous_method in direct_methods or next_method in direct_methods:
             if previous_method != next_method:
-                log(f"Смена метода {previous_method} -> {next_method}, сброс direct-кэша...", "INFO")
-                reset_cached_services()
+                log(f"Смена метода {previous_method} -> {next_method}", "INFO")
 
         return next_method
 

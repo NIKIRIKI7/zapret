@@ -1,7 +1,6 @@
 # Preset: Default multisplit_stun (game filter)
 # TemplateOrigin: Default multisplit_stun (game filter)
 # BuiltinVersion: 2.18
-# Created: 2026-02-03T17:52:52.760817
 # Description: 
 
 --lua-init=@lua/zapret-lib.lua
@@ -182,7 +181,6 @@
 
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt
 --ipset=lists/ipset-cloudflare.txt
 --ipset=lists/cloudflare-ipset.txt
@@ -206,7 +204,6 @@
 
 --filter-udp=443-65535
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt
 --ipset=lists/ipset-cloudflare.txt
 --ipset=lists/cloudflare-ipset.txt

@@ -12,7 +12,6 @@ from log import log
 
 _DEFAULT_TEMPLATE_CONTENT = """\
 # Preset: Default
-# Created: 2026-01-01T00:00:00
 # IconColor: #60cdff
 # Description: Default Zapret 1 preset
 
@@ -120,7 +119,7 @@ def get_builtin_base_from_copy_name_v1(name: str) -> Optional[str]:
 
 
 def ensure_v1_templates_copied_to_presets() -> int:
-    templates = _load_template_paths()
+    templates = _load_template_contents()
     if not templates:
         return 0
 
@@ -128,14 +127,13 @@ def ensure_v1_templates_copied_to_presets() -> int:
     deleted_lower = {name.lower() for name in get_deleted_preset_names_v1()}
     copied = 0
 
-    for name, src_path in templates.items():
+    for name, content in templates.items():
         if name.lower() in deleted_lower:
             continue
         dest = presets_dir / f"{name}.txt"
         if dest.exists():
             continue
         try:
-            content = _normalize_template_header_v1(src_path.read_text(encoding="utf-8", errors="replace"), name)
             dest.write_text(content, encoding="utf-8")
             copied += 1
             unmark_preset_deleted_v1(name)
@@ -146,7 +144,7 @@ def ensure_v1_templates_copied_to_presets() -> int:
 
 
 def update_changed_v1_templates_in_presets() -> int:
-    templates = _load_template_paths()
+    templates = _load_template_contents()
     if not templates:
         return 0
 
@@ -154,12 +152,11 @@ def update_changed_v1_templates_in_presets() -> int:
     backups_dir = presets_dir / "_builtin_version_backups"
     updated = 0
 
-    for name, src_path in templates.items():
+    for name, template_content in templates.items():
         dest = presets_dir / f"{name}.txt"
         if not dest.exists():
             continue
         try:
-            template_content = src_path.read_text(encoding="utf-8", errors="replace")
             template_version = _extract_builtin_version(template_content)
             if not template_version:
                 continue
@@ -179,7 +176,7 @@ def update_changed_v1_templates_in_presets() -> int:
             except Exception:
                 pass
 
-            dest.write_text(_normalize_template_header_v1(template_content, name), encoding="utf-8")
+            dest.write_text(template_content, encoding="utf-8")
             log(
                 f"Built-in V1 preset updated from template version {existing_version or 'none'} "
                 f"to {template_version or 'none'}: {dest}",
@@ -193,7 +190,7 @@ def update_changed_v1_templates_in_presets() -> int:
 
 
 def overwrite_v1_templates_to_presets() -> tuple[int, int, list[str]]:
-    templates = _load_template_paths()
+    templates = _load_template_contents()
     if not templates:
         return (0, 0, [])
 
@@ -202,11 +199,9 @@ def overwrite_v1_templates_to_presets() -> tuple[int, int, list[str]]:
     failed: list[str] = []
 
     for name in sorted(templates.keys(), key=lambda value: value.lower()):
-        src_path = templates[name]
         dest = presets_dir / f"{name}.txt"
         try:
-            content = _normalize_template_header_v1(src_path.read_text(encoding="utf-8", errors="replace"), name)
-            dest.write_text(content, encoding="utf-8")
+            dest.write_text(templates[name], encoding="utf-8")
             copied += 1
             unmark_preset_deleted_v1(name)
         except Exception as exc:
@@ -218,12 +213,6 @@ def overwrite_v1_templates_to_presets() -> tuple[int, int, list[str]]:
 
 def ensure_default_preset_exists_v1() -> bool:
     try:
-        try:
-            from .v1_builtin_templates import sync_repo_builtins_to_runtime_templates_v1
-
-            sync_repo_builtins_to_runtime_templates_v1()
-        except Exception:
-            pass
         ensure_v1_templates_copied_to_presets()
         presets_dir = _presets_dir_v1()
         if (presets_dir / "Default.txt").exists():
@@ -268,48 +257,18 @@ def _presets_dir_v1() -> Path:
     raise RuntimeError("Canonical userdata root is required for presets_v1 directory")
 
 
-def _templates_dir_v1() -> Path:
-    try:
-        from config import get_zapret_presets_v1_template_dir
-
-        return Path(get_zapret_presets_v1_template_dir())
-    except Exception:
-        raise RuntimeError("Canonical userdata root is required for presets_v1_template directory")
-
-
 def _deleted_presets_ini_path() -> Path:
     return _presets_dir_v1() / "deleted_presets.ini"
 
 
-def _load_template_paths() -> dict[str, Path]:
-    templates: dict[str, Path] = {}
-    tpl_dir = _templates_dir_v1()
-    try:
-        from .v1_builtin_templates import list_builtin_catalog_names_v1
-
-        builtin_names = {str(name or "").strip().casefold() for name in list_builtin_catalog_names_v1()}
-
-        if tpl_dir.is_dir():
-            for path in tpl_dir.glob("*.txt"):
-                if path.is_file() and not path.name.startswith("_") and path.stem.casefold() in builtin_names:
-                    templates[path.stem] = path
-    except Exception as exc:
-        log(f"Error reading V1 templates dir: {exc}", "DEBUG")
-    return templates
-
-
 def _load_template_contents() -> dict[str, str]:
-    contents: dict[str, str] = {}
-    for name, path in _load_template_paths().items():
-        clean_name = str(name or "").strip()
-        if not clean_name:
-            continue
-        try:
-            content = path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-        contents[clean_name] = _normalize_template_header_v1(content, clean_name)
-    return contents
+    try:
+        from .v1_builtin_templates import list_repo_builtin_templates_v1
+
+        return dict(list_repo_builtin_templates_v1())
+    except Exception as exc:
+        log(f"Error reading V1 built-in templates: {exc}", "DEBUG")
+        return {}
 
 
 def _normalize_template_header_v1(content: str, preset_name: str) -> str:
@@ -347,7 +306,7 @@ def _normalize_template_header_v1(content: str, preset_name: str) -> str:
             continue
         if stripped.startswith("# modified:"):
             continue
-        if stripped.startswith("# created:") or stripped.startswith("# iconcolor:") or stripped.startswith("# description:"):
+        if stripped.startswith("# iconcolor:") or stripped.startswith("# description:"):
             out_header.append(raw.rstrip("\n"))
             continue
         if stripped.startswith("#"):

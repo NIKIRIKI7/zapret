@@ -178,6 +178,7 @@ class OrchestraLockedPage(BasePage):
         self._direct_locked_by_askey = {askey: {} for askey in ASKEY_ALL}
         self._runtime_initialized = False
         self._refresh_loading = False
+        self._cleanup_in_progress = False
 
         self._setup_ui()
         self._apply_page_theme(force=True)
@@ -213,6 +214,8 @@ class OrchestraLockedPage(BasePage):
         return card, card_layout
 
     def _set_refresh_loading(self, loading: bool) -> None:
+        if self._cleanup_in_progress:
+            return
         self._refresh_loading = loading
         if hasattr(self, "refresh_btn") and self.refresh_btn is not None:
             self.refresh_btn.setEnabled(not loading)
@@ -426,6 +429,8 @@ class OrchestraLockedPage(BasePage):
             domain: Домен для которого заблокирована стратегия
             strategy: Номер заблокированной стратегии
         """
+        if self._cleanup_in_progress:
+            return
         message = self._tr(
             "page.orchestra.locked.warning.blocked_strategy",
             "Стратегия #{strategy} заблокирована для {domain}. Разблокируйте её на странице 'Заблокированные'.",
@@ -435,6 +440,8 @@ class OrchestraLockedPage(BasePage):
         self.notification_banner.show_warning(message, auto_hide_ms=7000)
 
     def _show_ignored_target_warning(self, domain: str) -> None:
+        if self._cleanup_in_progress:
+            return
         message = self._tr(
             "page.orchestra.locked.warning.ignored_proxy_target",
             "Домен {domain} относится к отдельному Telegram Proxy модулю. Оркестратор не управляет такими целями.",
@@ -444,13 +451,19 @@ class OrchestraLockedPage(BasePage):
 
     def _refresh_data(self):
         """Обновляет все данные на странице (из памяти)"""
+        if self._cleanup_in_progress:
+            return
         self._refresh_locked_list()
 
     def _reload_from_registry(self):
         """Перезагружает данные из реестра и обновляет список"""
+        if self._cleanup_in_progress:
+            return
         self._set_refresh_loading(True)
 
         def _do_reload():
+            if self._cleanup_in_progress:
+                return
             try:
                 runner = self._get_runner()
                 if runner and hasattr(runner, 'locked_manager'):
@@ -461,10 +474,11 @@ class OrchestraLockedPage(BasePage):
                     log("Список залоченных перезагружен из реестра (direct)", "INFO")
                 self._refresh_data()
             finally:
-                self._set_refresh_loading(False)
+                if not self._cleanup_in_progress:
+                    self._set_refresh_loading(False)
 
         from PyQt6.QtCore import QTimer
-        QTimer.singleShot(0, _do_reload)
+        QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and _do_reload())
 
     def _load_directly_from_registry(self):
         """Загружает данные напрямую из реестра (без активного runner)"""
@@ -479,6 +493,8 @@ class OrchestraLockedPage(BasePage):
 
     def _refresh_locked_list(self):
         """Обновляет список залоченных стратегий"""
+        if self._cleanup_in_progress:
+            return
         # Очищаем старые ряды
         self._domain_rows.clear()
         while self.rows_layout.count():
@@ -651,6 +667,8 @@ class OrchestraLockedPage(BasePage):
 
     def _lock_strategy(self):
         """Залочивает стратегию"""
+        if self._cleanup_in_progress:
+            return
         domain = self.domain_input.text().strip().lower()
         if not domain:
             return
@@ -696,6 +714,8 @@ class OrchestraLockedPage(BasePage):
 
     def _unlock_all(self):
         """Разлочивает все стратегии"""
+        if self._cleanup_in_progress:
+            return
         runner = self._get_runner()
         if not runner:
             return
@@ -740,3 +760,12 @@ class OrchestraLockedPage(BasePage):
                         duration=3000,
                         parent=self.window()
                     )
+
+    def cleanup(self) -> None:
+        self._cleanup_in_progress = True
+        self._refresh_loading = False
+        try:
+            self.notification_banner.auto_hide_timer.stop()
+            self.notification_banner.hide()
+        except Exception:
+            pass

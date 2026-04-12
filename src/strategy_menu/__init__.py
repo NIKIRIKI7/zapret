@@ -8,8 +8,6 @@
 - registry/orchestra helpers должны импортироваться явно из legacy модулей, а не через этот общий фасад.
 """
 
-from log import log
-
 from .launch_method_store import (
     get_strategy_launch_method,
     set_strategy_launch_method,
@@ -24,22 +22,25 @@ from .ui_prefs_store import (
 )
 # ==================== НАСТРОЙКИ DIRECT SOURCE PRESET ====================
 
-def _get_direct_preset_facade():
+def _get_direct_preset_facade(*, app_context=None):
     """Возвращает фасад нового direct preset core для direct_zapret1/direct_zapret2."""
     try:
         method = (get_strategy_launch_method() or "").strip().lower()
-        if method in ("direct_zapret2", "direct_zapret1"):
+        if method in ("direct_zapret2", "direct_zapret1") and app_context is not None:
             from core.presets.direct_facade import DirectPresetFacade
 
-            return DirectPresetFacade.from_launch_method(method)
+            return DirectPresetFacade.from_launch_method(
+                method,
+                app_context=app_context,
+            )
     except Exception:
         pass
     return None
 
 
-def get_wssize_enabled() -> bool:
+def get_wssize_enabled(*, app_context=None) -> bool:
     """Получает настройку включения --wssize."""
-    facade = _get_direct_preset_facade()
+    facade = _get_direct_preset_facade(app_context=app_context)
     if facade is not None:
         try:
             return bool(facade.get_wssize_enabled())
@@ -48,9 +49,9 @@ def get_wssize_enabled() -> bool:
     return False
 
 
-def set_wssize_enabled(enabled: bool) -> bool:
+def set_wssize_enabled(enabled: bool, *, app_context=None) -> bool:
     """Сохраняет настройку --wssize."""
-    facade = _get_direct_preset_facade()
+    facade = _get_direct_preset_facade(app_context=app_context)
     if facade is not None:
         try:
             return bool(facade.set_wssize_enabled(bool(enabled)))
@@ -59,9 +60,9 @@ def set_wssize_enabled(enabled: bool) -> bool:
     return False
 
 
-def get_debug_log_enabled() -> bool:
+def get_debug_log_enabled(*, app_context=None) -> bool:
     """Получает настройку включения логирования --debug."""
-    facade = _get_direct_preset_facade()
+    facade = _get_direct_preset_facade(app_context=app_context)
     if facade is not None:
         try:
             return bool(facade.get_debug_log_enabled())
@@ -70,9 +71,9 @@ def get_debug_log_enabled() -> bool:
     return False
 
 
-def set_debug_log_enabled(enabled: bool) -> bool:
+def set_debug_log_enabled(enabled: bool, *, app_context=None) -> bool:
     """Сохраняет настройку логирования --debug."""
-    facade = _get_direct_preset_facade()
+    facade = _get_direct_preset_facade(app_context=app_context)
     if facade is not None:
         try:
             return bool(facade.set_debug_log_enabled(bool(enabled)))
@@ -81,9 +82,9 @@ def set_debug_log_enabled(enabled: bool) -> bool:
     return False
 
 
-def get_debug_log_file() -> str:
+def get_debug_log_file(*, app_context=None) -> str:
     """Получает относительный путь к debug лог-файлу winws2 (без @)."""
-    facade = _get_direct_preset_facade()
+    facade = _get_direct_preset_facade(app_context=app_context)
     if facade is not None:
         try:
             return str(facade.get_debug_log_file() or "")

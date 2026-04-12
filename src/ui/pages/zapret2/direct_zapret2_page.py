@@ -6,29 +6,32 @@
 
 import time as _time
 
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QEvent
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QFrame, QSizePolicy
-)
-import qtawesome as qta
+from PyQt6.QtCore import pyqtSignal, QTimer, QEvent
 
 from core.runtime.direct_ui_snapshot_service import DirectBasicUiSnapshotWorker
 from ui.pages.base_page import BasePage
-from ui.compat_widgets import QuickActionsBar, RefreshButton
+from ui.pages.zapret2.direct_zapret2_page_build import build_z2_direct_shell
+from ui.pages.zapret2.direct_zapret2_page_runtime_helpers import (
+    apply_payload_snapshot,
+    build_list_structure_signature,
+    payload_requires_rebuild,
+    set_payload_loading,
+)
+from ui.pages.zapret2.direct_zapret2_page_selection_helpers import (
+    apply_direct_z2_language,
+    apply_filter_mode_change,
+    apply_strategy_selection,
+    update_current_strategies_display,
+)
 from ui.main_window_state import AppUiState, MainWindowStateStore
-from ui.widgets.preset_targets_list import PresetTargetsList
-from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 from log import log
 
 from qfluentwidgets import (
     BreadcrumbBar,
     MessageBox,
-    CaptionLabel,
     BodyLabel,
     PushButton,
-    PrimaryPushButton,
 )
 
 
@@ -58,6 +61,14 @@ class Zapret2StrategiesPageNew(BasePage):
     open_target_detail = pyqtSignal(str, str)  # target_key, current_strategy_id
     back_clicked = pyqtSignal()
 
+    def _require_app_context(self):
+        app_context = getattr(self.parent(), "app_context", None)
+        if app_context is None:
+            app_context = getattr(self.window(), "app_context", None)
+        if app_context is None:
+            raise RuntimeError("AppContext is required for Zapret2 strategies page")
+        return app_context
+
     def __init__(self, parent=None):
         super().__init__(
             title="Прямой запуск Zapret 2",
@@ -77,6 +88,7 @@ class Zapret2StrategiesPageNew(BasePage):
         self._built = False
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
+        self._cleanup_in_progress = False
         self._preset_refresh_pending = False
         self._list_structure_signature = None
         self._empty_state_label = None
@@ -208,110 +220,35 @@ class Zapret2StrategiesPageNew(BasePage):
             self._render_probe_first_paint_logged = False
             self._render_probe_idle_logged = False
 
-            # Панель быстрых действий: только stock fluent-кнопки без описаний.
             _t_toolbar = _time.perf_counter()
-            self.add_section_title(text_key="page.z2_direct.toolbar.title")
-            self._toolbar_actions_bar = QuickActionsBar(self.content)
-
-            self._request_btn = PrimaryPushButton()
-            self._request_btn.setText(
-                tr_catalog("page.z2_direct.request.button", language=self._ui_language, default="ОТКРЫТЬ ФОРМУ НА GITHUB")
+            shell = build_z2_direct_shell(
+                content_parent=self.content,
+                content_layout=self.content_layout,
+                add_section_title=self.add_section_title,
+                tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+                on_open_category_request_form=self._open_category_request_form,
+                on_reload=self._reload_strategies,
+                on_expand_all=self._expand_all,
+                on_collapse_all=self._collapse_all,
+                on_show_info_popup=self._show_info_popup,
             )
-            self._request_btn.setIcon(qta.icon("fa5b.github", color=get_theme_tokens().accent_hex))
-            self._request_btn.clicked.connect(self._open_category_request_form)
-            self._request_btn.setToolTip(
-                tr_catalog(
-                    "page.z2_direct.request.hint",
-                    language=self._ui_language,
-                    default=(
-                        "Хотите добавить новый сайт или сервис в Zapret 2? "
-                        "Откройте готовую форму на GitHub и опишите, что нужно добавить в hostlist или ipset."
-                    ),
-                )
-            )
-            self._toolbar_actions_bar.add_button(self._request_btn)
-
-            self._reload_btn = RefreshButton()
-            self._reload_btn.clicked.connect(self._reload_strategies)
-            self._reload_btn.setToolTip(
-                tr_catalog(
-                    "page.z2_direct.toolbar.reload.description",
-                    language=self._ui_language,
-                    default="Обновить список категорий, target'ов и выбранных стратегий.",
-                )
-            )
-            self._toolbar_actions_bar.add_button(self._reload_btn)
-
-            self._expand_btn = PushButton()
-            self._expand_btn.setText(
-                tr_catalog("page.z2_direct.toolbar.expand", language=self._ui_language, default="Развернуть")
-            )
-            self._expand_btn.setIcon(qta.icon("fa5s.expand-alt", color="#4CAF50"))
-            self._expand_btn.clicked.connect(self._expand_all)
-            self._expand_btn.setToolTip(
-                tr_catalog(
-                    "page.z2_direct.toolbar.expand.description",
-                    language=self._ui_language,
-                    default="Развернуть все категории и target'ы в списке.",
-                )
-            )
-            self._toolbar_actions_bar.add_button(self._expand_btn)
-
-            self._collapse_btn = PushButton()
-            self._collapse_btn.setText(
-                tr_catalog("page.z2_direct.toolbar.collapse", language=self._ui_language, default="Свернуть")
-            )
-            self._collapse_btn.setIcon(qta.icon("fa5s.compress-alt", color="#ff9800"))
-            self._collapse_btn.clicked.connect(self._collapse_all)
-            self._collapse_btn.setToolTip(
-                tr_catalog(
-                    "page.z2_direct.toolbar.collapse.description",
-                    language=self._ui_language,
-                    default="Свернуть все категории и target'ы в списке.",
-                )
-            )
-            self._toolbar_actions_bar.add_button(self._collapse_btn)
-
-            self._info_btn = PushButton()
-            self._info_btn.setText(
-                tr_catalog("page.z2_direct.toolbar.info", language=self._ui_language, default="Что это такое?")
-            )
-            self._info_btn.setIcon(qta.icon("fa5s.question-circle", color="#60cdff"))
-            self._info_btn.clicked.connect(self._show_info_popup)
-            self._info_btn.setToolTip(
-                tr_catalog(
-                    "page.z2_direct.toolbar.info.description",
-                    language=self._ui_language,
-                    default="Показать краткое объяснение по работе прямого запуска Zapret 2.",
-                )
-            )
-            self._toolbar_actions_bar.add_button(self._info_btn)
-            self.content_layout.addWidget(self._toolbar_actions_bar)
+            self._toolbar_actions_bar = shell.toolbar_actions_bar
+            self._request_btn = shell.request_btn
+            self._reload_btn = shell.reload_btn
+            self._expand_btn = shell.expand_btn
+            self._collapse_btn = shell.collapse_btn
+            self._info_btn = shell.info_btn
             _log_startup_z2_direct_metric("_build_content.toolbar", (_time.perf_counter() - _t_toolbar) * 1000)
 
-            self._content_host = QWidget(self.content)
-            self._content_host_layout = QVBoxLayout(self._content_host)
-            self._content_host_layout.setContentsMargins(0, 0, 0, 0)
-            self._content_host_layout.setSpacing(8)
-
-            self._loading_label = BodyLabel(
-                tr_catalog(
-                    "page.z2_direct.loading",
-                    language=self._ui_language,
-                    default="Загрузка категорий и target'ов...",
-                )
-            )
-            self._loading_label.setWordWrap(True)
-            self._loading_label.hide()
-            self._content_host_layout.addWidget(self._loading_label)
-
-            self.content_layout.addWidget(self._content_host, 1)
+            self._content_host = shell.content_host
+            self._content_host_layout = shell.content_host_layout
+            self._loading_label = shell.loading_label
 
             self._built = True
             log("Zapret2StrategiesPageNew: shell построен", "INFO")
             _log_startup_z2_direct_metric("_build_content.total", (_time.perf_counter() - _t_total) * 1000)
             self._render_probe_build_finished_at = _time.perf_counter()
-            QTimer.singleShot(0, self._log_render_probe_idle)
+            QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self._log_render_probe_idle())
 
         except Exception as e:
             log(f"Ошибка построения Zapret2StrategiesPageNew: {e}", "ERROR")
@@ -319,32 +256,7 @@ class Zapret2StrategiesPageNew(BasePage):
             log(traceback.format_exc(), "DEBUG")
 
     def _build_list_structure_signature(self, payload) -> tuple:
-        """Собирает сигнатуру структуры списка для решения: rebuild нужен или нет."""
-        selected_preset_file_name = str(getattr(payload, "selected_preset_file_name", "") or "").strip().lower()
-        target_items = payload.target_items or {}
-        signature_rows = []
-        for view in tuple(payload.target_views or ()):
-            target_key = str(getattr(view, "target_key", "") or "").strip()
-            meta = target_items.get(target_key)
-            signature_rows.append(
-                (
-                    target_key,
-                    str(getattr(view, "display_name", "") or "").strip(),
-                    str(getattr(meta, "full_name", "") or "").strip(),
-                    str(getattr(meta, "command_group", "") or "").strip(),
-                    int(getattr(meta, "order", 999) or 999),
-                    int(getattr(meta, "command_order", 999) or 999),
-                    str(getattr(meta, "protocol", "") or "").strip(),
-                    str(getattr(meta, "ports", "") or "").strip(),
-                    str(getattr(meta, "icon_name", "") or "").strip(),
-                    str(getattr(meta, "icon_color", "") or "").strip(),
-                    str(getattr(meta, "base_filter_hostlist", "") or "").strip(),
-                    str(getattr(meta, "base_filter_ipset", "") or "").strip(),
-                    str(getattr(meta, "strategy_type", "") or "").strip(),
-                    bool(getattr(meta, "requires_all_ports", False)),
-                )
-            )
-        return (selected_preset_file_name, tuple(signature_rows))
+        return build_list_structure_signature(payload)
 
     def _apply_payload_to_existing_list(self, payload, *, reason: str) -> bool:
         """Обновляет уже построенный список без полной перестройки страницы."""
@@ -365,23 +277,20 @@ class Zapret2StrategiesPageNew(BasePage):
         return True
 
     def _payload_requires_rebuild(self, payload) -> bool:
-        """Определяет, нужно ли физически пересобирать список."""
-        if self._targets_list is None:
-            return True
-        return self._build_list_structure_signature(payload) != self._list_structure_signature
+        return payload_requires_rebuild(
+            payload=payload,
+            current_signature=self._list_structure_signature,
+            targets_list=self._targets_list,
+        )
 
     def _set_payload_loading(self, loading: bool) -> None:
-        try:
-            if self._reload_btn is not None:
-                self._reload_btn.set_loading(bool(loading))
-        except Exception:
-            pass
-
-        if self._loading_label is None:
-            return
-
-        should_show_placeholder = bool(loading) and self._targets_list is None and self._empty_state_label is None
-        self._loading_label.setVisible(should_show_placeholder)
+        set_payload_loading(
+            reload_btn=self._reload_btn,
+            loading_label=self._loading_label,
+            loading=loading,
+            targets_list=self._targets_list,
+            empty_state_label=self._empty_state_label,
+        )
 
     def _clear_dynamic_payload_widgets(self) -> None:
         host_layout = self._content_host_layout
@@ -428,18 +337,23 @@ class Zapret2StrategiesPageNew(BasePage):
         self._content_host_layout.addWidget(self._targets_list, 1)
 
     def _apply_payload_snapshot(self, payload, *, reason: str) -> None:
-        if self._payload_requires_rebuild(payload):
-            _t_targets = _time.perf_counter()
-            self._clear_dynamic_payload_widgets()
-            self._build_targets_list_widget(payload)
-            _log_startup_z2_direct_metric("_build_content.targets_list", (_time.perf_counter() - _t_targets) * 1000)
-        else:
-            self._apply_payload_to_existing_list(payload, reason=reason)
-            return
-
-        self._list_structure_signature = self._build_list_structure_signature(payload)
-        self._update_current_strategies_display()
-        log(f"Список стратегий применен из runtime snapshot ({reason})", "DEBUG")
+        result = apply_payload_snapshot(
+            page=self,
+            payload=payload,
+            reason=reason,
+            targets_list=self._targets_list,
+            list_structure_signature=self._list_structure_signature,
+            content_host_layout=self._content_host_layout,
+            update_current_strategies_display=self._update_current_strategies_display,
+            build_empty_state_text=self._build_empty_state_text,
+            on_target_clicked=self._on_target_clicked,
+            on_selections_changed=self._on_selections_changed,
+            startup_metric_logger=_log_startup_z2_direct_metric,
+        )
+        self._targets_list = result["targets_list"]
+        self._empty_state_label = result["empty_state_label"]
+        self.target_selections = result["target_selections"]
+        self._list_structure_signature = result["list_structure_signature"]
 
     def _request_payload_refresh(
         self,
@@ -460,6 +374,7 @@ class Zapret2StrategiesPageNew(BasePage):
 
         worker = DirectBasicUiSnapshotWorker(
             request_id,
+            snapshot_service=self._require_app_context().direct_ui_snapshot_service,
             launch_method="direct_zapret2",
             refresh=refresh,
             startup_scope=startup_scope,
@@ -497,9 +412,11 @@ class Zapret2StrategiesPageNew(BasePage):
 
         self._apply_payload_snapshot(payload, reason=reason)
         self._render_probe_build_finished_at = _time.perf_counter()
-        QTimer.singleShot(0, self._log_render_probe_idle)
+        QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self._log_render_probe_idle())
 
     def _log_render_probe_idle(self) -> None:
+        if self._cleanup_in_progress:
+            return
         if self._render_probe_idle_logged:
             return
         finished_at = self._render_probe_build_finished_at
@@ -513,63 +430,43 @@ class Zapret2StrategiesPageNew(BasePage):
 
     def _on_target_clicked(self, target_key: str, strategy_id: str):
         """Обработчик клика по target - открывает страницу выбора стратегий"""
+        if self._cleanup_in_progress:
+            return
         try:
             current_strategy = self.target_selections.get(target_key, 'none')
             # Defer navigation to the next event loop tick: prevents page switch
             # while Qt is still processing the mouse event (can break hover/cursor updates).
-            QTimer.singleShot(0, lambda tk=target_key, cs=current_strategy: self.open_target_detail.emit(tk, cs))
+            QTimer.singleShot(0, lambda tk=target_key, cs=current_strategy: (not self._cleanup_in_progress) and self.open_target_detail.emit(tk, cs))
         except Exception as e:
             log(f"Ошибка открытия детальной страницы: {e}", "ERROR")
 
     def apply_strategy_selection(self, target_key: str, strategy_id: str):
         """Применяет выбор стратегии (вызывается из StrategyDetailPage)"""
-        try:
-            from core.presets.direct_facade import DirectPresetFacade
-            from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
-
-            # Multi-phase TCP UI persists args directly (strategy_detail_page.py).
-            # Avoid clobbering preset args by re-applying a non-existent single strategy.
-            if (strategy_id or "").strip().lower() == "custom":
-                self.target_selections[target_key] = "custom"
-                if self._targets_list:
-                    self._targets_list.update_selection(target_key, "custom")
-                return
-
-            # Сохраняем в preset файл
-            direct_facade = DirectPresetFacade.from_launch_method(
-                "direct_zapret2",
-                on_dpi_reload_needed=lambda: request_direct_runtime_content_apply(
-                    self.parent_app,
-                    launch_method="direct_zapret2",
-                    reason="strategy_changed"
-                )
-            )
+        self.target_selections, should_suppress = apply_strategy_selection(
+            target_key=target_key,
+            strategy_id=strategy_id,
+            target_selections=self.target_selections,
+            targets_list=self._targets_list,
+            require_app_context=self._require_app_context,
+            parent_app=self.parent_app,
+            strategy_selected_emit=self.strategy_selected.emit,
+            strategies_changed_emit=self.strategies_changed.emit,
+            log_info=lambda text: log(text, "INFO"),
+            log_error=lambda text: log(text, "ERROR"),
+        )
+        if should_suppress:
             self._suppress_next_preset_refresh = True
-            direct_facade.set_strategy_selection(target_key, strategy_id, save_and_sync=True)
-
-            self.target_selections[target_key] = strategy_id
-
-            # Обновляем UI
-            if self._targets_list:
-                self._targets_list.update_selection(target_key, strategy_id)
-
-            # Эмитим сигналы
-            self.strategy_selected.emit(target_key, strategy_id)
-            self.strategies_changed.emit(self.target_selections)
-
-            log(f"Выбрана стратегия: {target_key} = {strategy_id}", "INFO")
-
-        except Exception as e:
-            log(f"Ошибка сохранения выбора: {e}", "ERROR")
 
     def apply_filter_mode_change(self, target_key: str, filter_mode: str):
         """Обновляет badge Hostlist/IPset на главной странице без перестроения списка."""
-        try:
+        ok = apply_filter_mode_change(
+            target_key=target_key,
+            filter_mode=filter_mode,
+            targets_list=self._targets_list,
+            log_debug=lambda text: log(text, "DEBUG"),
+        )
+        if ok:
             self._suppress_next_preset_refresh = True
-            if self._targets_list:
-                self._targets_list.update_filter_mode(target_key, filter_mode)
-        except Exception as e:
-            log(f"Ошибка обновления filter_mode: {e}", "DEBUG")
 
     def _on_selections_changed(self, selections: dict):
         """Обработчик изменения выборов"""
@@ -578,7 +475,7 @@ class Zapret2StrategiesPageNew(BasePage):
 
     def _apply_changes(self):
         """Применяет изменения - перезапускает DPI если запущен"""
-        from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
+        from dpi.policy.direct_runtime_apply_policy import request_direct_runtime_content_apply
         request_direct_runtime_content_apply(
             self.parent_app,
             launch_method="direct_zapret2",
@@ -597,6 +494,8 @@ class Zapret2StrategiesPageNew(BasePage):
         Перечитывает активный пресет и обновляет UI списка (без перестроения).
         Вызывается асинхронно из MainWindow после активации пресета.
         """
+        if self._cleanup_in_progress:
+            return
         if not self.isVisible():
             self._preset_refresh_pending = True
             return
@@ -608,9 +507,7 @@ class Zapret2StrategiesPageNew(BasePage):
     def _build_empty_state_text(self) -> str:
         empty_state = None
         try:
-            from app_context import require_app_context
-
-            empty_state = require_app_context().direct_ui_snapshot_service.get_basic_ui_empty_state("direct_zapret2")
+            empty_state = self._require_app_context().direct_ui_snapshot_service.get_basic_ui_empty_state("direct_zapret2")
         except Exception as e:
             log(f"Zapret2StrategiesPageNew: не удалось определить причину пустого списка: {e}", "DEBUG")
 
@@ -706,6 +603,8 @@ class Zapret2StrategiesPageNew(BasePage):
         )
 
     def _on_ui_state_changed(self, state: AppUiState, changed_fields: frozenset[str]) -> None:
+        if self._cleanup_in_progress:
+            return
         if "mode_revision" in changed_fields:
             self.reload_for_mode_change()
             return
@@ -735,24 +634,12 @@ class Zapret2StrategiesPageNew(BasePage):
 
     def _update_current_strategies_display(self):
         """Совместимость: обновляет отображение текущих стратегий"""
-        try:
-            selections = dict(self.target_selections or {})
-            active_count = sum(1 for s in selections.values() if s and s != 'none')
-
-            if active_count > 0:
-                self.current_strategy_label.setText(
-                    tr_catalog(
-                        "page.z2_direct.current.active_count",
-                        language=self._ui_language,
-                        default="{count} активных",
-                    ).format(count=active_count)
-                )
-            else:
-                self.current_strategy_label.setText(
-                    tr_catalog("page.z2_direct.current.not_selected", language=self._ui_language, default="Не выбрана")
-                )
-        except Exception as e:
-            log(f"Ошибка обновления отображения: {e}", "DEBUG")
+        update_current_strategies_display(
+            target_selections=self.target_selections,
+            ui_language=self._ui_language,
+            current_strategy_label=self.current_strategy_label,
+            log_debug=lambda text: log(text, "DEBUG"),
+        )
 
     def _start_process_monitoring(self):
         """Совместимость: заглушка для мониторинга процесса"""
@@ -806,60 +693,30 @@ class Zapret2StrategiesPageNew(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
-        self._rebuild_breadcrumb()
-
-        if self._request_btn is not None:
-            self._request_btn.setText(
-                tr_catalog("page.z2_direct.request.button", language=self._ui_language, default="ОТКРЫТЬ ФОРМУ НА GITHUB")
-            )
-            self._request_btn.setToolTip(
-                tr_catalog(
-                    "page.z2_direct.request.hint",
-                    language=self._ui_language,
-                    default=(
-                        "Хотите добавить новый сайт или сервис в Zapret 2? "
-                        "Откройте готовую форму на GitHub и опишите, что нужно добавить в hostlist или ipset."
-                    ),
-                )
-            )
-        if self._expand_btn is not None:
-            self._expand_btn.setText(
-                tr_catalog("page.z2_direct.toolbar.expand", language=self._ui_language, default="Развернуть")
-            )
-            self._expand_btn.setToolTip(
-                tr_catalog(
-                    "page.z2_direct.toolbar.expand.description",
-                    language=self._ui_language,
-                    default="Развернуть все категории и target'ы в списке.",
-                )
-            )
-        if self._collapse_btn is not None:
-            self._collapse_btn.setText(
-                tr_catalog("page.z2_direct.toolbar.collapse", language=self._ui_language, default="Свернуть")
-            )
-            self._collapse_btn.setToolTip(
-                tr_catalog(
-                    "page.z2_direct.toolbar.collapse.description",
-                    language=self._ui_language,
-                    default="Свернуть все категории и target'ы в списке.",
-                )
-            )
-        if self._info_btn is not None:
-            self._info_btn.setText(
-                tr_catalog("page.z2_direct.toolbar.info", language=self._ui_language, default="Что это такое?")
-            )
-            self._info_btn.setToolTip(
-                tr_catalog(
-                    "page.z2_direct.toolbar.info.description",
-                    language=self._ui_language,
-                    default="Показать краткое объяснение по работе прямого запуска Zapret 2.",
-                )
-            )
-
-        self._update_current_strategies_display()
+        apply_direct_z2_language(
+            ui_language=self._ui_language,
+            rebuild_breadcrumb=self._rebuild_breadcrumb,
+            request_btn=self._request_btn,
+            expand_btn=self._expand_btn,
+            collapse_btn=self._collapse_btn,
+            info_btn=self._info_btn,
+            update_current_strategies_display=self._update_current_strategies_display,
+        )
 
     def _open_category_request_form(self):
         """Открывает GitHub-форму запроса на добавление сайтов в hostlist/ipset."""
         import webbrowser
 
         webbrowser.open(_CATEGORY_REQUEST_FORM_URL)
+
+    def cleanup(self) -> None:
+        self._cleanup_in_progress = True
+
+        unsubscribe = getattr(self, "_ui_state_unsubscribe", None)
+        if callable(unsubscribe):
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+        self._ui_state_unsubscribe = None
+        self._ui_state_store = None

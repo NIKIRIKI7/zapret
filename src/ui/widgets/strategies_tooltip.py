@@ -13,7 +13,8 @@ from PyQt6.QtGui import (QColor, QPainter, QPainterPath, QBrush,
 import qtawesome as qta
 
 from log import log
-from ui.theme import get_theme_tokens
+from ui.animation_policy import register_managed_animation, start_managed_animation
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 
 
 class StrategiesListTooltip(QWidget):
@@ -40,8 +41,10 @@ class StrategiesListTooltip(QWidget):
         self._mouse_offset = QPoint(15, 15)
         
         # Анимация появления
-        self._fade_animation = QPropertyAnimation(self, b"opacity_value")
-        self._fade_animation.setDuration(150)
+        self._fade_animation = register_managed_animation(
+            QPropertyAnimation(self, b"opacity_value"),
+            150,
+        )
         self._fade_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         
         # Таймер для следования за мышкой
@@ -70,7 +73,7 @@ class StrategiesListTooltip(QWidget):
         header_layout.setSpacing(6)
         
         header_icon = QLabel()
-        header_icon.setPixmap(qta.icon('fa5s.list-ul', color=self._tokens.accent_hex).pixmap(14, 14))
+        header_icon.setPixmap(get_cached_qta_pixmap('fa5s.list-ul', color=self._tokens.accent_hex, size=14))
         header_layout.addWidget(header_icon)
         
         self.title_label = QLabel("Все активные стратегии")
@@ -123,11 +126,11 @@ class StrategiesListTooltip(QWidget):
         # Иконка категории (Font Awesome)
         icon_label = QLabel()
         try:
-            pixmap = qta.icon(icon_name, color=icon_color).pixmap(14, 14)
+            pixmap = get_cached_qta_pixmap(icon_name, color=icon_color, size=14)
             icon_label.setPixmap(pixmap)
         except:
             # Fallback на простую иконку
-            pixmap = qta.icon('fa5s.globe', color=self._tokens.accent_hex).pixmap(14, 14)
+            pixmap = get_cached_qta_pixmap('fa5s.globe', color=self._tokens.accent_hex, size=14)
             icon_label.setPixmap(pixmap)
         icon_label.setFixedSize(16, 16)
         row_layout.addWidget(icon_label)
@@ -203,7 +206,7 @@ class StrategiesListTooltip(QWidget):
         self._fade_animation.stop()
         self._fade_animation.setStartValue(0.0)
         self._fade_animation.setEndValue(1.0)
-        self._fade_animation.start()
+        start_managed_animation(self._fade_animation)
     
     def _follow_cursor(self):
         """Плавно следует за курсором"""
@@ -255,7 +258,7 @@ class StrategiesListTooltip(QWidget):
         except:
             pass
         self._fade_animation.finished.connect(self._on_hide_finished)
-        self._fade_animation.start()
+        start_managed_animation(self._fade_animation)
     
     def _on_hide_finished(self):
         try:

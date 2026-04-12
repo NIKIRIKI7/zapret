@@ -7,7 +7,7 @@ import time
 
 from PyQt6.QtCore import QObject, QMetaObject, Qt, pyqtSignal
 
-from dpi.process_health_check import diagnose_startup_error
+from dpi.health.process_health_check import diagnose_startup_error
 from log import log
 from strategy_menu import get_strategy_launch_method
 
@@ -486,10 +486,9 @@ class DirectPresetSwitchWorker(QObject):
 
             self.progress.emit("Применяем пресет...")
 
-            from app_context import require_app_context
             from launcher_common import get_strategy_runner
 
-            profile = require_app_context().direct_flow_coordinator.ensure_launch_profile(
+            profile = self.app_instance.app_context.direct_flow_coordinator.ensure_launch_profile(
                 self.launch_method,
                 require_filters=True,
             )

@@ -2,7 +2,6 @@
 # TemplateOrigin: Ultimate Main Riot + Valorant (game filter)
 # BuiltinVersion: 2.18
 # Description: YouTube + Discord (as MAIN) + Valorant/Riot
-# Created: 2026-02-10
 # IconColor: #60cdff
 
 --lua-init=@lua/zapret-lib.lua
@@ -156,7 +155,6 @@
 
 --filter-tcp=443,444-65535
 --ipset=lists/ipset-all.txt
---ipset=lists/ipset-base.txt
 --ipset=lists/ipset-discord.txt
 --ipset=lists/ipset-cloudflare.txt
 --ipset=lists/cloudflare-ipset.txt

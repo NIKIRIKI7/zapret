@@ -66,6 +66,7 @@ class AboutPage(BasePage):
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
         self._pending_tab_key: str | None = None
+        self._cleanup_in_progress = False
 
         self._build_ui()
         self.set_ui_language(self._ui_language)
@@ -89,6 +90,8 @@ class AboutPage(BasePage):
         )
 
     def _on_ui_state_changed(self, state: AppUiState, _changed_fields: frozenset[str]) -> None:
+        if self._cleanup_in_progress:
+            return
         self.update_subscription_status(
             state.subscription_is_premium,
             state.subscription_days_remaining,
@@ -166,6 +169,8 @@ class AboutPage(BasePage):
 
     def switch_to_tab(self, key: str) -> None:
         """External API: switch to About/Support/Help tab by key."""
+        if self._cleanup_in_progress:
+            return
         index = AboutPageController.resolve_tab_index(key)
         if index is None:
             return
@@ -573,3 +578,16 @@ class AboutPage(BasePage):
                 )
             except Exception:
                 pass
+
+    def cleanup(self) -> None:
+        self._cleanup_in_progress = True
+        self._pending_tab_key = None
+
+        unsubscribe = getattr(self, "_ui_state_unsubscribe", None)
+        if callable(unsubscribe):
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+        self._ui_state_unsubscribe = None
+        self._ui_state_store = None

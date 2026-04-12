@@ -155,7 +155,12 @@ def _selector_lines_from_metadata(raw: dict[str, object]) -> tuple[str, ...]:
     return tuple(line for line in lines if any(line.startswith(prefix) for prefix in _MATCH_PREFIXES))
 
 
-def _normalize_match_signature(lines: list[str] | tuple[str, ...], *, strip_payload: bool = False) -> tuple[str, ...]:
+def _normalize_match_signature(
+    lines: list[str] | tuple[str, ...],
+    *,
+    strip_payload: bool = False,
+    strip_ranges: bool = False,
+) -> tuple[str, ...]:
     normalized: list[str] = []
     for raw in lines:
         line = str(raw or "").strip()
@@ -163,6 +168,8 @@ def _normalize_match_signature(lines: list[str] | tuple[str, ...], *, strip_payl
         if not lowered:
             continue
         if strip_payload and lowered.startswith("--payload="):
+            continue
+        if strip_ranges and lowered.startswith("--in-range"):
             continue
         family = selector_family_for_line(line)
         if family in {"hostlist", "hostlist-exclude", "ipset", "ipset-exclude"}:
@@ -205,12 +212,17 @@ def infer_broad_target_keys(match_lines: list[str], protocol_kind: str) -> tuple
             continue
 
         strip_payload = bool(metadata.get("strip_payload", False))
-        actual_signature = _normalize_match_signature(match_lines, strip_payload=strip_payload)
+        actual_signature = _normalize_match_signature(
+            match_lines,
+            strip_payload=strip_payload,
+            strip_ranges=True,
+        )
         if not actual_signature:
             continue
         metadata_signature = _normalize_match_signature(
             metadata_lines,
             strip_payload=strip_payload,
+            strip_ranges=True,
         )
         if metadata_signature != actual_signature:
             continue

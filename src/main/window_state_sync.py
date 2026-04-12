@@ -159,7 +159,8 @@ class WindowStateSyncMixin:
             is_premium = False
             if hasattr(self, "donate_checker") and self.donate_checker:
                 try:
-                    is_premium, _, _ = self.donate_checker.check_subscription_status(use_cache=True)
+                    sub_info = self.donate_checker.get_full_subscription_info(use_cache=True)
+                    is_premium = bool(sub_info.get("is_premium"))
                     log(f"🎄 Премиум статус: {is_premium}", "DEBUG")
                 except Exception as e:
                     log(f"🎄 Ошибка проверки премиума: {e}", "DEBUG")

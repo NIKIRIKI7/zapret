@@ -11,8 +11,10 @@
 копируется в `%APPDATA%/zapret/lists_backup/other.user.txt`.
 
 Примечание:
-В более старых версиях мог существовать backup `%APPDATA%/zapret/lists_backup/other.txt`.
-Он воспринимается как legacy (слитый base+user) и используется только для миграции.
+Поддерживается только новая модель:
+- `other.base.txt` как системная база;
+- `other.user.txt` как пользовательский файл;
+- `other.txt` как автоматически собираемый итоговый файл для движка.
 """
 
 from __future__ import annotations
@@ -21,11 +23,9 @@ import os
 
 from log import log
 from config import (
-    MAIN_DIRECTORY,
     OTHER_PATH,
     OTHER_BASE_PATH,
     OTHER_USER_PATH,
-    get_other_backup_path,
     get_other_template_path,
     get_other_user_backup_path,
 )
@@ -93,47 +93,17 @@ def _dedup_preserve_order(items: list[str]) -> list[str]:
     return out
 
 
-def _candidate_source_paths() -> list[str]:
-    """Кандидаты для source other.txt (без hardcode абсолютных путей)."""
-    candidates: list[str] = []
-
-    unique: list[str] = []
-    for path in candidates:
-        if path not in unique:
-            unique.append(path)
-    return unique
-
-
-def _find_valid_source_path() -> str | None:
-    for path in _candidate_source_paths():
-        if _read_effective_entries(path):
-            return path
-    return None
-
-
 def ensure_other_template_updated() -> bool:
     """Гарантирует валидный системный шаблон other.txt в lists_template."""
     try:
         template_path = get_other_template_path()
-        source_path = _find_valid_source_path()
-
-        if source_path:
-            source_content = _normalize_newlines(_read_text_file(source_path))
-            current_content = ""
-            if os.path.exists(template_path):
-                current_content = _normalize_newlines(_read_text_file(template_path))
-
-            if source_content != current_content:
-                _write_text_file(template_path, source_content)
-                log(f"Обновлен шаблон other.txt из source: {source_path}", "DEBUG")
-            return True
 
         if _count_effective_entries(template_path) > 0:
             return True
 
         fallback_content = "\n".join(sorted(set(_fallback_base_domains()))) + "\n"
         _write_text_file(template_path, fallback_content)
-        log("Создан аварийный шаблон other.txt (source не найден)", "WARNING")
+        log("Создан аварийный шаблон other.txt", "WARNING")
         return True
 
     except Exception as e:
@@ -142,18 +112,12 @@ def ensure_other_template_updated() -> bool:
 
 
 def get_base_domains() -> list[str]:
-    """Возвращает базовые домены (по шаблону/источнику)."""
+    """Возвращает базовые домены из шаблона или аварийного минимума."""
     template_domains = _read_effective_entries(get_other_template_path())
     if template_domains:
         return template_domains
 
-    source_path = _find_valid_source_path()
-    if source_path:
-        source_domains = _read_effective_entries(source_path)
-        if source_domains:
-            return source_domains
-
-    log("WARNING: Не найден валидный source other.txt, использую аварийный минимум", "WARNING")
+    log("WARNING: Не найден валидный шаблон other.txt, использую аварийный минимум", "WARNING")
     return _fallback_base_domains()
 
 
@@ -169,13 +133,6 @@ def get_user_domains() -> list[str]:
 
 def build_other_template_content() -> str:
     """Формирует содержимое системного шаблона other.txt."""
-    source_path = _find_valid_source_path()
-    if source_path:
-        try:
-            return _normalize_newlines(_read_text_file(source_path))
-        except Exception:
-            pass
-
     template_path = get_other_template_path()
     if os.path.exists(template_path):
         try:
@@ -187,23 +144,6 @@ def build_other_template_content() -> str:
 
     domains = sorted(set(_fallback_base_domains()))
     return "\n".join(domains) + "\n"
-
-
-def _extract_user_entries_from_combined(path: str) -> list[str]:
-    base_set = get_base_domains_set()
-    entries = _read_effective_entries(path)
-
-    user: list[str] = []
-    seen: set[str] = set()
-    for e in entries:
-        if e in base_set:
-            continue
-        if e in seen:
-            continue
-        seen.add(e)
-        user.append(e)
-    return user
-
 
 def _ensure_user_file_exists() -> bool:
     """Ensures OTHER_USER_PATH exists; restores/migrates only if missing."""
@@ -220,23 +160,6 @@ def _ensure_user_file_exists() -> bool:
             if content is not None:
                 _write_text_file(OTHER_USER_PATH, content)
                 log("other.user.txt восстановлен из backup", "SUCCESS")
-                return True
-
-        # 2) Legacy backup (combined base+user).
-        legacy_bkp = get_other_backup_path()
-        if _count_effective_entries(legacy_bkp) > 0:
-            user_entries = _extract_user_entries_from_combined(legacy_bkp)
-            if user_entries:
-                _write_text_file(OTHER_USER_PATH, "\n".join(user_entries) + "\n")
-                log("other.user.txt восстановлен из legacy backup", "SUCCESS")
-                return True
-
-        # 3) Legacy work file (combined base+user).
-        if _count_effective_entries(OTHER_PATH) > 0:
-            user_entries = _extract_user_entries_from_combined(OTHER_PATH)
-            if user_entries:
-                _write_text_file(OTHER_USER_PATH, "\n".join(user_entries) + "\n")
-                log("other.user.txt создан из существующего other.txt", "INFO")
                 return True
 
         # Nothing to restore: create empty user file.

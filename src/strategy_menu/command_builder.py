@@ -13,7 +13,7 @@ Command Builder Module
 import re
 from typing import Optional
 
-from launcher_common.blobs import get_blobs
+from blobs.service import get_blobs
 from core.presets.direct_facade import DirectPresetFacade
 
 # ===================== HELPERS =====================
@@ -72,15 +72,17 @@ def extract_payload(args: str) -> tuple[str, str]:
 # ===================== SYNDATA =====================
 
 
-def _get_direct_facade():
+def _get_direct_facade(*, app_context=None):
     try:
-        return DirectPresetFacade.from_launch_method("direct_zapret2")
+        if app_context is None:
+            return None
+        return DirectPresetFacade.from_launch_method("direct_zapret2", app_context=app_context)
     except Exception:
         return None
 
 
-def _get_target_details(target_key: str):
-    facade = _get_direct_facade()
+def _get_target_details(target_key: str, *, app_context=None):
+    facade = _get_direct_facade(app_context=app_context)
     if facade is None:
         return None
     try:
@@ -89,7 +91,7 @@ def _get_target_details(target_key: str):
         return None
 
 
-def build_syndata_args(target_key: str, protocol: str = "tcp") -> str:
+def build_syndata_args(target_key: str, protocol: str = "tcp", *, app_context=None) -> str:
     """
     Собирает --lua-desync=syndata:... из настроек активного пресета.
 
@@ -101,7 +103,7 @@ def build_syndata_args(target_key: str, protocol: str = "tcp") -> str:
         if proto in ("udp", "quic", "l7", "raw"):
             return ""
 
-        details = _get_target_details(target_key)
+        details = _get_target_details(target_key, app_context=app_context)
         syndata = getattr(details, "syndata_settings", None)
 
         if not syndata or not syndata.enabled:
@@ -138,7 +140,7 @@ def build_syndata_args(target_key: str, protocol: str = "tcp") -> str:
         return ""
 
 
-def get_out_range_args(target_key: str, protocol: str = "tcp") -> str:
+def get_out_range_args(target_key: str, protocol: str = "tcp", *, app_context=None) -> str:
     """
     Возвращает --out-range=-{mode}{value} (всегда, дефолт -n8).
 
@@ -161,7 +163,7 @@ def get_out_range_args(target_key: str, protocol: str = "tcp") -> str:
     DEFAULT_OUT_RANGE = 8
     DEFAULT_MODE = "n"
     try:
-        details = _get_target_details(target_key)
+        details = _get_target_details(target_key, app_context=app_context)
         out_range_settings = getattr(details, "out_range_settings", None)
         out_range = getattr(out_range_settings, "value", 0) if getattr(out_range_settings, "enabled", False) else 0
         if out_range is None or int(out_range) == 0:
@@ -180,7 +182,7 @@ def get_out_range_args(target_key: str, protocol: str = "tcp") -> str:
         return f"--out-range=-{DEFAULT_MODE}{DEFAULT_OUT_RANGE}"
 
 
-def build_send_args(target_key: str, protocol: str = "tcp") -> str:
+def build_send_args(target_key: str, protocol: str = "tcp", *, app_context=None) -> str:
     """
     Собирает --lua-desync=send:... из настроек активного пресета.
 
@@ -200,7 +202,7 @@ def build_send_args(target_key: str, protocol: str = "tcp") -> str:
         if proto in ("udp", "quic", "l7", "raw"):
             return ""
 
-        details = _get_target_details(target_key)
+        details = _get_target_details(target_key, app_context=app_context)
         send = getattr(details, "send_settings", None)
 
         if not send or not send.enabled:
@@ -250,7 +252,9 @@ def build_category_args(
     base_filter: str,
     strategy_args: str,
     target_key: str,
-    strip_payload: bool = False
+    strip_payload: bool = False,
+    *,
+    app_context=None,
 ) -> str:
     """
     Собирает полную строку для категории:
@@ -265,7 +269,7 @@ def build_category_args(
     Returns:
         str: полная командная строка для категории
     """
-    syndata_args = build_syndata_args(target_key)
+    syndata_args = build_syndata_args(target_key, app_context=app_context)
 
     # Извлекаем payload из strategy_args
     payload_part, remaining_strategy_args = extract_payload(strategy_args)
@@ -288,9 +292,9 @@ def build_category_args(
 
 # ===================== PREVIEW =====================
 
-def preview_syndata(target_key: str) -> str:
+def preview_syndata(target_key: str, *, app_context=None) -> str:
     """Возвращает превью syndata для отображения в UI"""
-    args = build_syndata_args(target_key)
+    args = build_syndata_args(target_key, app_context=app_context)
     if not args:
         return "Syndata: выключено"
     return f"Syndata: {args}"
@@ -298,7 +302,7 @@ def preview_syndata(target_key: str) -> str:
 
 # ===================== FILTER MODE =====================
 
-def get_filter_mode(target_key: str) -> str:
+def get_filter_mode(target_key: str, *, app_context=None) -> str:
     """
     Получает режим фильтрации для категории из активного пресета.
 
@@ -306,7 +310,7 @@ def get_filter_mode(target_key: str) -> str:
         "hostlist" или "ipset"
     """
     try:
-        facade = _get_direct_facade()
+        facade = _get_direct_facade(app_context=app_context)
         if facade is None:
             return "hostlist"
         filter_mode = facade.get_target_filter_mode(target_key)

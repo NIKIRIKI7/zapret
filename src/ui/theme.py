@@ -83,15 +83,6 @@ def start_theme_switch_metrics(theme_name: str, *, source: str = "unknown", clic
     return 0
 
 
-def get_selected_theme(default: str | None = None, *, log_read: bool = True) -> str | None:
-    """Возвращает сохранённую тему или default."""
-    from config import REGISTRY_PATH
-    saved = reg(REGISTRY_PATH, "SelectedTheme")
-    if log_read:
-        from log import log
-        log(f"📦 Чтение темы из реестра [{REGISTRY_PATH}]: '{saved}' (default: '{default}')", "DEBUG")
-    return saved or default
-
 def set_selected_theme(theme_name: str) -> bool:
     """Записывает строку SelectedTheme"""
     from config import REGISTRY_PATH
@@ -99,32 +90,6 @@ def set_selected_theme(theme_name: str) -> bool:
     result = reg(REGISTRY_PATH, "SelectedTheme", theme_name)
     log(f"💾 Сохранение темы в реестр [{REGISTRY_PATH}]: '{theme_name}' -> {result}", "DEBUG")
     return result
-
-
-def get_theme_bg_color(theme_name: str) -> str:
-    """Returns background color RGB string for the current mode."""
-    try:
-        from qfluentwidgets import isDarkTheme
-        is_light = not isDarkTheme()
-    except Exception:
-        is_light = False
-    if str(theme_name).startswith("Светлая") or str(theme_name) == "light":
-        is_light = True
-    return "243, 243, 243" if is_light else "26, 26, 26"
-
-
-def get_theme_content_bg_color(theme_name: str) -> str:
-    """Returns content area background color (slightly lighter than bg)."""
-    bg = get_theme_bg_color(theme_name)
-    try:
-        r, g, b = [int(x.strip()) for x in bg.split(',')]
-        r = min(255, r + 7)
-        g = min(255, g + 7)
-        b = min(255, b + 7)
-        return f"{r}, {g}, {b}"
-    except Exception:
-        return "39, 39, 39"
-
 
 def _parse_rgb(rgb: str, *, default: tuple[int, int, int] = (0, 0, 0)) -> tuple[int, int, int]:
     try:
@@ -180,26 +145,6 @@ def _normalize_theme_name(theme_name: str | None) -> str:
     if raw.startswith("Светлая"):
         return "light"
     return "dark"
-
-
-def set_active_theme_name(theme_name: str | None) -> str:
-    """No-op: theme name is now derived from isDarkTheme(). Kept for compatibility."""
-    return _normalize_theme_name(theme_name)
-
-
-def get_active_theme_name() -> str:
-    """Returns 'Светлая синяя' if light mode, else 'Темная синяя'. Backward compat."""
-    try:
-        from qfluentwidgets import isDarkTheme
-        return "Светлая синяя" if not isDarkTheme() else "Темная синяя"
-    except Exception:
-        return "Темная синяя"
-
-
-def clear_qta_pixmap_cache() -> None:
-    """Clears shared qtawesome pixmap cache."""
-    _QTA_PIXMAP_CACHE.clear()
-
 
 def invalidate_theme_tokens_cache() -> None:
     """Clears the theme tokens cache.
@@ -782,7 +727,6 @@ _RGBA_COLOR_RE = re.compile(
     r"^\s*rgba?\(\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*(?:,\s*([0-9]*\.?[0-9]+)\s*)?\)\s*$",
     re.IGNORECASE,
 )
-_QTA_ICON_PATCHED = False
 
 
 def _theme_tokens_for_icons(theme_name: str | None = None) -> ThemeTokens:
@@ -1287,52 +1231,6 @@ def get_themed_qta_icon(
     except Exception:
         return QIcon()
 
-
-def install_qtawesome_icon_theme_patch() -> None:
-    """Installs global qtawesome icon color defaults and rgba() normalization."""
-    global _QTA_ICON_PATCHED
-    if _QTA_ICON_PATCHED:
-        return
-
-    try:
-        import qtawesome as qta
-    except Exception as e:
-        log(f"⚠️ Не удалось импортировать qtawesome для icon patch: {e}", "DEBUG")
-        return
-
-    original_icon = getattr(qta, "icon", None)
-    if not callable(original_icon):
-        return
-
-    def _patched_qta_icon(*args, **kwargs):
-        local_kwargs = dict(kwargs)
-
-        # Normalize known color arguments.
-        local_kwargs["color"] = resolve_icon_color(local_kwargs.get("color"), muted_fallback=False)
-        if "color_disabled" in local_kwargs:
-            local_kwargs["color_disabled"] = resolve_icon_color(local_kwargs.get("color_disabled"), muted_fallback=True)
-        if "color_active" in local_kwargs:
-            local_kwargs["color_active"] = resolve_icon_color(local_kwargs.get("color_active"), muted_fallback=False)
-        if "color_selected" in local_kwargs:
-            local_kwargs["color_selected"] = resolve_icon_color(local_kwargs.get("color_selected"), muted_fallback=False)
-        if "color_on" in local_kwargs:
-            local_kwargs["color_on"] = resolve_icon_color(local_kwargs.get("color_on"), muted_fallback=False)
-        if "color_off" in local_kwargs:
-            local_kwargs["color_off"] = resolve_icon_color(local_kwargs.get("color_off"), muted_fallback=True)
-
-        return original_icon(*args, **local_kwargs)
-
-    try:
-        _patched_qta_icon.__name__ = getattr(original_icon, "__name__", "icon")
-        _patched_qta_icon.__doc__ = getattr(original_icon, "__doc__", None)
-    except Exception:
-        pass
-
-    qta.icon = _patched_qta_icon
-    _QTA_ICON_PATCHED = True
-
-
-
 class ThemeBuildWorker(QObject):
     """Worker for theme CSS preparation. Returns empty CSS (qfluentwidgets handles styling)."""
 
@@ -1379,7 +1277,10 @@ class PremiumCheckWorker(QObject):
                 return
             
             # Выполняем проверку
-            is_premium, message, days = self.donate_checker.check_subscription_status(use_cache=False)
+            sub_info = self.donate_checker.get_full_subscription_info(use_cache=False)
+            is_premium = bool(sub_info.get("is_premium"))
+            message = str(sub_info.get("status_msg") or ("Premium активен" if is_premium else "Не активировано"))
+            days = sub_info.get("days_remaining")
             
             elapsed = time.time() - start_time
             log(f"Асинхронная проверка завершена за {elapsed:.2f}с: premium={is_premium}", "DEBUG")
@@ -1427,7 +1328,11 @@ class ThemeManager:
         # список тем — теперь пустой (тема определяется isDarkTheme() системно)
         self.themes = []
         # Initialize from current qfluentwidgets state to avoid overriding startup setTheme()
-        self.current_theme = get_active_theme_name()
+        try:
+            from qfluentwidgets import isDarkTheme
+            self.current_theme = "Светлая синяя" if not isDarkTheme() else "Темная синяя"
+        except Exception:
+            self.current_theme = "Темная синяя"
         log("🎨 ThemeManager: режим из isDarkTheme(), тема не выбирается", "DEBUG")
 
         # Тема применяется асинхронно через apply_theme_async() после инициализации
@@ -1562,36 +1467,46 @@ class ThemeManager:
             self._check_worker = None
         
         # Создаем воркер и поток
-        self._check_thread = QThread()
-        self._check_worker = PremiumCheckWorker(self.donate_checker)
-        self._check_worker.moveToThread(self._check_thread)
+        check_thread = QThread(self.widget)
+        check_worker = PremiumCheckWorker(self.donate_checker)
+        check_worker.moveToThread(check_thread)
+        self._check_thread = check_thread
+        self._check_worker = check_worker
         
         # Подключаем сигналы
-        self._check_thread.started.connect(self._check_worker.run)
-        self._check_worker.finished.connect(self._on_premium_check_finished)
-        self._check_worker.error.connect(self._on_premium_check_error)
+        check_thread.started.connect(check_worker.run)
+        check_worker.finished.connect(self._on_premium_check_finished)
+        check_worker.error.connect(self._on_premium_check_error)
         
         # Правильная очистка потока после завершения
-        def cleanup_thread():
+        def cleanup_thread(*, thread=check_thread, worker=check_worker):
             try:
                 self._check_in_progress = False
-                if self._check_worker:
-                    self._check_worker.deleteLater()
+                try:
+                    worker.deleteLater()
+                except RuntimeError:
+                    pass
+                try:
+                    thread.deleteLater()
+                except RuntimeError:
+                    pass
+                if self._check_worker is worker:
                     self._check_worker = None
-                if self._check_thread:
-                    self._check_thread.deleteLater()
+                if self._check_thread is thread:
                     self._check_thread = None
             except RuntimeError:
-                # Объекты уже удалены
-                self._check_worker = None
-                self._check_thread = None
+                if self._check_worker is worker:
+                    self._check_worker = None
+                if self._check_thread is thread:
+                    self._check_thread = None
         
-        self._check_worker.finished.connect(self._check_thread.quit)
-        self._check_thread.finished.connect(cleanup_thread)
+        check_worker.finished.connect(check_thread.quit)
+        check_worker.error.connect(check_thread.quit)
+        check_thread.finished.connect(cleanup_thread)
         
         # Запускаем поток
         try:
-            self._check_thread.start()
+            check_thread.start()
         except RuntimeError as e:
             log(f"Ошибка запуска потока проверки премиума: {e}", "❌ ERROR")
             self._check_in_progress = False
@@ -1633,7 +1548,7 @@ class ThemeManager:
         self._cache_time = time.time()
 
     def reapply_saved_theme_if_premium(self):
-        """Восстанавливает премиум-тему после инициализации DonateChecker"""
+        """Восстанавливает премиум-тему после инициализации PremiumService"""
         log(f"🔄 reapply_saved_theme_if_premium: fallback={self._fallback_due_to_premium}", "DEBUG")
         # Запускаем асинхронную проверку
         self._start_async_premium_check()
@@ -1865,7 +1780,7 @@ class ThemeManager:
             if not self.widget or not self.app:
                 return
 
-            clean = set_active_theme_name(theme_name)
+            clean = _normalize_theme_name(theme_name)
 
             # Sync qfluentwidgets dark/light mode — updates all native widgets.
             _sync_theme_mode_to_qfluent(clean, window=self.widget)

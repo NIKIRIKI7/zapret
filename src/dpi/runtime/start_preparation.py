@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from log import log
 
 from .workers import PreparedDpiStartRequest
+
+if TYPE_CHECKING:
+    from app_context import AppContext
 
 
 def resolve_launch_method(launch_method=None) -> str:
@@ -36,7 +40,7 @@ def resolve_mode_name(selected_mode) -> str:
     return "Неизвестная стратегия"
 
 
-def prepare_selected_mode_for_start(selected_mode, launch_method: str):
+def prepare_selected_mode_for_start(selected_mode, launch_method: str, *, app_context: "AppContext"):
     method = str(launch_method or "").strip().lower()
 
     if method == "orchestra":
@@ -46,9 +50,7 @@ def prepare_selected_mode_for_start(selected_mode, launch_method: str):
         return selected_mode
 
     if method in ("direct_zapret2", "direct_zapret1"):
-        from app_context import require_app_context
-
-        snapshot = require_app_context().direct_flow_coordinator.get_startup_snapshot(
+        snapshot = app_context.direct_flow_coordinator.get_startup_snapshot(
             method,
             require_filters=True,
         )
@@ -65,7 +67,7 @@ def direct_filter_flags(launch_method: str) -> tuple[str, ...]:
     return ("--wf-tcp-out", "--wf-udp-out", "--wf-raw-part")
 
 
-def validate_direct_selected_mode(selected_mode, launch_method: str) -> None:
+def validate_direct_selected_mode(selected_mode, launch_method: str, *, app_context: "AppContext") -> None:
     method = str(launch_method or "").strip().lower()
     if method not in ("direct_zapret2", "direct_zapret1"):
         return
@@ -84,9 +86,8 @@ def validate_direct_selected_mode(selected_mode, launch_method: str) -> None:
             if ("unknown.txt" in content_lower) or ("ipset-unknown.txt" in content_lower):
                 try:
                     from core.direct_preset_core.service import DirectPresetService
-                    from app_context import require_app_context
 
-                    service = DirectPresetService(require_app_context().app_paths, "winws2")
+                    service = DirectPresetService(app_context.app_paths, "winws2")
                     source = service.read_source_preset(preset_path)
                     if service.remove_placeholder_profiles(source):
                         service.write_source_preset(preset_path, source)
@@ -102,7 +103,7 @@ def validate_direct_selected_mode(selected_mode, launch_method: str) -> None:
         raise RuntimeError(f"Ошибка чтения preset: {e}") from e
 
 
-def collect_soft_launch_warnings(selected_mode, launch_method: str) -> list[str]:
+def collect_soft_launch_warnings(selected_mode, launch_method: str, *, app_context: "AppContext") -> list[str]:
     method = str(launch_method or "").strip().lower()
     if method != "direct_zapret2":
         return []
@@ -115,9 +116,8 @@ def collect_soft_launch_warnings(selected_mode, launch_method: str) -> list[str]
 
     try:
         from core.direct_preset_core.service import DirectPresetService
-        from app_context import require_app_context
 
-        service = DirectPresetService(require_app_context().app_paths, "winws2")
+        service = DirectPresetService(app_context.app_paths, "winws2")
         source = service.read_source_preset(Path(preset_path))
         labels = service.collect_out_range_autofix_warning_labels(source)
     except Exception as e:
@@ -139,7 +139,12 @@ def collect_soft_launch_warnings(selected_mode, launch_method: str) -> list[str]
     return [message]
 
 
-def sanitize_direct_preset_before_launch(selected_mode, launch_method: str) -> tuple[list[str], str | None]:
+def sanitize_direct_preset_before_launch(
+    selected_mode,
+    launch_method: str,
+    *,
+    app_context: "AppContext",
+) -> tuple[list[str], str | None]:
     method = str(launch_method or "").strip().lower()
     if method != "direct_zapret2":
         return [], None
@@ -152,9 +157,8 @@ def sanitize_direct_preset_before_launch(selected_mode, launch_method: str) -> t
 
     try:
         from core.direct_preset_core.service import DirectPresetService
-        from app_context import require_app_context
 
-        service = DirectPresetService(require_app_context().app_paths, "winws2")
+        service = DirectPresetService(app_context.app_paths, "winws2")
         source = service.read_source_preset(preset_path)
         changed = False
         warnings: list[str] = []
@@ -186,23 +190,41 @@ def sanitize_direct_preset_before_launch(selected_mode, launch_method: str) -> t
         return [], None
 
 
-def prepare_start_request(selected_mode=None, launch_method=None) -> tuple[PreparedDpiStartRequest, list[str]]:
+def prepare_start_request(
+    selected_mode=None,
+    launch_method=None,
+    *,
+    app_context: "AppContext",
+) -> tuple[PreparedDpiStartRequest, list[str]]:
     resolved_method = resolve_launch_method(launch_method)
     log(f"Используется метод запуска: {resolved_method}", "INFO")
 
-    prepared_selected_mode = prepare_selected_mode_for_start(selected_mode, resolved_method)
-    validate_direct_selected_mode(prepared_selected_mode, resolved_method)
+    prepared_selected_mode = prepare_selected_mode_for_start(
+        selected_mode,
+        resolved_method,
+        app_context=app_context,
+    )
+    validate_direct_selected_mode(
+        prepared_selected_mode,
+        resolved_method,
+        app_context=app_context,
+    )
 
     prelaunch_warnings, prelaunch_error = sanitize_direct_preset_before_launch(
         prepared_selected_mode,
         resolved_method,
+        app_context=app_context,
     )
     if prelaunch_error:
         raise RuntimeError(prelaunch_error)
 
     warnings = [
         *prelaunch_warnings,
-        *collect_soft_launch_warnings(prepared_selected_mode, resolved_method),
+        *collect_soft_launch_warnings(
+            prepared_selected_mode,
+            resolved_method,
+            app_context=app_context,
+        ),
     ]
 
     return (

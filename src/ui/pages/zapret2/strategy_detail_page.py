@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import (
 )
 
 from core.runtime.direct_ui_snapshot_service import DirectTargetDetailSnapshotWorker
-from core.services import get_strategy_favorites_store, get_strategy_marks_store
 try:
     from qfluentwidgets import (
         BodyLabel, CaptionLabel, StrongBodyLabel, SubtitleLabel,
@@ -63,7 +62,7 @@ from ui.widgets.win11_controls import Win11ToggleRow, Win11ComboRow, Win11Number
 from ui.widgets.direct_zapret2_strategies_tree import DirectZapret2StrategiesTree, StrategyTreeRow
 from ui.popup_menu import exec_popup_menu
 from strategy_menu.args_preview_dialog import ArgsPreviewDialog
-from launcher_common.blobs import get_blobs_info
+from blobs.service import get_blobs_info
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from log import log
 from ui.pages.zapret2.strategy_detail_page_controller import StrategyDetailPageController
@@ -245,16 +244,23 @@ class StrategyDetailPage(BasePage):
         self._tree_scroll_by_target: dict[str, int] = {}
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
+        self._cleanup_in_progress = False
 
         # Direct preset facade for target settings storage
         from core.presets.direct_facade import DirectPresetFacade
 
         self._direct_facade = DirectPresetFacade.from_launch_method(
             "direct_zapret2",
+            app_context=app_context,
             on_dpi_reload_needed=self._on_dpi_reload_needed,
         )
-        self._marks_store = get_strategy_marks_store()
-        self._favorites_store = get_strategy_favorites_store()
+        app_context = getattr(parent, "app_context", None)
+        if app_context is None:
+            app_context = getattr(self.window(), "app_context", None)
+        if app_context is None:
+            raise RuntimeError("AppContext is required for Zapret2 strategy detail page")
+        self._marks_store = app_context.strategy_marks_store
+        self._favorites_store = app_context.strategy_favorites_store
         self._favorite_strategy_ids = set()
         self._preview_dialog = None
         self._preview_pinned = False
@@ -281,13 +287,15 @@ class StrategyDetailPage(BasePage):
         self._content_built = True
 
         # Close hover/pinned preview when the main window hides/deactivates (e.g. tray).
-        QTimer.singleShot(0, self._install_main_window_event_filter)
+        QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self._install_main_window_event_filter())
 
         # Подключаемся к process_monitor для отслеживания статуса DPI
         self._connect_process_monitor()
         self._apply_pending_target_request_if_ready()
 
     def _install_main_window_event_filter(self) -> None:
+        if self._cleanup_in_progress:
+            return
         try:
             w = self.window()
         except Exception:
@@ -424,6 +432,8 @@ class StrategyDetailPage(BasePage):
             pass
 
     def _apply_pending_target_request_if_ready(self) -> None:
+        if self._cleanup_in_progress:
+            return
         pending_target_key = self._target_payload_runtime.take_pending_target_if_ready(
             is_visible=self.isVisible(),
             content_built=bool(getattr(self, "_content_built", False)),
@@ -471,6 +481,8 @@ class StrategyDetailPage(BasePage):
             return
 
         def _apply() -> None:
+            if self._cleanup_in_progress:
+                return
             try:
                 page_bar = self.verticalScrollBar()
                 saved_page = self._page_scroll_by_target.get(key)
@@ -493,8 +505,8 @@ class StrategyDetailPage(BasePage):
                 pass
 
         if defer:
-            QTimer.singleShot(0, _apply)
-            QTimer.singleShot(40, _apply)
+            QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and _apply())
+            QTimer.singleShot(40, lambda: (not self._cleanup_in_progress) and _apply())
         else:
             _apply()
 
@@ -506,7 +518,7 @@ class StrategyDetailPage(BasePage):
             self.show_loading()
         except Exception:
             pass
-        from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
+        from dpi.policy.direct_runtime_apply_policy import request_direct_runtime_content_apply
         if self.parent_app:
             request_direct_runtime_content_apply(
                 self.parent_app,
@@ -1188,23 +1200,17 @@ class StrategyDetailPage(BasePage):
             self._target_payload = payload
         return payload
 
-    def _get_direct_ui_snapshot_service(self):
+    def _require_app_context(self):
         app_context = getattr(self.window(), "app_context", None)
-        service = getattr(app_context, "direct_ui_snapshot_service", None)
-        if service is None:
-            from app_context import require_app_context
+        if app_context is None:
+            raise RuntimeError("AppContext is required for Zapret2 strategy detail page")
+        return app_context
 
-            service = require_app_context().direct_ui_snapshot_service
-        return service
+    def _get_direct_ui_snapshot_service(self):
+        return self._require_app_context().direct_ui_snapshot_service
 
     def _get_direct_flow_coordinator(self):
-        app_context = getattr(self.window(), "app_context", None)
-        coordinator = getattr(app_context, "direct_flow_coordinator", None)
-        if coordinator is None:
-            from app_context import require_app_context
-
-            coordinator = require_app_context().direct_flow_coordinator
-        return coordinator
+        return self._require_app_context().direct_flow_coordinator
 
     def _read_target_raw_args_text(self, target_key: str) -> str:
         try:
@@ -1446,12 +1452,14 @@ class StrategyDetailPage(BasePage):
         Асинхронно перечитывает активный пресет и обновляет текущий target (если открыт).
         Вызывается из MainWindow после активации пресета.
         """
+        if self._cleanup_in_progress:
+            return
         if not self.isVisible():
             self._preset_refresh_runtime.mark_pending()
             return
         try:
             self._preset_refresh_runtime.clear_pending()
-            QTimer.singleShot(0, self._apply_preset_refresh)
+            QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self._apply_preset_refresh())
         except Exception:
             try:
                 self._apply_preset_refresh()
@@ -1477,6 +1485,8 @@ class StrategyDetailPage(BasePage):
         )
 
     def _on_ui_state_changed(self, _state: AppUiState, changed_fields: frozenset[str]) -> None:
+        if self._cleanup_in_progress:
+            return
         if "mode_revision" in changed_fields:
             self.reload_for_mode_change()
             return
@@ -1492,6 +1502,8 @@ class StrategyDetailPage(BasePage):
             self.refresh_from_preset_switch()
 
     def _apply_preset_refresh(self):
+        if self._cleanup_in_progress:
+            return
         apply_preset_refresh(
             is_visible=self.isVisible(),
             target_key=self._target_key,
@@ -1568,6 +1580,8 @@ class StrategyDetailPage(BasePage):
 
     def _load_strategies(self, policy: StrategyDetailModePolicy | None = None):
         """Загружает стратегии для текущего target'а."""
+        if self._cleanup_in_progress:
+            return
         _t_total = _time.perf_counter()
         try:
             payload = self._target_payload or self._load_target_payload_sync(self._target_key, refresh=False)
@@ -1617,7 +1631,7 @@ class StrategyDetailPage(BasePage):
                 self._retry_count = plan.next_retry_count
 
                 if plan.should_schedule_retry:
-                    QTimer.singleShot(1000, self._load_strategies)
+                    QTimer.singleShot(1000, lambda: (not self._cleanup_in_progress) and self._load_strategies())
                 elif plan.should_suppress_warning:
                     log(
                         f"StrategyDetailPage: suppress 'no strategies' warning while DPI is stopped ({self._target_key})",
@@ -1980,9 +1994,11 @@ class StrategyDetailPage(BasePage):
 
     def _schedule_full_repopulate(self) -> None:
         """Compatibility helper for old sort modes; keep list state consistent."""
+        if self._cleanup_in_progress:
+            return
         try:
-            QTimer.singleShot(0, self._apply_sort)
-            QTimer.singleShot(0, self._apply_filters)
+            QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self._apply_sort())
+            QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self._apply_filters())
         except Exception:
             pass
 
@@ -2226,6 +2242,8 @@ class StrategyDetailPage(BasePage):
 
     def _start_apply_feedback_timer(self, timeout_ms: int = 1500):
         """Быстрый таймер, который завершает спиннер после apply/hot-reload."""
+        if self._cleanup_in_progress:
+            return
         self._stop_apply_feedback_timer()
         self._apply_feedback_timer = QTimer(self)
         self._apply_feedback_timer.setSingleShot(True)
@@ -2242,6 +2260,8 @@ class StrategyDetailPage(BasePage):
         В direct_zapret2 изменения часто применяются без смены процесса (winws2 остаётся запущен),
         поэтому ориентируемся на включенность target'а, а не на processStatusChanged.
         """
+        if self._cleanup_in_progress:
+            return
         plan = StrategyDetailPageController.build_apply_feedback_timeout_plan(
             waiting_for_process_start=self._waiting_for_process_start,
             selected_strategy_id=self._selected_strategy_id,
@@ -2266,7 +2286,7 @@ class StrategyDetailPage(BasePage):
 
     def _connect_process_monitor(self):
         """Подключается к сигналу processStatusChanged от ProcessMonitorThread"""
-        if self._process_monitor_connected:
+        if self._cleanup_in_progress or self._process_monitor_connected:
             return  # Уже подключены
 
         try:
@@ -2284,6 +2304,8 @@ class StrategyDetailPage(BasePage):
         Обработчик изменения статуса процесса DPI.
         Вызывается когда winws.exe/winws2.exe запускается или останавливается.
         """
+        if self._cleanup_in_progress:
+            return
         try:
             if is_running and self._waiting_for_process_start:
                 # DPI запустился и мы ждали этого - показываем галочку
@@ -2294,9 +2316,61 @@ class StrategyDetailPage(BasePage):
 
     def _on_args_changed(self, strategy_id: str, args: list):
         """Обработчик изменения аргументов стратегии"""
+        if self._cleanup_in_progress:
+            return
         if self._target_key:
             self.args_changed.emit(self._target_key, strategy_id, args)
             log(f"Args changed: {self._target_key}/{strategy_id} = {args}", "DEBUG")
+
+    def cleanup(self) -> None:
+        self._cleanup_in_progress = True
+        self._preset_refresh_runtime.mark_pending()
+        self._target_payload_runtime.clear_pending_target()
+
+        unsubscribe = getattr(self, "_ui_state_unsubscribe", None)
+        if callable(unsubscribe):
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+        self._ui_state_unsubscribe = None
+        self._ui_state_store = None
+
+        self._stop_apply_feedback_timer()
+        try:
+            self._syndata_save_timer.stop()
+        except Exception:
+            pass
+
+        try:
+            self._strategies_load_runtime.reset(delete_later=True)
+        except Exception:
+            pass
+
+        try:
+            self._close_preview_dialog(force=True)
+        except Exception:
+            pass
+        try:
+            self._close_filter_combo_popup()
+        except Exception:
+            pass
+
+        try:
+            if self._main_window is not None:
+                self._main_window.removeEventFilter(self)
+        except Exception:
+            pass
+        self._main_window = None
+
+        try:
+            if self._process_monitor_connected and self.parent_app and hasattr(self.parent_app, 'process_monitor'):
+                process_monitor = self.parent_app.process_monitor
+                if process_monitor is not None:
+                    process_monitor.processStatusChanged.disconnect(self._on_process_status_changed)
+        except Exception:
+            pass
+        self._process_monitor_connected = False
 
     def _get_target_details(self, target_key: str | None = None):
         key = str(target_key or self._target_key or "").strip().lower()

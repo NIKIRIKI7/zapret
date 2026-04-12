@@ -97,6 +97,8 @@ class ControlPage(BasePage):
         self._runtime_initialized = False
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
+        self._program_settings_runtime_unsubscribe = None
+        self._cleanup_in_progress = False
         self._last_known_dpi_running = False
 
         self._build_ui()
@@ -273,17 +275,25 @@ class ControlPage(BasePage):
                 pass
         self._on_reset_program_clicked()
 
+    def _require_app_context(self):
+        app_context = getattr(self.window(), "app_context", None)
+        if app_context is None:
+            raise RuntimeError("AppContext is required for ControlPage")
+        return app_context
+
     def _attach_program_settings_runtime(self) -> None:
         if self._program_settings_runtime_attached:
             return
         self._program_settings_runtime_attached = True
-        self._require_app_context().program_settings_runtime_service.subscribe(
+        self._program_settings_runtime_unsubscribe = self._require_app_context().program_settings_runtime_service.subscribe(
             self._apply_program_settings_snapshot,
             emit_initial=True,
         )
 
     def _apply_program_settings_snapshot(self, snapshot) -> None:
         """Применяет shared snapshot программных настроек к toggle-элементам."""
+        if self._cleanup_in_progress:
+            return
         apply_program_settings_snapshot(
             snapshot,
             auto_dpi_toggle=self.auto_dpi_toggle,
@@ -297,13 +307,7 @@ class ControlPage(BasePage):
         self._apply_program_settings_snapshot(snapshot)
 
     def _get_program_settings_runtime_service(self):
-        app_context = getattr(self.window(), "app_context", None)
-        service = getattr(app_context, "program_settings_runtime_service", None)
-        if service is None:
-            from app_context import require_app_context
-
-            service = require_app_context().program_settings_runtime_service
-        return service
+        return self._require_app_context().program_settings_runtime_service
 
     def _set_status(self, msg: str) -> None:
         try:
@@ -444,6 +448,8 @@ class ControlPage(BasePage):
         )
 
     def _on_ui_state_changed(self, state: AppUiState, _changed_fields: frozenset[str]) -> None:
+        if self._cleanup_in_progress:
+            return
         self.set_loading(state.dpi_busy, state.dpi_busy_text)
         self.update_status(state.dpi_phase or ("running" if state.dpi_running else "stopped"), state.dpi_last_error)
         self.update_strategy(state.current_strategy_summary or "")
@@ -563,3 +569,23 @@ class ControlPage(BasePage):
             strategy_label=self.strategy_label,
             strategy_desc=self.strategy_desc,
         )
+
+    def cleanup(self) -> None:
+        self._cleanup_in_progress = True
+
+        unsubscribe = getattr(self, "_ui_state_unsubscribe", None)
+        if callable(unsubscribe):
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+        self._ui_state_unsubscribe = None
+        self._ui_state_store = None
+
+        unsubscribe_runtime = getattr(self, "_program_settings_runtime_unsubscribe", None)
+        if callable(unsubscribe_runtime):
+            try:
+                unsubscribe_runtime()
+            except Exception:
+                pass
+        self._program_settings_runtime_unsubscribe = None

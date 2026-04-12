@@ -1489,7 +1489,7 @@ class StrategyScanner:
     def _generate_blob_lines(self, strategy_args: str) -> list[str]:
         """Generate --blob= lines for blobs used in the strategy."""
         try:
-            from launcher_common.blobs import find_used_blobs, get_blobs
+            from blobs.service import find_used_blobs, get_blobs
             used = find_used_blobs(strategy_args)
             if not used:
                 return []

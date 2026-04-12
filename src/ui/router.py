@@ -91,7 +91,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET2_PRESET_DETAIL: PageRouteSpec(
         page_name=PageName.ZAPRET2_PRESET_DETAIL,
         attr_name="zapret2_preset_detail_page",
-        module_name="ui.pages.zapret2.preset_detail_page",
+        module_name="preset_zapret2.ui.preset_detail_page",
         class_name="Zapret2PresetDetailPage",
         route_key="Zapret2PresetDetailPage",
         is_top_level=False,
@@ -127,7 +127,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET1_USER_PRESETS: PageRouteSpec(
         page_name=PageName.ZAPRET1_USER_PRESETS,
         attr_name="zapret1_user_presets_page",
-        module_name="ui.pages.zapret1.user_presets_page",
+        module_name="preset_zapret1.ui.user_presets_page",
         class_name="Zapret1UserPresetsPage",
         route_key="Zapret1UserPresetsPage",
         is_top_level=False,
@@ -151,7 +151,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET1_PRESET_DETAIL: PageRouteSpec(
         page_name=PageName.ZAPRET1_PRESET_DETAIL,
         attr_name="zapret1_preset_detail_page",
-        module_name="ui.pages.zapret1.preset_detail_page",
+        module_name="preset_zapret1.ui.preset_detail_page",
         class_name="Zapret1PresetDetailPage",
         route_key="Zapret1PresetDetailPage",
         is_top_level=False,
@@ -163,7 +163,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.HOSTLIST: PageRouteSpec(
         page_name=PageName.HOSTLIST,
         attr_name="hostlist_page",
-        module_name="ui.pages.hostlist_page",
+        module_name="lists.ui.hostlist_page",
         class_name="HostlistPage",
         route_key="HostlistPage",
         is_top_level=True,
@@ -175,7 +175,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.BLOBS: PageRouteSpec(
         page_name=PageName.BLOBS,
         attr_name="blobs_page",
-        module_name="ui.pages.blobs_page",
+        module_name="blobs.ui.page",
         class_name="BlobsPage",
         route_key="BlobsPage",
         is_top_level=False,
@@ -187,7 +187,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.DPI_SETTINGS: PageRouteSpec(
         page_name=PageName.DPI_SETTINGS,
         attr_name="dpi_settings_page",
-        module_name="ui.pages.dpi_settings_page",
+        module_name="dpi.ui.dpi_settings_page",
         class_name="DpiSettingsPage",
         route_key="DpiSettingsPage",
         is_top_level=True,
@@ -199,7 +199,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET2_USER_PRESETS: PageRouteSpec(
         page_name=PageName.ZAPRET2_USER_PRESETS,
         attr_name="zapret2_user_presets_page",
-        module_name="ui.pages.zapret2.user_presets_page",
+        module_name="preset_zapret2.ui.user_presets_page",
         class_name="Zapret2UserPresetsPage",
         route_key="Zapret2UserPresetsPage_Direct",
         is_top_level=False,
@@ -211,7 +211,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.NETROGAT: PageRouteSpec(
         page_name=PageName.NETROGAT,
         attr_name="netrogat_page",
-        module_name="ui.pages.netrogat_page",
+        module_name="lists.ui.netrogat_page",
         class_name="NetrogatPage",
         route_key="NetrogatPage",
         is_top_level=False,
@@ -223,7 +223,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.CUSTOM_DOMAINS: PageRouteSpec(
         page_name=PageName.CUSTOM_DOMAINS,
         attr_name="custom_domains_page",
-        module_name="ui.pages.custom_domains_page",
+        module_name="lists.ui.custom_domains_page",
         class_name="CustomDomainsPage",
         route_key="CustomDomainsPage",
         is_top_level=False,
@@ -235,7 +235,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.CUSTOM_IPSET: PageRouteSpec(
         page_name=PageName.CUSTOM_IPSET,
         attr_name="custom_ipset_page",
-        module_name="ui.pages.custom_ipset_page",
+        module_name="lists.ui.custom_ipset_page",
         class_name="CustomIpSetPage",
         route_key="CustomIpSetPage",
         is_top_level=False,
@@ -247,7 +247,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.AUTOSTART: PageRouteSpec(
         page_name=PageName.AUTOSTART,
         attr_name="autostart_page",
-        module_name="ui.pages.autostart_page",
+        module_name="autostart.ui.page",
         class_name="AutostartPage",
         route_key="AutostartPage",
         is_top_level=True,
@@ -259,7 +259,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.NETWORK: PageRouteSpec(
         page_name=PageName.NETWORK,
         attr_name="network_page",
-        module_name="ui.pages.network_page",
+        module_name="dns.ui.page",
         class_name="NetworkPage",
         route_key="NetworkPage",
         is_top_level=True,
@@ -271,7 +271,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.HOSTS: PageRouteSpec(
         page_name=PageName.HOSTS,
         attr_name="hosts_page",
-        module_name="ui.pages.hosts_page",
+        module_name="hosts.ui.page",
         class_name="HostsPage",
         route_key="HostsPage",
         is_top_level=True,
@@ -283,7 +283,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.BLOCKCHECK: PageRouteSpec(
         page_name=PageName.BLOCKCHECK,
         attr_name="blockcheck_page",
-        module_name="ui.pages.blockcheck_page",
+        module_name="blockcheck.ui.page",
         class_name="BlockcheckPage",
         route_key="BlockcheckPage",
         is_top_level=True,
@@ -307,7 +307,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.PREMIUM: PageRouteSpec(
         page_name=PageName.PREMIUM,
         attr_name="premium_page",
-        module_name="ui.pages.premium_page",
+        module_name="donater.ui.page",
         class_name="PremiumPage",
         route_key="PremiumPage",
         is_top_level=True,
@@ -319,7 +319,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.LOGS: PageRouteSpec(
         page_name=PageName.LOGS,
         attr_name="logs_page",
-        module_name="ui.pages.logs_page",
+        module_name="log.ui.page",
         class_name="LogsPage",
         route_key="LogsPage",
         is_top_level=True,
@@ -331,7 +331,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.SERVERS: PageRouteSpec(
         page_name=PageName.SERVERS,
         attr_name="servers_page",
-        module_name="ui.pages.servers_page",
+        module_name="updater.ui.page",
         class_name="ServersPage",
         route_key="ServersPage",
         is_top_level=False,
@@ -391,7 +391,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.TELEGRAM_PROXY: PageRouteSpec(
         page_name=PageName.TELEGRAM_PROXY,
         attr_name="telegram_proxy_page",
-        module_name="ui.pages.telegram_proxy_page",
+        module_name="telegram_proxy.ui.page",
         class_name="TelegramProxyPage",
         route_key="TelegramProxyPage",
         is_top_level=True,

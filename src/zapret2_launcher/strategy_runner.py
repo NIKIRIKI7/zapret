@@ -36,8 +36,12 @@ from launcher_common.preset_runner_support import (
 from utils.circular_strategy_numbering import (
     strip_strategy_tags,
 )
+from core.direct_preset_core.common.circular_preset_support import (
+    is_circular_source_preset,
+    normalize_action_lines_for_preset,
+)
 from launcher_common.constants import CREATE_NO_WINDOW
-from dpi.process_health_check import (
+from dpi.health.process_health_check import (
     diagnose_startup_error
 )
 
@@ -432,8 +436,16 @@ class StrategyRunnerV2(StrategyRunnerBase):
         if lua_fixed:
             log("Applying implicit lua-init lines for launch artifact", "DEBUG")
 
-        cleaned = strip_strategy_tags(normalized)
-        if cleaned != normalized:
+        source_is_circular = False
+        try:
+            from core.direct_preset_core.engines import winws2_parser
+
+            source_is_circular = is_circular_source_preset(winws2_parser.parse(normalized))
+        except Exception:
+            source_is_circular = False
+
+        cleaned = normalized if source_is_circular else strip_strategy_tags(normalized)
+        if (not source_is_circular) and cleaned != normalized:
             log("Ignoring legacy :strategy=N tags in launch artifact", "DEBUG")
 
         try:
@@ -441,13 +453,18 @@ class StrategyRunnerV2(StrategyRunnerBase):
             from core.direct_preset_core.engines import winws2_parser, winws2_rules, winws2_serializer
 
             source = winws2_parser.parse(cleaned)
+            source_is_circular = is_circular_source_preset(source)
             repaired_profiles = 0
             defaulted_profiles = 0
             rewritten_profiles = 0
 
             for index, profile in enumerate(list(source.profiles or [])):
                 current_action_lines = [str(line).strip() for line in getattr(profile, "action_lines", ()) or () if str(line).strip()]
-                normalized_action_lines, fixes, _resolved = winws2_rules.normalize_action_lines(current_action_lines)
+                normalized_action_lines, fixes, _resolved = normalize_action_lines_for_preset(
+                    current_action_lines,
+                    rules_module=winws2_rules,
+                    source_is_circular=source_is_circular,
+                )
                 if not fixes or normalized_action_lines == current_action_lines:
                     continue
                 if "applied_default_out_range" in fixes:
@@ -723,7 +740,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
             )
 
             if not hot_reload:
-                from dpi.process_health_check import diagnose_winws_exit
+                from dpi.health.process_health_check import diagnose_winws_exit
 
                 diag = diagnose_winws_exit(exit_code, stderr_output)
                 if diag:

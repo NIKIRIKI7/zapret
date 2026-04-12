@@ -2,15 +2,8 @@ from __future__ import annotations
 
 from PyQt6.QtGui import QIcon
 
-try:
-    import qtawesome as qta
-
-    _HAS_QTA = True
-except ImportError:
-    qta = None
-    _HAS_QTA = False
-
 from qfluentwidgets import PushButton, TransparentPushButton
+from ui.theme import get_themed_qta_icon
 
 
 _DANGER_BUTTON_QSS = (
@@ -21,11 +14,11 @@ _DANGER_BUTTON_QSS = (
 
 
 def _resolve_icon(icon_name: str | None, color: str | None) -> QIcon:
-    if not _HAS_QTA or not icon_name:
+    if not icon_name:
         return QIcon()
 
     try:
-        return qta.icon(icon_name, color=color)
+        return get_themed_qta_icon(icon_name, color=color)
     except Exception:
         return QIcon()
 

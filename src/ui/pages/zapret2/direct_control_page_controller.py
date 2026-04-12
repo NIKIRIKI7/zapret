@@ -20,16 +20,15 @@ from ui.text_catalog import tr as tr_catalog
 class AdvancedSettingsLoadWorker(QThread):
     loaded = pyqtSignal(int, dict)
 
-    def __init__(self, request_id: int, parent=None):
+    def __init__(self, request_id: int, snapshot_service, parent=None):
         super().__init__(parent)
         self._request_id = int(request_id)
+        self._snapshot_service = snapshot_service
 
     def run(self) -> None:
         state: dict = {}
         try:
-            from core.presets.direct_facade import DirectPresetFacade
-
-            state = DirectPresetFacade.from_launch_method("direct_zapret2").get_advanced_settings_state() or {}
+            state = self._snapshot_service.load_advanced_settings_state("direct_zapret2") or {}
         except Exception:
             state = {}
         self.loaded.emit(self._request_id, state)
@@ -93,17 +92,20 @@ class Zapret2DirectControlPageController(ControlPageController):
         return DirectControlRefreshRuntime()
 
     @staticmethod
-    def load_advanced_settings_state() -> dict:
+    def load_advanced_settings_state(*, app_context) -> dict:
         try:
-            from app_context import require_app_context
+            from core.presets.direct_facade import DirectPresetFacade
 
-            return require_app_context().direct_ui_snapshot_service.load_advanced_settings_state("direct_zapret2")
+            return DirectPresetFacade.from_launch_method(
+                "direct_zapret2",
+                app_context=app_context,
+            ).get_advanced_settings_state() or {}
         except Exception:
             return {}
 
     @staticmethod
-    def create_advanced_settings_worker(request_id: int, parent=None) -> AdvancedSettingsLoadWorker:
-        return AdvancedSettingsLoadWorker(request_id, parent)
+    def create_advanced_settings_worker(request_id: int, snapshot_service, parent=None) -> AdvancedSettingsLoadWorker:
+        return AdvancedSettingsLoadWorker(request_id, snapshot_service, parent)
 
     @staticmethod
     def build_advanced_settings_apply_plan(state: dict | None) -> DirectAdvancedSettingsApplyPlan:
@@ -166,11 +168,12 @@ class Zapret2DirectControlPageController(ControlPageController):
             pass
 
         try:
-            from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
+            from dpi.policy.direct_runtime_apply_policy import request_direct_runtime_content_apply
             from core.presets.direct_facade import DirectPresetFacade
 
             facade = DirectPresetFacade.from_launch_method(
                 "direct_zapret2",
+                app_context=parent_app.app_context,
                 on_dpi_reload_needed=lambda: request_direct_runtime_content_apply(
                     parent_app,
                     launch_method="direct_zapret2",
@@ -192,20 +195,26 @@ class Zapret2DirectControlPageController(ControlPageController):
             pass
 
     @staticmethod
-    def save_wssize_enabled(enabled: bool) -> None:
+    def save_wssize_enabled(enabled: bool, *, app_context) -> None:
         try:
             from core.presets.direct_facade import DirectPresetFacade
 
-            DirectPresetFacade.from_launch_method("direct_zapret2").set_wssize_enabled(bool(enabled))
+            DirectPresetFacade.from_launch_method(
+                "direct_zapret2",
+                app_context=app_context,
+            ).set_wssize_enabled(bool(enabled))
         except Exception:
             pass
 
     @staticmethod
-    def save_debug_log_enabled(enabled: bool) -> None:
+    def save_debug_log_enabled(enabled: bool, *, app_context) -> None:
         try:
             from core.presets.direct_facade import DirectPresetFacade
 
-            DirectPresetFacade.from_launch_method("direct_zapret2").set_debug_log_enabled(bool(enabled))
+            DirectPresetFacade.from_launch_method(
+                "direct_zapret2",
+                app_context=app_context,
+            ).set_debug_log_enabled(bool(enabled))
         except Exception:
             pass
 

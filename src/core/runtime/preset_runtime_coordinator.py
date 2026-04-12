@@ -7,7 +7,7 @@ from PyQt6.QtCore import QFileSystemWatcher, QTimer, QObject
 
 from launcher_common.preset_runner_support import publish_active_preset_content_changed
 from log import log
-from dpi.runtime_preset_switch_policy import request_runtime_preset_switch
+from dpi.policy.runtime_preset_switch_policy import request_runtime_preset_switch
 
 
 class PresetRuntimeCoordinator(QObject):
@@ -164,22 +164,3 @@ class PresetRuntimeCoordinator(QObject):
                 self.schedule_refresh_after_preset_switch()
             except Exception:
                 pass
-
-
-def resolve_active_preset_watch_path() -> str:
-    try:
-        from strategy_menu import get_strategy_launch_method
-
-        method = (get_strategy_launch_method() or "").strip().lower()
-    except Exception:
-        method = ""
-
-    try:
-        if method == "direct_zapret2":
-            from app_context import require_app_context
-
-            return os.fspath(require_app_context().direct_flow_coordinator.get_selected_source_path("direct_zapret2"))
-    except Exception:
-        return ""
-
-    return ""

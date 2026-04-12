@@ -153,28 +153,6 @@ class DirectZapret2MarksStore:
             ratings.setdefault(cat, {})[sid] = "broken"
         return ratings
 
-    def replace_from_ratings(self, ratings: dict) -> None:
-        self._work = set()
-        self._notwork = set()
-        for cat, per_cat in (ratings or {}).items():
-            if not isinstance(cat, str) or not isinstance(per_cat, dict):
-                continue
-            for sid, rating in per_cat.items():
-                if not isinstance(sid, str):
-                    continue
-                key = (cat, sid)
-                if rating == "working":
-                    self._work.add(key)
-                elif rating == "broken":
-                    self._notwork.add(key)
-        self._notwork.difference_update(self._work)
-        self._save()
-
-    def clear_all(self) -> None:
-        self._work = set()
-        self._notwork = set()
-        self._save()
-
     def _save(self) -> None:
         base = self.work_path.parent
         base.mkdir(parents=True, exist_ok=True)
@@ -213,13 +191,6 @@ class DirectZapret2FavoritesStore:
         self._ensure_loaded()
         return (target_key, strategy_id) in (self._favorites or set())
 
-    def is_favorite_any(self, strategy_id: str) -> bool:
-        sid = str(strategy_id or "").strip()
-        if not sid:
-            return False
-        self._ensure_loaded()
-        return any(stored_sid == sid for _cat, stored_sid in (self._favorites or set()))
-
     def set_favorite(self, target_key: str, strategy_id: str, favorite: bool) -> None:
         self._ensure_loaded()
         key = ((target_key or "").strip(), (strategy_id or "").strip())
@@ -235,39 +206,6 @@ class DirectZapret2FavoritesStore:
         favorite = not self.is_favorite(target_key, strategy_id)
         self.set_favorite(target_key, strategy_id, favorite)
         return favorite
-
-    def export_favorites(self) -> dict[str, list[str]]:
-        self._ensure_loaded()
-        out: dict[str, list[str]] = {}
-        for cat, sid in sorted(self._favorites or set(), key=lambda x: (x[0].lower(), x[1].lower())):
-            out.setdefault(cat, []).append(sid)
-        return out
-
-    def replace_from_favorites(self, favorites: dict) -> None:
-        self._favorites = set()
-        for cat, sids in (favorites or {}).items():
-            if not isinstance(cat, str) or not isinstance(sids, (list, tuple, set)):
-                continue
-            for sid in sids:
-                if isinstance(sid, str) and sid.strip():
-                    self._favorites.add((cat, sid.strip()))
-        self._save()
-
-    def clear_target(self, target_key: str) -> None:
-        self._ensure_loaded()
-        cat = str(target_key or "").strip()
-        if not cat:
-            return
-        self._favorites = {(stored_cat, sid) for stored_cat, sid in (self._favorites or set()) if stored_cat != cat}
-        self._save()
-
-    def clear_all(self) -> None:
-        self._favorites = set()
-        self._save()
-
-    def all_strategy_ids(self) -> list[str]:
-        self._ensure_loaded()
-        return sorted({sid for _cat, sid in (self._favorites or set())}, key=str.lower)
 
     def _save(self) -> None:
         base = self.favorites_path.parent

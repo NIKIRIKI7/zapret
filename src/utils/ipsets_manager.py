@@ -1,7 +1,6 @@
 """Менеджер IPset файлов.
 
 Файлы в папке приложения:
-- `lists/ipset-base.txt`      : базовый минимальный ipset (legacy)
 - `lists/ipset-all.base.txt`  : системная база для ipset-all
 - `lists/ipset-all.user.txt`  : пользовательские записи (редактируются из GUI)
 - `lists/ipset-all.txt`       : итоговый файл (base + user)
@@ -12,25 +11,25 @@
 Шаблон базы `ipset-all` хранится в `%APPDATA%/zapret/lists_template/ipset-all.txt`.
 Пользовательские записи дополнительно бэкапятся в
 `%APPDATA%/zapret/lists_backup/ipset-all.user.txt`.
+
+Поддерживаются следующие рабочие модели:
+- `ipset-all.base.txt` + `ipset-all.user.txt` -> `ipset-all.txt`
+- `ipset-ru.base.txt` + `ipset-ru.user.txt` -> `ipset-ru.txt`
 """
 
 from __future__ import annotations
 
 import ipaddress
 import os
-from datetime import datetime
 from urllib.parse import urlparse
 
 from log import log
 from config import (
     LISTS_FOLDER,
-    MAIN_DIRECTORY,
     get_zapret_lists_backup_dir,
     get_zapret_lists_template_dir,
 )
 
-
-IPSET_BASE_PATH = os.path.join(LISTS_FOLDER, "ipset-base.txt")
 IPSET_ALL_PATH = os.path.join(LISTS_FOLDER, "ipset-all.txt")
 IPSET_ALL_BASE_PATH = os.path.join(LISTS_FOLDER, "ipset-all.base.txt")
 IPSET_ALL_USER_PATH = os.path.join(LISTS_FOLDER, "ipset-all.user.txt")
@@ -39,7 +38,7 @@ IPSET_RU_BASE_PATH = os.path.join(LISTS_FOLDER, "ipset-ru.base.txt")
 IPSET_RU_USER_PATH = os.path.join(LISTS_FOLDER, "ipset-ru.user.txt")
 
 
-BASE_IPS_TEXT = """
+IPSET_ALL_BUILTIN_BASE_TEXT = """
 # Cloudflare DNS
 1.1.1.1
 1.1.1.2
@@ -119,8 +118,13 @@ def _has_effective_line(path: str) -> bool:
     return False
 
 
-def _fallback_base_ips() -> list[str]:
-    return get_base_ips()
+def _builtin_ipset_all_base_ips() -> list[str]:
+    ips: list[str] = []
+    for line in IPSET_ALL_BUILTIN_BASE_TEXT.strip().split("\n"):
+        line = line.strip()
+        if line and not line.startswith("#"):
+            ips.append(line)
+    return ips
 
 
 def _normalize_newlines(text: str) -> str:
@@ -221,48 +225,17 @@ def _get_ipset_all_user_backup_path() -> str:
 def _get_ipset_ru_template_path() -> str:
     return os.path.join(get_zapret_lists_template_dir(), "ipset-ru.txt")
 
-
-def _candidate_source_paths() -> list[str]:
-    """Кандидаты для source ipset-all.txt (без hardcode абсолютных путей)."""
-    candidates: list[str] = []
-
-    unique: list[str] = []
-    for path in candidates:
-        if path not in unique:
-            unique.append(path)
-    return unique
-
-
-def _find_valid_source_path() -> str | None:
-    for path in _candidate_source_paths():
-        if _has_effective_line(path):
-            return path
-    return None
-
-
 def ensure_ipset_all_template_updated() -> bool:
     """Гарантирует валидный системный шаблон ipset-all в lists_template."""
     try:
         template_path = _get_ipset_all_template_path()
-        source_path = _find_valid_source_path()
-
-        if source_path:
-            source_content = _normalize_newlines(_read_text_file(source_path))
-            current_content = ""
-            if os.path.exists(template_path):
-                current_content = _normalize_newlines(_read_text_file(template_path))
-
-            if source_content != current_content:
-                _write_text_file(template_path, source_content)
-                log(f"Обновлен шаблон ipset-all.txt из source: {source_path}", "DEBUG")
-            return True
 
         if _has_effective_line(template_path):
             return True
 
-        fallback_content = "\n".join(_fallback_base_ips()) + "\n"
+        fallback_content = "\n".join(_builtin_ipset_all_base_ips()) + "\n"
         _write_text_file(template_path, fallback_content)
-        log("Создан аварийный шаблон ipset-all.txt (source не найден)", "WARNING")
+        log("Создан аварийный шаблон ipset-all.txt", "WARNING")
         return True
 
     except Exception as e:
@@ -286,19 +259,11 @@ def get_ipset_all_base_entries() -> list[str]:
 
     template_entries = _read_effective_ip_entries(template_path)
     if template_entries:
-        _cache_base(template_path, template_entries)
-        return list(template_entries)
+        merged_entries = _dedup_preserve_order(list(template_entries) + _builtin_ipset_all_base_ips())
+        _cache_base(template_path, merged_entries)
+        return list(merged_entries)
 
-    source_path = _find_valid_source_path()
-    if source_path:
-        if _is_cached(source_path):
-            return list(_BASE_CACHE_ENTRIES or [])
-        source_entries = _read_effective_ip_entries(source_path)
-        if source_entries:
-            _cache_base(source_path, source_entries)
-            return list(source_entries)
-
-    return _fallback_base_ips()
+    return _builtin_ipset_all_base_ips()
 
 
 def get_ipset_all_base_set() -> set[str]:
@@ -349,9 +314,21 @@ def _write_ipset_all_base_file_from_template() -> bool:
 
         template_content = _read_text_file_safe(_get_ipset_all_template_path())
         if template_content is None:
-            template_content = "\n".join(get_ipset_all_base_entries()) + "\n"
+            merged_content = "\n".join(get_ipset_all_base_entries()) + "\n"
+        else:
+            normalized_template = _normalize_newlines(template_content)
+            template_entries = _read_effective_ip_entries(_get_ipset_all_template_path())
+            template_set = set(template_entries)
+            extra_entries = [ip for ip in _builtin_ipset_all_base_ips() if ip not in template_set]
+            merged_content = normalized_template
+            if extra_entries:
+                if merged_content and not merged_content.endswith("\n"):
+                    merged_content += "\n"
+                if merged_content and not merged_content.endswith("\n\n"):
+                    merged_content += "\n"
+                merged_content += "\n".join(extra_entries) + "\n"
 
-        _write_text_file(IPSET_ALL_BASE_PATH, template_content)
+        _write_text_file(IPSET_ALL_BASE_PATH, merged_content)
         _invalidate_base_cache()
         return True
 
@@ -578,33 +555,10 @@ def rebuild_ipset_ru_files() -> bool:
         return False
 
 
-def get_base_ips() -> list[str]:
-    """Возвращает список базовых IP для ipset-base.txt (legacy)."""
-    ips: list[str] = []
-    for line in BASE_IPS_TEXT.strip().split("\n"):
-        line = line.strip()
-        if line and not line.startswith("#"):
-            ips.append(line)
-    return ips
-
-
-def _create_ipset_base() -> None:
-    """Создаёт ipset-base.txt с базовыми IP."""
-    with open(IPSET_BASE_PATH, "w", encoding="utf-8") as f:
-        f.write("# Базовые IP диапазоны\n")
-        f.write(f"# Создано: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        for ip in get_base_ips():
-            f.write(f"{ip}\n")
-
-
 def ensure_ipsets_exist() -> bool:
     """Проверяет существование файлов IPsets и создает их если нужно."""
     try:
         os.makedirs(LISTS_FOLDER, exist_ok=True)
-
-        if not os.path.exists(IPSET_BASE_PATH):
-            log("Создание ipset-base.txt...", "INFO")
-            _create_ipset_base()
 
         if not rebuild_ipset_all_files():
             log("Не удалось подготовить ipset-all файлы", "WARNING")
@@ -627,12 +581,6 @@ def startup_ipsets_check() -> bool:
         log("=== Проверка IPsets при запуске ===", "IPSETS")
 
         os.makedirs(LISTS_FOLDER, exist_ok=True)
-
-        if not os.path.exists(IPSET_BASE_PATH) or os.path.getsize(IPSET_BASE_PATH) < 50:
-            log("Создаем/обновляем ipset-base.txt", "WARNING")
-            _create_ipset_base()
-        else:
-            log(f"ipset-base.txt: {os.path.getsize(IPSET_BASE_PATH)} байт", "INFO")
 
         ipset_all_ok = rebuild_ipset_all_files()
         ipset_ru_ok = rebuild_ipset_ru_files()

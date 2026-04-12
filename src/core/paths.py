@@ -12,7 +12,6 @@ class EnginePaths:
     state_dir: Path
     runtime_dir: Path
     runtime_low_dir: Path
-    index_path: Path
     selected_state_path: Path
     validate_dry_run_config_path: Path
     validate_lua_config_path: Path
@@ -54,7 +53,6 @@ class AppPaths:
             state_dir=state_dir,
             runtime_dir=runtime_dir,
             runtime_low_dir=runtime_low_dir,
-            index_path=state_dir / "index.json",
             selected_state_path=state_dir / "selection.json",
             validate_dry_run_config_path=runtime_dir / "validate_dry_run.txt",
             validate_lua_config_path=runtime_dir / "validate_lua.txt",

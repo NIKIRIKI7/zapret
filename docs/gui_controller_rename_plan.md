@@ -4,6 +4,15 @@
 
 Этот документ описывает не конечный архитектурный контракт, а безопасный план миграции для слоя `controller` в GUI. Его задача не "сразу всё переписать", а дать понятный порядок действий, при котором проект не скатится в хаос из-за одновременного переименования, переноса файлов и переписывания логики.
 
+Обновление состояния: 2026-04-12
+
+На дату обновления план остаётся актуальным по стратегии, но уже не полностью совпадает со старой картой путей. За прошедший рефакторинг проект заметно сдвинулся в сторону feature-local UI-структуры. Это значит:
+
+- naming-first стратегия остаётся канонической;
+- часть folder-move этапа уже фактически произошла;
+- дальше нельзя опираться на старую картину `src/ui/pages/...` как на единственный живой UI-слой;
+- план нужно читать как живой маршрут миграции, а не как замороженный список старых путей.
+
 ## Зачем нужен план
 
 Сейчас слово `controller` в проекте используется для нескольких разных ролей сразу:
@@ -26,6 +35,43 @@
 Ключевой принцип такой:
 
 `смысловая ясность -> переименование -> перенос -> внутренняя декомпозиция`
+
+## Текущий статус проекта на 2026-04-12
+
+На текущий момент уже видны реальные structural shifts, которые надо учитывать в следующих итерациях.
+
+### Что уже произошло
+
+- UI для нескольких фич уже переехал ближе к самим фичам.
+- В проекте появились feature-local UI-пакеты:
+  - `src/updater/ui`
+  - `src/donater/ui`
+  - `src/dns/ui`
+  - `src/hosts/ui`
+  - `src/lists/ui`
+  - `src/log/ui`
+  - `src/blockcheck/ui`
+  - `src/telegram_proxy/ui`
+- Старый `src/core/hostlist_page_controller.py` удалён.
+- Его роль сейчас живёт в `src/lists/controller.py` как `HostlistPageController`.
+
+### Что ещё не произошло
+
+- Большинство ключевых controller-имён всё ещё старые:
+  - `DPIController`
+  - `PremiumPageController`
+  - `UpdatePageController`
+  - `UpdatePageViewController`
+  - `ControlPageController`
+  - `ConnectionPageController`
+  - и другие page/feature controller-классы
+- Значит проблема терминологии остаётся живой даже после уже выполненных переносов по папкам.
+
+### Практический вывод
+
+- Для уже переехавших фич приоритетом становится не новый folder move, а naming-only очистка.
+- Старые ссылки на `src/ui/pages/...` внутри этого плана надо трактовать как исторический контекст, если у фичи уже появился свой `feature/ui` слой.
+- Для новых итераций нужно опираться на текущие feature-local точки входа страниц, а не на старые общие страницы из `src/ui/pages`.
 
 ## Что нельзя делать
 
@@ -113,7 +159,7 @@
 - `dns.network_page_controller.NetworkPageController` -> `NetworkSettingsWorkflowService`
 - `dns.dns_check_page_controller.DNSCheckPageController` -> `DnsCheckWorkflowService`
 - `hosts.page_controller.HostsPageController` -> `HostsWorkflowService`
-- `core.hostlist_page_controller.HostlistPageController` -> `HostlistWorkflowService`
+- `lists.controller.HostlistPageController` -> `HostlistWorkflowService`
 - `blockcheck.page_controller.BlockcheckPageController` -> `BlockcheckCoordinator`
 - `blockcheck.strategy_scan_page_controller.StrategyScanPageController` -> `StrategyScanCoordinator`
 - `orchestra.page_controller.OrchestraPageController` -> `OrchestraWorkflowService`
@@ -164,6 +210,11 @@
 - обновление путей импорта;
 - повторный поиск старых путей.
 
+Исключение для текущего состояния проекта:
+
+- если у фичи уже существует устойчивый feature-local UI слой, например `updater/ui`, `donater/ui`, `dns/ui`, `hosts/ui`, `lists/ui`, `log/ui`, `blockcheck/ui`, `telegram_proxy/ui`, то для этой фичи folder-move этап считается частично выполненным;
+- в таких срезах следующим приоритетом становится выравнивание имён и ролей, а не дополнительный перенос файлов ради самого переноса.
+
 ### Этап 4. Responsibility split
 
 Только после стабильного переименования и переноса допускается:
@@ -185,7 +236,7 @@
 - переименовать `UpdatePageController`;
 - переименовать `UpdatePageViewController`;
 - обновить все импорты;
-- убедиться, что экран обновлений собирается и читается без старых имён.
+- убедиться, что экран обновлений в `src/updater/ui/page.py` собирается и читается без старых имён.
 
 ### Итерация B. Premium
 
@@ -196,7 +247,7 @@
 Шаги:
 
 - переименовать `PremiumPageController`;
-- обновить use-site'ы в `ui/pages/premium_page.py` и связанных workflow-модулях;
+- обновить use-site'ы в `src/donater/ui/page.py` и связанных workflow-модулях;
 - убедиться, что не осталось старого имени в импортах.
 
 ### Итерация C. DPI runtime
@@ -231,8 +282,23 @@
 
 Шаги:
 
-- идти фичами по одной: сначала `dns`, потом `hosts/hostlist`, потом `blockcheck`, потом `orchestra`;
+- идти фичами по одной: сначала `dns`, потом `hosts`, потом `lists`, потом `blockcheck`, потом `orchestra`;
 - не смешивать эти срезы между собой в одном коммите без необходимости.
+
+## Текущие точки входа, на которые надо ориентироваться при миграции
+
+Ниже перечислены не все use-site'ы, а главные живые точки входа страниц, которые уже показывают новую структуру проекта.
+
+- `update` -> `src/updater/ui/page.py`
+- `premium` -> `src/donater/ui/page.py`
+- `network/dns` -> `src/dns/ui/page.py`
+- `hosts` -> `src/hosts/ui/page.py`
+- `lists/hostlist` -> `src/lists/ui/hostlist_page.py`
+- `logs` -> `src/log/ui/page.py`
+- `blockcheck` -> `src/blockcheck/ui/page.py`
+- `telegram_proxy` -> `src/telegram_proxy/ui/page.py`
+
+Эти пути важнее старых ссылок на `src/ui/pages/...`, если между ними есть расхождение.
 
 ## Критерии завершения каждого среза
 
@@ -258,8 +324,15 @@
 - `ui/pages/direct_user_presets_page_controller.py`
 - `ui/pages/zapret2/strategy_detail_page_controller.py`
 - `updater/update_page_controller.py`
+- `lists/controller.py`
 
 Это не повод откладывать миграцию, но повод не смешивать rename-этап с глубокой внутренней переработкой.
+
+## Что план больше не предполагает по умолчанию
+
+- Не предполагается, что вся page-level UI логика будет жить только в `src/ui/pages`.
+- Не предполагается, что перенос папок является обязательным первым шагом для каждой фичи.
+- Не предполагается, что старые пути из раннего состояния проекта остаются каноническими после появления feature-local UI пакетов.
 
 ## Ожидаемый результат
 

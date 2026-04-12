@@ -1,6 +1,5 @@
 # Preset: faketlsalt_181
 # TemplateOrigin: faketlsalt_181
-# Created: 2026-02-19T00:00:00
 # IconColor: #60cdff
 # Description: Imported from bat/faketlsalt_181.txt
 

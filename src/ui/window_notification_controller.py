@@ -432,7 +432,7 @@ class WindowNotificationController(QObject):
             return
 
         try:
-            from dpi.process_health_check import execute_windivert_auto_fix
+            from dpi.health.process_health_check import execute_windivert_auto_fix
 
             ok, message = execute_windivert_auto_fix(action)
             try:
