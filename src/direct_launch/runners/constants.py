@@ -4,6 +4,11 @@
 Константы для системы стратегий Zapret
 """
 
+import sys
+
+IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
+
 # Метки для стратегий
 LABEL_RECOMMENDED = "recommended"
 LABEL_CAUTION = "caution"
@@ -12,10 +17,17 @@ LABEL_STABLE = "stable"
 LABEL_GAME = "game"
 LABEL_WARP = "warp"
 
-# Константы для скрытого запуска
-SW_HIDE = 0
-CREATE_NO_WINDOW = 0x08000000
-STARTF_USESHOWWINDOW = 0x00000001
+# Константы для скрытого запуска — platform-aware
+# На Linux эти значения не используются (нет окон консоли в GUI-приложениях)
+if IS_WINDOWS:
+    SW_HIDE = 0
+    CREATE_NO_WINDOW = 0x08000000
+    STARTF_USESHOWWINDOW = 0x00000001
+else:
+    # Linux stubs
+    SW_HIDE = 0
+    CREATE_NO_WINDOW = 0
+    STARTF_USESHOWWINDOW = 0
 
 # Настройки отображения меток
 LABEL_COLORS = {

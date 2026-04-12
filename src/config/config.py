@@ -5,6 +5,13 @@
 import os, sys
 
 # ═══════════════════════════════════════════════════════════════════
+# PLATFORM DETECTION
+# ═══════════════════════════════════════════════════════════════════
+IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
+IS_MAC = sys.platform == "darwin"
+
+# ═══════════════════════════════════════════════════════════════════
 # ОСНОВНАЯ ПАПКА ПРОГРАММЫ
 # ═══════════════════════════════════════════════════════════════════
 # Путь определяется автоматически по расположению exe файла.
@@ -21,8 +28,11 @@ APP_CORE_PATH = MAIN_DIRECTORY
 
 
 def get_roaming_appdata_dir() -> str:
-    """Returns %APPDATA% (Roaming) on Windows, or empty string."""
-    return os.environ.get("APPDATA", "")
+    """Returns %APPDATA% (Roaming) on Windows, or XDG_CONFIG_HOME on Linux."""
+    if IS_WINDOWS:
+        return os.environ.get("APPDATA", "")
+    # Linux: use XDG_CONFIG_HOME or ~/.config
+    return os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
 
 
 def get_zapret_channel_dir_name() -> str:
@@ -34,7 +44,8 @@ def get_zapret_userdata_dir() -> str:
     """Returns the canonical per-channel user-data root for Zapret.
 
     Primary target (Windows): %APPDATA%\\zapret\\stable or %APPDATA%\\zapret\\dev
-    Fallback (non-Windows/dev): MAIN_DIRECTORY
+    Linux: ~/.config/zapret/stable or ~/.config/zapret/dev
+    Fallback (dev): MAIN_DIRECTORY
     """
     base = get_roaming_appdata_dir()
     if base:
@@ -86,11 +97,20 @@ HELP_FOLDER = os.path.join(MAIN_DIRECTORY, "help")
 MAX_LOG_FILES = 50           # zapret_log_*.txt - основные логи приложения
 MAX_DEBUG_LOG_FILES = 20     # zapret_winws2_debug_*.log - debug логи winws2
 
-WINDIVERT_FILTER = os.path.join(MAIN_DIRECTORY, "windivert.filter")
+# Platform-specific filter file
+if IS_WINDOWS:
+    WINDIVERT_FILTER = os.path.join(MAIN_DIRECTORY, "windivert.filter")
+else:
+    WINDIVERT_FILTER = ""  # Not used on Linux
 
-# Пути к файлам
-WINWS_EXE = os.path.join(EXE_FOLDER, "winws.exe")      # Для Zapret 1
-WINWS2_EXE = os.path.join(EXE_FOLDER, "winws2.exe")    # Для Zapret 2
+# Пути к файлам — platform-aware
+if IS_WINDOWS:
+    WINWS_EXE = os.path.join(EXE_FOLDER, "winws.exe")      # Для Zapret 1
+    WINWS2_EXE = os.path.join(EXE_FOLDER, "winws2.exe")    # Для Zapret 2
+else:
+    # Linux: nfqws/nfqws2 binaries
+    WINWS_EXE = os.path.join(BIN_FOLDER, "nfqws")
+    WINWS2_EXE = os.path.join(BIN_FOLDER, "nfqws2")
 
 # ═══════════════════════════════════════════════════════════════════
 # ОПРЕДЕЛЕНИЕ EXE ПО МЕТОДУ ЗАПУСКА
@@ -196,13 +216,21 @@ APPDATA_DIR = get_zapret_userdata_dir()
 # ПУТИ РЕЕСТРА (все в одном месте)
 # ═══════════════════════════════════════════════════════════════════
 # Базовый путь зависит от канала сборки (stable/test)
-REGISTRY_PATH = r"Software\Zapret2DevReg" if CHANNEL == "test" else r"Software\Zapret2Reg"
+# На Linux используется как ключ для JSON config store
+if IS_WINDOWS:
+    REGISTRY_PATH = r"Software\Zapret2DevReg" if CHANNEL == "test" else r"Software\Zapret2Reg"
+else:
+    REGISTRY_PATH = f"zapret2/{CHANNEL if CHANNEL == 'test' else 'stable'}"
 
 # Подпути внутри базового пути
-REGISTRY_PATH_GUI = rf"{REGISTRY_PATH}\GUI"                     # Настройки GUI (MAX blocker, donate и т.д.)
-REGISTRY_PATH_STRATEGIES = rf"{REGISTRY_PATH}\Strategies"       # Настройки стратегий
-REGISTRY_PATH_WINDOW = rf"{REGISTRY_PATH}\Window"               # Позиция и размер окна
-# ═══════════════════════════════════════════════════════════════════
+if IS_WINDOWS:
+    REGISTRY_PATH_GUI = rf"{REGISTRY_PATH}\GUI"                     # Настройки GUI (MAX blocker, donate и т.д.)
+    REGISTRY_PATH_STRATEGIES = rf"{REGISTRY_PATH}\Strategies"       # Настройки стратегий
+    REGISTRY_PATH_WINDOW = rf"{REGISTRY_PATH}\Window"               # Позиция и размер окна
+else:
+    REGISTRY_PATH_GUI = f"{REGISTRY_PATH}/GUI"
+    REGISTRY_PATH_STRATEGIES = f"{REGISTRY_PATH}/Strategies"
+    REGISTRY_PATH_WINDOW = f"{REGISTRY_PATH}/Window"
 
 BASE_WIDTH = 1000  # Базовый размер для бокового меню в стиле Windows 11
 BASE_HEIGHT = 950  # Базовая высота для нового интерфейса
@@ -210,41 +238,85 @@ MIN_WIDTH = 680    # Минимальная ширина (уменьшено д�
 MIN_HEIGHT = 580   # Минимальная высота (уменьшено для экранов 1366x768)
 
 def get_display_scale():
-    """Получает масштабирование экрана Windows (например, 1.0, 1.25, 1.5, 1.75, 2.0)"""
-    try:
-        import ctypes
-        # Включаем DPI awareness для получения реального масштаба
+    """Получает масштабирование экрана.
+    
+    Windows: через ctypes.windll
+    Linux: через Qt или环境变量, fallback 1.0
+    """
+    if IS_WINDOWS:
         try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
-        except:
-            pass
-        
-        # Получаем DPI экрана
-        hdc = ctypes.windll.user32.GetDC(0)
-        dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX = 88
-        ctypes.windll.user32.ReleaseDC(0, hdc)
-        
-        # Стандартный DPI = 96, масштаб = DPI / 96
-        scale = dpi / 96.0
-        return scale
-    except Exception:
+            import ctypes
+            # Включаем DPI awareness для получения реального масштаба
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            except:
+                pass
+
+            # Получаем DPI экрана
+            hdc = ctypes.windll.user32.GetDC(0)
+            dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX = 88
+            ctypes.windll.user32.ReleaseDC(0, hdc)
+
+            # Стандартный DPI = 96, масштаб = DPI / 96
+            scale = dpi / 96.0
+            return scale
+        except Exception:
+            return 1.0
+    # Linux: use environment variable or default
+    try:
+        scale_str = os.environ.get("QT_SCALE_FACTOR", "1.0")
+        return float(scale_str)
+    except ValueError:
         return 1.0
 
 def get_screen_resolution():
-    """Получает реальное разрешение экрана в пикселях"""
-    try:
-        import ctypes
-        user32 = ctypes.windll.user32
-        # Включаем DPI awareness для получения реального разрешения
+    """Получает реальное разрешение экрана в пикселях.
+    
+    Windows: через ctypes.windll
+    Linux: через Qt
+    """
+    if IS_WINDOWS:
         try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
-        except:
-            pass
-        screen_width = user32.GetSystemMetrics(0)   # SM_CXSCREEN
-        screen_height = user32.GetSystemMetrics(1)  # SM_CYSCREEN
-        return screen_width, screen_height
+            import ctypes
+            user32 = ctypes.windll.user32
+            # Включаем DPI awareness для получения реального разрешения
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            except:
+                pass
+            screen_width = user32.GetSystemMetrics(0)   # SM_CXSCREEN
+            screen_height = user32.GetSystemMetrics(1)  # SM_CYSCREEN
+            return screen_width, screen_height
+        except Exception:
+            return 1920, 1080  # Значение по умолчанию
+    # Linux: try Qt first, fallback to xrandr or default
+    try:
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtGui import QScreen
+        app = QApplication.instance()
+        if app is None:
+            return 1920, 1080
+        screen = app.primaryScreen()
+        if screen:
+            geom = screen.geometry()
+            return geom.width(), geom.height()
     except Exception:
-        return 1920, 1080  # Значение по умолчанию
+        pass
+    # Fallback: try xrandr
+    try:
+        import subprocess
+        result = subprocess.run(["xrandr", "--current"], capture_output=True, text=True, timeout=3)
+        for line in result.stdout.splitlines():
+            if "current" in line and "maximum" in line:
+                parts = line.split()
+                for i, part in enumerate(parts):
+                    if part == "current":
+                        w = int(parts[i + 1])
+                        h = int(parts[i + 3].rstrip(","))
+                        return w, h
+    except Exception:
+        pass
+    return 1920, 1080  # Значение по умолчанию
 
 def get_scaled_window_size():
     """Возвращает размер окна с учетом масштабирования и разрешения экрана"""
@@ -305,117 +377,256 @@ if __name__ == "__main__":
 
 
 def get_window_position():
-    """Получает сохраненную позицию окна из реестра"""
-    try:
-        import winreg
-        from log import log
-
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_READ)
+    """Получает сохраненную позицию окна.
+    
+    Windows: из реестра
+    Linux: из JSON config store
+    """
+    if IS_LINUX:
         try:
-            x = winreg.QueryValueEx(key, "WindowX")[0]
-            y = winreg.QueryValueEx(key, "WindowY")[0]
-            winreg.CloseKey(key)
-            # Values are stored as DWORD. Decode signed 32-bit so multi-monitor
-            # setups (negative coordinates) work correctly.
-            if isinstance(x, int) and x >= 0x80000000:
-                x -= 0x100000000
-            if isinstance(y, int) and y >= 0x80000000:
-                y -= 0x100000000
-            return (x, y)
-        except FileNotFoundError:
-            winreg.CloseKey(key)
+            from platform.config_store import get_linux_store
+            from log import log
+            store = get_linux_store()
+            x = store.get_dword(f"{REGISTRY_PATH_WINDOW}/WindowX")
+            y = store.get_dword(f"{REGISTRY_PATH_WINDOW}/WindowY")
+            if x is not None and y is not None:
+                return (x, y)
             return None
-    except Exception as e:
-        log(f"Ошибка чтения позиции окна: {e}", "DEBUG")
-        return None
+        except Exception as e:
+            try:
+                from log import log
+                log(f"Ошибка чтения позиции окна (Linux): {e}", "DEBUG")
+            except ImportError:
+                pass
+            return None
+
+    if IS_WINDOWS:
+        try:
+            import winreg
+            from log import log
+
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_READ)
+            try:
+                x = winreg.QueryValueEx(key, "WindowX")[0]
+                y = winreg.QueryValueEx(key, "WindowY")[0]
+                winreg.CloseKey(key)
+                # Values are stored as DWORD. Decode signed 32-bit so multi-monitor
+                # setups (negative coordinates) work correctly.
+                if isinstance(x, int) and x >= 0x80000000:
+                    x -= 0x100000000
+                if isinstance(y, int) and y >= 0x80000000:
+                    y -= 0x100000000
+                return (x, y)
+            except FileNotFoundError:
+                winreg.CloseKey(key)
+                return None
+        except Exception as e:
+            log(f"Ошибка чтения позиции окна: {e}", "DEBUG")
+            return None
+    return None
 
 def set_window_position(x, y):
-    """Сохраняет позицию окна в реестр"""
-    try:
-        import winreg
-        from log import log
-
-        # REG_DWORD is unsigned; store signed 32-bit coordinates as two's complement.
-        def _to_dword_signed(v):
+    """Сохраняет позицию окна.
+    
+    Windows: в реестр
+    Linux: в JSON config store
+    """
+    if IS_LINUX:
+        try:
+            from platform.config_store import get_linux_store
+            from log import log
+            store = get_linux_store()
+            store.set_value(f"{REGISTRY_PATH_WINDOW}/WindowX", int(x))
+            store.set_value(f"{REGISTRY_PATH_WINDOW}/WindowY", int(y))
+            log(f"Позиция окна сохранена: ({x}, {y})", "DEBUG")
+            return True
+        except Exception as e:
             try:
-                return int(v) & 0xFFFFFFFF
-            except Exception:
-                return 0
+                from log import log
+                log(f"Ошибка сохранения позиции окна: {e}", "❌ ERROR")
+            except ImportError:
+                pass
+            return False
 
-        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH)
-        winreg.SetValueEx(key, "WindowX", 0, winreg.REG_DWORD, _to_dword_signed(x))
-        winreg.SetValueEx(key, "WindowY", 0, winreg.REG_DWORD, _to_dword_signed(y))
-        winreg.CloseKey(key)
-        log(f"Позиция окна сохранена: ({x}, {y})", "DEBUG")
-        return True
-    except Exception as e:
-        log(f"Ошибка сохранения позиции окна: {e}", "❌ ERROR")
-        return False
+    if IS_WINDOWS:
+        try:
+            import winreg
+            from log import log
+
+            # REG_DWORD is unsigned; store signed 32-bit coordinates as two's complement.
+            def _to_dword_signed(v):
+                try:
+                    return int(v) & 0xFFFFFFFF
+                except Exception:
+                    return 0
+
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH)
+            winreg.SetValueEx(key, "WindowX", 0, winreg.REG_DWORD, _to_dword_signed(x))
+            winreg.SetValueEx(key, "WindowY", 0, winreg.REG_DWORD, _to_dword_signed(y))
+            winreg.CloseKey(key)
+            log(f"Позиция окна сохранена: ({x}, {y})", "DEBUG")
+            return True
+        except Exception as e:
+            log(f"Ошибка сохранения позиции окна: {e}", "❌ ERROR")
+            return False
+    return False
 
 def get_window_size():
-    """Получает сохраненный размер окна из реестра"""
-    try:
-        import winreg
-        from log import log
-
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_READ)
+    """Получает сохраненный размер окна.
+    
+    Windows: из реестра
+    Linux: из JSON config store
+    """
+    if IS_LINUX:
         try:
-            width = winreg.QueryValueEx(key, "WindowWidth")[0]
-            height = winreg.QueryValueEx(key, "WindowHeight")[0]
-            winreg.CloseKey(key)
-            return (width, height)
-        except FileNotFoundError:
-            winreg.CloseKey(key)
+            from platform.config_store import get_linux_store
+            from log import log
+            store = get_linux_store()
+            w = store.get_dword(f"{REGISTRY_PATH_WINDOW}/WindowWidth")
+            h = store.get_dword(f"{REGISTRY_PATH_WINDOW}/WindowHeight")
+            if w is not None and h is not None:
+                return (w, h)
             return None
-    except Exception as e:
-        log(f"Ошибка чтения размера окна: {e}", "DEBUG")
-        return None
+        except Exception as e:
+            try:
+                from log import log
+                log(f"Ошибка чтения размера окна (Linux): {e}", "DEBUG")
+            except ImportError:
+                pass
+            return None
+
+    if IS_WINDOWS:
+        try:
+            import winreg
+            from log import log
+
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_READ)
+            try:
+                width = winreg.QueryValueEx(key, "WindowWidth")[0]
+                height = winreg.QueryValueEx(key, "WindowHeight")[0]
+                winreg.CloseKey(key)
+                return (width, height)
+            except FileNotFoundError:
+                winreg.CloseKey(key)
+                return None
+        except Exception as e:
+            log(f"Ошибка чтения размера окна: {e}", "DEBUG")
+            return None
+    return None
 
 def set_window_size(width, height):
-    """Сохраняет размер окна в реестр"""
-    try:
-        import winreg
-        from log import log
-        
-        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH)
-        winreg.SetValueEx(key, "WindowWidth", 0, winreg.REG_DWORD, int(width))
-        winreg.SetValueEx(key, "WindowHeight", 0, winreg.REG_DWORD, int(height))
-        winreg.CloseKey(key)
-        log(f"Размер окна сохранен: ({width}x{height})", "DEBUG")
-        return True
-    except Exception as e:
-        log(f"Ошибка сохранения размера окна: {e}", "❌ ERROR")
-        return False
+    """Сохраняет размер окна.
+    
+    Windows: в реестр
+    Linux: в JSON config store
+    """
+    if IS_LINUX:
+        try:
+            from platform.config_store import get_linux_store
+            from log import log
+            store = get_linux_store()
+            store.set_value(f"{REGISTRY_PATH_WINDOW}/WindowWidth", int(width))
+            store.set_value(f"{REGISTRY_PATH_WINDOW}/WindowHeight", int(height))
+            log(f"Размер окна сохранен: ({width}x{height})", "DEBUG")
+            return True
+        except Exception as e:
+            try:
+                from log import log
+                log(f"Ошибка сохранения размера окна: {e}", "❌ ERROR")
+            except ImportError:
+                pass
+            return False
+
+    if IS_WINDOWS:
+        try:
+            import winreg
+            from log import log
+
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH)
+            winreg.SetValueEx(key, "WindowWidth", 0, winreg.REG_DWORD, int(width))
+            winreg.SetValueEx(key, "WindowHeight", 0, winreg.REG_DWORD, int(height))
+            winreg.CloseKey(key)
+            log(f"Размер окна сохранен: ({width}x{height})", "DEBUG")
+            return True
+        except Exception as e:
+            log(f"Ошибка сохранения размера окна: {e}", "❌ ERROR")
+            return False
+    return False
 
 def get_window_maximized():
-    """Получает сохранённое состояние "окно развернуто" из реестра"""
-    try:
-        import winreg
-        from log import log
-
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_READ)
+    """Получает сохранённое состояние "окно развернуто".
+    
+    Windows: из реестра
+    Linux: из JSON config store
+    """
+    if IS_LINUX:
         try:
-            maximized = winreg.QueryValueEx(key, "WindowMaximized")[0]
-            winreg.CloseKey(key)
-            return bool(int(maximized))
-        except FileNotFoundError:
-            winreg.CloseKey(key)
+            from platform.config_store import get_linux_store
+            from log import log
+            store = get_linux_store()
+            val = store.get_value(f"{REGISTRY_PATH_WINDOW}/WindowMaximized")
+            if val is not None:
+                return bool(int(val))
             return None
-    except Exception as e:
-        log(f"Ошибка чтения состояния maximized: {e}", "DEBUG")
-        return None
+        except Exception as e:
+            try:
+                from log import log
+                log(f"Ошибка чтения состояния maximized (Linux): {e}", "DEBUG")
+            except ImportError:
+                pass
+            return None
+
+    if IS_WINDOWS:
+        try:
+            import winreg
+            from log import log
+
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_READ)
+            try:
+                maximized = winreg.QueryValueEx(key, "WindowMaximized")[0]
+                winreg.CloseKey(key)
+                return bool(int(maximized))
+            except FileNotFoundError:
+                winreg.CloseKey(key)
+                return None
+        except Exception as e:
+            log(f"Ошибка чтения состояния maximized: {e}", "DEBUG")
+            return None
+    return None
 
 def set_window_maximized(maximized: bool):
-    """Сохраняет состояние "окно развернуто" в реестр"""
-    try:
-        import winreg
-        from log import log
+    """Сохраняет состояние "окно развернуто".
+    
+    Windows: в реестр
+    Linux: в JSON config store
+    """
+    if IS_LINUX:
+        try:
+            from platform.config_store import get_linux_store
+            from log import log
+            store = get_linux_store()
+            store.set_value(f"{REGISTRY_PATH_WINDOW}/WindowMaximized", int(bool(maximized)))
+            log(f"Состояние maximized сохранено: {bool(maximized)}", "DEBUG")
+            return True
+        except Exception as e:
+            try:
+                from log import log
+                log(f"Ошибка сохранения состояния maximized: {e}", "❌ ERROR")
+            except ImportError:
+                pass
+            return False
 
-        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH)
-        winreg.SetValueEx(key, "WindowMaximized", 0, winreg.REG_DWORD, int(bool(maximized)))
-        winreg.CloseKey(key)
-        log(f"Состояние maximized сохранено: {bool(maximized)}", "DEBUG")
-        return True
-    except Exception as e:
-        log(f"Ошибка сохранения состояния maximized: {e}", "❌ ERROR")
-        return False
+    if IS_WINDOWS:
+        try:
+            import winreg
+            from log import log
+
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH)
+            winreg.SetValueEx(key, "WindowMaximized", 0, winreg.REG_DWORD, int(bool(maximized)))
+            winreg.CloseKey(key)
+            log(f"Состояние maximized сохранено: {bool(maximized)}", "DEBUG")
+            return True
+        except Exception as e:
+            log(f"Ошибка сохранения состояния maximized: {e}", "❌ ERROR")
+            return False
+    return False

@@ -1,13 +1,18 @@
 """
-Управление службами Windows через Win API
-Быстрее и надёжнее чем sc.exe
+Управление службами (Windows) и сетевыми правилами (Linux).
+Windows: через Win API (advapi32) для WinDivert cleanup
+Linux: через iptables/nftables для nfqws cleanup
 """
 
+import sys
 import ctypes
 from ctypes import wintypes
 from typing import Optional, List
 import time
 from .winapi_service_types import SERVICE_STATUS
+
+IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
 
 # Безопасный импорт log
 try:
@@ -210,18 +215,45 @@ def stop_and_delete_service(service_name: str, retry_count: int = 3) -> bool:
 
 def cleanup_windivert_services() -> bool:
     """
-    Быстро очищает все службы WinDivert
-    
+    Очищает службы WinDivert (Windows) или правила iptables (Linux).
+
     Returns:
-        True если хотя бы одна служба была остановлена
+        True если очистка прошла успешно
     """
+    if IS_LINUX:
+        log("Очистка правил iptables/nftables для nfqws...", "INFO")
+        try:
+            import subprocess
+            # Очищаем таблицу mangle (используется nfqws для NFQUEUE)
+            subprocess.run(
+                ["iptables", "-t", "mangle", "-F"],
+                capture_output=True, timeout=10
+            )
+            # Если использовался ipv6
+            subprocess.run(
+                ["ip6tables", "-t", "mangle", "-F"],
+                capture_output=True, timeout=10
+            )
+            log("✅ Правила iptables очищены", "DEBUG")
+            return True
+        except FileNotFoundError:
+            log("iptables не найден (возножно, не установлен)", "WARNING")
+            return False
+        except subprocess.TimeoutExpired:
+            log("Таймаут очистки iptables", "WARNING")
+            return False
+        except Exception as e:
+            log(f"Ошибка очистки iptables: {e}", "DEBUG")
+            return False
+
+    # Windows: original WinDivert cleanup
     service_names = ["WinDivert", "WinDivert14", "WinDivert64", "windivert", "Monkey"]
-    
+
     cleaned = False
     for service_name in service_names:
         if stop_and_delete_service(service_name, retry_count=1):
             cleaned = True
-    
+
     return cleaned
 
 

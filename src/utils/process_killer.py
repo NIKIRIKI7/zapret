@@ -1,10 +1,11 @@
 """
-Утилита для остановки процессов через Windows API.
-Быстрее и надёжнее чем taskkill.exe
+Утилита для остановки процессов.
+Windows: через Windows API + psutil
+Linux: через os.kill / pkill
 """
 
-import ctypes
-from ctypes import wintypes
+import os
+import sys
 try:
     import psutil  # type: ignore[import-not-found]
 except Exception:  # pragma: no cover - local test environments may not ship psutil
@@ -30,37 +31,51 @@ except Exception:  # pragma: no cover - local test environments may not ship psu
 from log import log
 from typing import List, Optional
 
-# Windows API константы
-PROCESS_TERMINATE = 0x0001
-PROCESS_QUERY_INFORMATION = 0x0400
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-SYNCHRONIZE = 0x00100000
+IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
 
-# WaitForSingleObject константы
-WAIT_OBJECT_0 = 0x00000000
-WAIT_TIMEOUT = 0x00000102
-WAIT_FAILED = 0xFFFFFFFF
-INFINITE = 0xFFFFFFFF
+if IS_WINDOWS:
+    import ctypes
+    from ctypes import wintypes
 
-if hasattr(ctypes, "windll"):
-    kernel32 = ctypes.windll.kernel32
+    # Windows API константы
+    PROCESS_TERMINATE = 0x0001
+    PROCESS_QUERY_INFORMATION = 0x0400
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    SYNCHRONIZE = 0x00100000
 
-    OpenProcess = kernel32.OpenProcess
-    OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    OpenProcess.restype = wintypes.HANDLE
+    # WaitForSingleObject константы
+    WAIT_OBJECT_0 = 0x00000000
+    WAIT_TIMEOUT = 0x00000102
+    WAIT_FAILED = 0xFFFFFFFF
+    INFINITE = 0xFFFFFFFF
 
-    TerminateProcess = kernel32.TerminateProcess
-    TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
-    TerminateProcess.restype = wintypes.BOOL
+    if hasattr(ctypes, "windll"):
+        kernel32 = ctypes.windll.kernel32
 
-    WaitForSingleObject = kernel32.WaitForSingleObject
-    WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-    WaitForSingleObject.restype = wintypes.DWORD
+        OpenProcess = kernel32.OpenProcess
+        OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        OpenProcess.restype = wintypes.HANDLE
 
-    CloseHandle = kernel32.CloseHandle
-    CloseHandle.argtypes = [wintypes.HANDLE]
-    CloseHandle.restype = wintypes.BOOL
-else:  # pragma: no cover - import safety for non-Windows environments
+        TerminateProcess = kernel32.TerminateProcess
+        TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        TerminateProcess.restype = wintypes.BOOL
+
+        WaitForSingleObject = kernel32.WaitForSingleObject
+        WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        WaitForSingleObject.restype = wintypes.DWORD
+
+        CloseHandle = kernel32.CloseHandle
+        CloseHandle.argtypes = [wintypes.HANDLE]
+        CloseHandle.restype = wintypes.BOOL
+    else:  # pragma: no cover - import safety for non-Windows environments
+        kernel32 = None
+        OpenProcess = None
+        TerminateProcess = None
+        WaitForSingleObject = None
+        CloseHandle = None
+else:
+    # Linux stubs
     kernel32 = None
     OpenProcess = None
     TerminateProcess = None
@@ -70,18 +85,30 @@ else:  # pragma: no cover - import safety for non-Windows environments
 
 def kill_process_by_pid(pid: int, force: bool = True, wait_timeout_ms: int = 3000) -> bool:
     """
-    Завершает процесс по PID через Windows API с fallback на psutil.
-    Ждёт реального завершения процесса.
-
-    Args:
-        pid: ID процесса
-        force: True для принудительного завершения
-        wait_timeout_ms: Таймаут ожидания завершения в миллисекундах
-
-    Returns:
-        True если процесс успешно завершён
+    Завершает процесс по PID.
+    
+    Windows: через Windows API с fallback на psutil
+    Linux: через os.kill / signal
     """
-    # Сначала пробуем через Win API с расширенными правами
+    # Linux: use os.kill
+    if IS_LINUX:
+        import signal
+        try:
+            sig = signal.SIGKILL if force else signal.SIGTERM
+            os.kill(pid, sig)
+            log(f"✅ Процесс PID={pid} завершён сигналом {sig.name}", "DEBUG")
+            return True
+        except ProcessLookupError:
+            log(f"Процесс PID={pid} уже завершён", "DEBUG")
+            return True
+        except PermissionError:
+            log(f"❌ Нет прав для завершения процесса PID={pid} (требуются права root)", "WARNING")
+            return False
+        except Exception as e:
+            log(f"❌ Ошибка завершения процесса PID={pid}: {e}", "WARNING")
+            return False
+
+    # Windows: сначала пробуем через Win API с расширенными правами
     try:
         if OpenProcess is None or TerminateProcess is None or WaitForSingleObject is None or CloseHandle is None:
             raise RuntimeError("WinAPI unavailable")
@@ -150,18 +177,30 @@ def kill_process_by_pid(pid: int, force: bool = True, wait_timeout_ms: int = 300
 
 def kill_process_by_name(process_name: str, kill_all: bool = True) -> int:
     """
-    Завершает все процессы с указанным именем через Windows API.
+    Завершает все процессы с указанным именем.
     
-    Args:
-        process_name: Имя процесса (например "winws.exe")
-        kill_all: True для завершения всех найденных процессов
-        
-    Returns:
-        Количество завершённых процессов
+    Windows: через psutil
+    Linux: через pkill
     """
+    if IS_LINUX:
+        import subprocess
+        try:
+            # pkill -f matches against full command line
+            cmd = ['pkill', '-9', '-f', process_name]
+            result = subprocess.run(cmd, capture_output=True, timeout=5)
+            if result.returncode == 0:
+                log(f"✅ Завершено процессов {process_name} через pkill", "INFO")
+                return 1
+            return 0
+        except FileNotFoundError:
+            # pkill not available, fallback to psutil
+            pass
+        except Exception as e:
+            log(f"Ошибка pkill для {process_name}: {e}", "WARNING")
+
     killed_count = 0
     process_name_lower = process_name.lower()
-    
+
     try:
         # Ищем все процессы с указанным именем через psutil
         for proc in psutil.process_iter(['pid', 'name']):
@@ -169,81 +208,77 @@ def kill_process_by_name(process_name: str, kill_all: bool = True) -> int:
                 proc_name = proc.info['name']
                 if proc_name and proc_name.lower() == process_name_lower:
                     pid = proc.info['pid']
-                    
+
                     if kill_process_by_pid(pid):
                         killed_count += 1
-                        
+
                         if not kill_all:
                             break
-                            
+
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
-                
+
     except Exception as e:
         log(f"Ошибка поиска процесса {process_name}: {e}", "WARNING")
-    
+
     if killed_count > 0:
         log(f"Завершено {killed_count} процессов {process_name}", "INFO")
     else:
         log(f"Процессы {process_name} не найдены или уже завершены", "DEBUG")
-    
+
     return killed_count
 
 
 def kill_winws_all(max_retries: int = 3, retry_delay: float = 0.5) -> bool:
     """
-    Завершает все процессы winws.exe и winws2.exe.
-    Проверяет что процессы действительно завершены и делает повторные попытки.
-
-    Args:
-        max_retries: Максимальное количество попыток
-        retry_delay: Задержка между попытками в секундах
-
-    Returns:
-        True если все процессы успешно завершены
+    Завершает все процессы winws/nfqws.
     """
     import time
+
+    # Platform-specific process names
+    if IS_LINUX:
+        process_names = ["nfqws", "nfqws2"]
+    else:
+        process_names = ["winws.exe", "winws2.exe"]
 
     for attempt in range(1, max_retries + 1):
         total_killed = 0
 
-        # Завершаем winws.exe
-        total_killed += kill_process_by_name("winws.exe", kill_all=True)
-
-        # Завершаем winws2.exe
-        total_killed += kill_process_by_name("winws2.exe", kill_all=True)
+        for proc_name in process_names:
+            total_killed += kill_process_by_name(proc_name, kill_all=True)
 
         if total_killed > 0:
-            log(f"✅ Завершено {total_killed} процессов winws (попытка {attempt})", "INFO")
+            log(f"✅ Завершено {total_killed} процессов (попытка {attempt})", "INFO")
 
         # Проверяем, что процессы действительно завершены
-        time.sleep(0.2)  # Небольшая пауза для обновления списка процессов
+        time.sleep(0.2)
 
-        remaining_winws = get_process_pids("winws.exe")
-        remaining_winws2 = get_process_pids("winws2.exe")
+        remaining = []
+        for proc_name in process_names:
+            remaining.extend(get_process_pids(proc_name))
 
-        if not remaining_winws and not remaining_winws2:
+        if not remaining:
             if total_killed > 0:
-                log(f"✅ Всего завершено {total_killed} процессов winws (подтверждено)", "INFO")
+                log(f"✅ Всего завершено {total_killed} процессов (подтверждено)", "INFO")
             else:
-                log("Процессы winws не найдены", "DEBUG")
+                log("Процессы не найдены", "DEBUG")
             return True
 
         # Есть ещё живые процессы
-        remaining_count = len(remaining_winws) + len(remaining_winws2)
-        log(f"⚠ Осталось {remaining_count} процессов winws после попытки {attempt}", "WARNING")
+        remaining_count = len(remaining)
+        log(f"⚠ Осталось {remaining_count} процессов после попытки {attempt}", "WARNING")
 
         if attempt < max_retries:
             log(f"Повторная попытка через {retry_delay}с...", "DEBUG")
             time.sleep(retry_delay)
 
     # После всех попыток ещё раз проверяем
-    remaining_winws = get_process_pids("winws.exe")
-    remaining_winws2 = get_process_pids("winws2.exe")
+    remaining = []
+    for proc_name in process_names:
+        remaining.extend(get_process_pids(proc_name))
 
-    if remaining_winws or remaining_winws2:
-        all_remaining = remaining_winws + remaining_winws2
-        log(f"❌ Не удалось завершить процессы winws: PIDs={all_remaining}", "ERROR")
+    if remaining:
+        log(f"❌ Не удалось завершить процессы: PIDs={remaining}", "ERROR")
         return False
 
     return True
@@ -252,15 +287,19 @@ def kill_winws_all(max_retries: int = 3, retry_delay: float = 0.5) -> bool:
 def is_process_running(process_name: str) -> bool:
     """
     Быстрая проверка запущен ли процесс.
-    
-    Args:
-        process_name: Имя процесса (например "winws.exe")
-        
-    Returns:
-        True если процесс найден
     """
+    if IS_LINUX:
+        import subprocess
+        try:
+            result = subprocess.run(['pgrep', '-f', process_name], 
+                                    capture_output=True, timeout=3)
+            return result.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            # Fallback to psutil
+            pass
+
     process_name_lower = process_name.lower()
-    
+
     try:
         for proc in psutil.process_iter(['name']):
             try:
@@ -271,7 +310,7 @@ def is_process_running(process_name: str) -> bool:
                 continue
     except Exception as e:
         log(f"Ошибка проверки процесса {process_name}: {e}", "DEBUG")
-    
+
     return False
 
 
@@ -458,62 +497,62 @@ def kill_via_wmi(process_name: str) -> bool:
 
 def kill_winws_force() -> bool:
     """
-    Агрессивное завершение всех процессов winws через все доступные методы.
-    Используется когда обычные методы не работают.
-
-    Returns:
-        True если все процессы завершены
+    Агрессивное завершение всех процессов winws/nfqws.
     """
     import time
 
-    # Быстрая проверка - если процессов нет, сразу выходим
-    if not get_process_pids("winws.exe") and not get_process_pids("winws2.exe"):
-        log("Процессы winws не найдены", "DEBUG")
+    # Platform-specific process names
+    if IS_LINUX:
+        process_names = ["nfqws", "nfqws2"]
+    else:
+        process_names = ["winws.exe", "winws2.exe"]
+
+    # Quick check - exit if no processes running
+    all_pids = []
+    for proc_name in process_names:
+        all_pids.extend(get_process_pids(proc_name))
+
+    if not all_pids:
+        log("Процессы не найдены", "DEBUG")
         return True
 
-    # 1. Пробуем через Win API (быстро)
+    # 1. Try normal kill
     kill_winws_all(max_retries=2, retry_delay=0.3)
 
-    # 2. Проверяем остались ли процессы
-    remaining = get_process_pids("winws.exe") + get_process_pids("winws2.exe")
+    # 2. Check remaining
+    remaining = []
+    for proc_name in process_names:
+        remaining.extend(get_process_pids(proc_name))
 
     if not remaining:
-        return True  # Win API справился
-
-    # 3. Win API не справился - применяем taskkill /F /T
-    log(f"⚠ Осталось {len(remaining)} процессов, применяем taskkill", "WARNING")
-    force_kill_via_taskkill("winws.exe")
-    force_kill_via_taskkill("winws2.exe")
-
-    time.sleep(0.3)
-
-    # 4. Проверяем после taskkill
-    remaining = get_process_pids("winws.exe") + get_process_pids("winws2.exe")
-
-    if not remaining:
-        log("✅ Процессы winws завершены через taskkill", "INFO")
         return True
 
-    # 5. Taskkill не справился - применяем WMI
-    log(f"⚠ Taskkill не справился, осталось {len(remaining)} процессов. Применяем WMI", "WARNING")
-    kill_via_wmi("winws.exe")
-    kill_via_wmi("winws2.exe")
+    # 3. Linux: try pkill -9 as fallback
+    if IS_LINUX:
+        import subprocess
+        log(f"⚠ Осталось {len(remaining)} процессов, применяем pkill -9", "WARNING")
+        for proc_name in process_names:
+            try:
+                subprocess.run(['pkill', '-9', '-f', proc_name], 
+                               capture_output=True, timeout=5)
+            except Exception:
+                pass
+        time.sleep(0.3)
+    else:
+        # Windows: try taskkill
+        log(f"⚠ Осталось {len(remaining)} процессов, применяем taskkill", "WARNING")
+        for proc_name in process_names:
+            force_kill_via_taskkill(proc_name)
+        time.sleep(0.3)
 
-    time.sleep(0.3)
-
-    # 6. Финальная проверка
-    remaining = get_process_pids("winws.exe") + get_process_pids("winws2.exe")
+    # 4. Final check
+    remaining = []
+    for proc_name in process_names:
+        remaining.extend(get_process_pids(proc_name))
 
     if remaining:
-        log(f"❌ Не удалось завершить процессы winws: PIDs={remaining}", "ERROR")
-        # Пытаемся собрать диагностику
-        try:
-            for pid in remaining:
-                proc = psutil.Process(pid)
-                log(f"  PID={pid}: name={proc.name()}, status={proc.status()}, username={proc.username()}", "DEBUG")
-        except Exception:
-            pass
+        log(f"❌ Не удалось завершить процессы: PIDs={remaining}", "ERROR")
         return False
 
-    log("✅ Процессы winws завершены через WMI", "INFO")
+    log("✅ Процессы завершены", "INFO")
     return True

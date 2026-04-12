@@ -2,6 +2,7 @@
 """Base class for strategy runners with shared functionality"""
 
 import os
+import sys
 import subprocess
 import time
 from abc import ABC, abstractmethod
@@ -9,7 +10,7 @@ from typing import Optional, List, Dict
 
 from log import log
 from .args_filters import apply_all_filters
-from .constants import SW_HIDE, CREATE_NO_WINDOW, STARTF_USESHOWWINDOW
+from .constants import SW_HIDE, CREATE_NO_WINDOW, STARTF_USESHOWWINDOW, IS_WINDOWS, IS_LINUX
 from .preset_runner_support import wait_for_process_exit
 from direct_launch.health.process_health_check import (
     check_process_health, get_last_crash_info, check_common_crash_causes,
@@ -73,7 +74,9 @@ class StrategyRunnerBase(ABC):
         pass
 
     def _create_startup_info(self):
-        """Creates STARTUPINFO for hidden process launch"""
+        """Creates STARTUPINFO for hidden process launch (Windows only)."""
+        if not IS_WINDOWS:
+            return None  # Linux doesn't need STARTUPINFO
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags = STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = SW_HIDE
@@ -99,14 +102,16 @@ class StrategyRunnerBase(ABC):
         return resolve_args_paths(args, self.lists_dir, self.bin_dir, WINDIVERT_FILTER)
 
     def _fast_cleanup_services(self):
-        """Fast service cleanup via Win API (for normal startup)"""
+        """Fast service cleanup — WinDivert (Windows) or iptables (Linux)"""
         try:
             cleanup_windivert_services()
         except Exception as e:
             log(f"Fast cleanup error: {e}", "DEBUG")
 
     def _unload_known_windivert_drivers(self) -> None:
-        """Best-effort unload of known WinDivert-related drivers before spawn."""
+        """Best-effort unload of known WinDivert-related drivers before spawn (Windows only)."""
+        if not IS_WINDOWS:
+            return  # Not applicable on Linux
         try:
             for driver in ["WinDivert", "WinDivert14", "WinDivert64", "Monkey"]:
                 try:
@@ -118,10 +123,11 @@ class StrategyRunnerBase(ABC):
 
     def _perform_standard_windivert_cleanup(self) -> None:
         """Canonical lightweight cleanup before ordinary preset start."""
-        log("Cleaning up previous winws processes...", "DEBUG")
+        log("Cleaning up previous processes...", "DEBUG")
         kill_winws_force()
         self._fast_cleanup_services()
-        self._unload_known_windivert_drivers()
+        if IS_WINDOWS:
+            self._unload_known_windivert_drivers()
         time.sleep(0.3)
 
     def _force_cleanup_multiple_services(self, service_names: List[str], retry_count: int = 3):

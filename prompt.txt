@@ -1,0 +1,2547 @@
+# ============================================================================
+# ЗАДАЧА: Добавить поддержку Linux для проекта Zapret (youtubediscord/zapret)
+# ============================================================================
+#
+# Цель: Сделать приложение Zapret2 работающим на Linux с nfqws2 вместо winws2.exe
+#
+# Ключевая идея:
+# - Windows: winws2.exe + WinDivert
+# - Linux: nfqws2 + nfqueue + iptables/nftables
+# - Пресеты СОВМЕСТИМЫ между winws2 и nfqws2 (тот же формат)
+#
+# ============================================================================
+# ОБЩИЙ ПЛАН ИЗМЕНЕНИЙ
+# ============================================================================
+#
+# 1. СОЗДАТЬ НОВЫЕ ФАЙЛЫ:
+#    - src/platform/__init__.py
+#    - src/platform/detector.py          — определение ОС
+#    - src/platform/process_manager.py   — кроссплатформенное управление процессами
+#    - src/platform/config_store.py      — Registry (Win) vs JSON (Linux)
+#    - src/platform/dpi_engine.py        — winws vs nfqws абстракция
+#
+# 2. ОТРЕДАКТИРОВАТЬ СУЩЕСТВУЮЩИЕ ФАЙЛЫ (см. ниже)
+#
+# 3. WINDOWS-ONLY ФУНКЦИИ (скрыть на Linux):
+#    - Windows Defender toggle (defender_manager.py)
+#    - MAX Blocker (max_blocker.py)
+#    - WinDivert cleanup (service_manager.py)
+#
+# ============================================================================
+# ФАЙЛ 1: src/config/config.py
+# ============================================================================
+# Местоположение: src/config/config.py
+# Описание: Основной конфиг — пути, Registry, DPI настройки
+# Изменения: Добавить platform guards для путей, Registry, DPI
+
+import os, sys
+
+# ═══════════════════════════════════════════════════════════════════
+# ОСНОВНАЯ ПАПКА ПРОГРАММЫ
+# ═══════════════════════════════════════════════════════════════════
+# Путь определяется автоматически по расположению exe файла.
+MAIN_DIRECTORY = os.path.dirname(sys.executable)
+
+# Канал сборки (для информации)
+try:
+    from config.build_info import CHANNEL
+except ImportError:
+    CHANNEL = "stable"
+
+# App core path (where Zapret.exe lives).
+APP_CORE_PATH = MAIN_DIRECTORY
+
+
+def get_roaming_appdata_dir() -> str:
+    """Returns %APPDATA% (Roaming) on Windows, or empty string."""
+    return os.environ.get("APPDATA", "")
+
+
+def get_zapret_channel_dir_name() -> str:
+    """Returns the per-channel userdata leaf directory name."""
+    return "dev" if str(CHANNEL or "").strip().lower() == "test" else "stable"
+
+
+def get_zapret_userdata_dir() -> str:
+    """Returns the canonical per-channel user-data root for Zapret.
+
+    Primary target (Windows): %APPDATA%\\zapret\\stable or %APPDATA%\\zapret\\dev
+    Fallback (non-Windows/dev): MAIN_DIRECTORY
+    """
+    base = get_roaming_appdata_dir()
+    if base:
+        return os.path.join(base, "zapret", get_zapret_channel_dir_name())
+    return MAIN_DIRECTORY
+
+
+def get_zapret_presets_v2_dir() -> str:
+    """Returns V2 presets root directory: <userdata>/zapret/presets_v2."""
+    return os.path.join(get_zapret_userdata_dir(), "presets_v2")
+
+
+def get_zapret_lists_template_dir() -> str:
+    """Returns lists templates directory: <userdata>/zapret/lists_template."""
+    return os.path.join(get_zapret_userdata_dir(), "lists_template")
+
+
+def get_zapret_lists_backup_dir() -> str:
+    """Returns lists backup directory: <userdata>/zapret/lists_backup.
+
+    Used to persist user-edited list files across app updates.
+    """
+    return os.path.join(get_zapret_userdata_dir(), "lists_backup")
+
+
+def get_other_user_backup_path() -> str:
+    """Returns backup path for user-edited other.user.txt."""
+    return os.path.join(get_zapret_lists_backup_dir(), "other.user.txt")
+
+
+def get_other_template_path() -> str:
+    """Returns path to canonical other.txt template in user data."""
+    return os.path.join(get_zapret_lists_template_dir(), "other.txt")
+
+# ═══════════════════════════════════════════════════════════════════
+
+# Все папки относительно MAIN_DIRECTORY
+BIN_FOLDER = os.path.join(MAIN_DIRECTORY, "bin")
+INDEXJSON_FOLDER = os.path.join(MAIN_DIRECTORY, "json")
+EXE_FOLDER = os.path.join(MAIN_DIRECTORY, "exe")
+LUA_FOLDER = os.path.join(MAIN_DIRECTORY, "lua")  # Lua библиотеки для Zapret 2
+ICO_FOLDER = os.path.join(MAIN_DIRECTORY, "ico")
+LISTS_FOLDER = os.path.join(MAIN_DIRECTORY, "lists")
+THEME_FOLDER = os.path.join(MAIN_DIRECTORY, "themes")
+LOGS_FOLDER = os.path.join(MAIN_DIRECTORY, "logs")
+HELP_FOLDER = os.path.join(MAIN_DIRECTORY, "help")
+
+# Настройка количества сохраняемых лог-файлов
+MAX_LOG_FILES = 50           # zapret_log_*.txt - основные логи приложения
+MAX_DEBUG_LOG_FILES = 20     # zapret_winws2_debug_*.log - debug логи winws2
+
+WINDIVERT_FILTER = os.path.join(MAIN_DIRECTORY, "windivert.filter")
+
+# Пути к файлам
+WINWS_EXE = os.path.join(EXE_FOLDER, "winws.exe")      # Для Zapret 1
+WINWS2_EXE = os.path.join(EXE_FOLDER, "winws2.exe")    # Для Zapret 2
+
+# ═══════════════════════════════════════════════════════════════════
+# ОПРЕДЕЛЕНИЕ EXE ПО МЕТОДУ ЗАПУСКА
+# ═══════════════════════════════════════════════════════════════════
+# Все режимы, которые используют winws2.exe (Zapret 2 с Lua)
+ZAPRET2_MODES = ("direct_zapret2", "orchestra")
+# Режимы, которые используют winws.exe (Zapret 1)
+ZAPRET1_DIRECT_MODES = ("direct_zapret1",)
+
+def get_winws_exe_for_method(method: str) -> str:
+    """
+    Возвращает путь к winws exe в зависимости от метода запуска.
+
+    Args:
+        method: Метод запуска (direct_zapret2, orchestra, direct_zapret1)
+
+    Returns:
+        Путь к winws2.exe для Zapret 2 режимов, winws.exe для остальных
+    """
+    if method in ZAPRET2_MODES:
+        return WINWS2_EXE
+    return WINWS_EXE
+
+def is_zapret2_mode(method: str) -> bool:
+    """
+    Проверяет, является ли метод режимом Zapret 2 (использует winws2.exe).
+
+    Args:
+        method: Метод запуска
+
+    Returns:
+        True если режим использует winws2.exe
+    """
+    return method in ZAPRET2_MODES
+
+def is_zapret1_direct_mode(method: str) -> bool:
+    """
+    Проверяет, является ли метод режимом Zapret 1 (winws.exe).
+
+    Args:
+        method: Метод запуска
+
+    Returns:
+        True если режим использует winws.exe
+    """
+    return method in ZAPRET1_DIRECT_MODES
+
+
+def get_current_winws_exe() -> str:
+    """
+    ЕДИНАЯ точка определения winws.exe для всего проекта.
+
+    Получает текущий метод запуска из реестра и возвращает
+    соответствующий путь к исполняемому файлу.
+
+    Returns:
+        Путь к winws2.exe для Zapret 2 режимов (direct_zapret2, orchestra),
+        winws.exe для Zapret 1 режимов (direct_zapret1)
+
+    Примечание:
+        Используйте эту функцию когда метод запуска не передаётся явно.
+        Если метод известен заранее, используйте get_winws_exe_for_method(method).
+    """
+    try:
+        from log import log
+    except ImportError:
+        log = lambda msg, level="DEBUG": print(f"[{level}] {msg}")
+
+    try:
+        # Импортируем здесь чтобы избежать циклических зависимостей
+        from settings.dpi.strategy_settings import get_strategy_launch_method
+
+        method = get_strategy_launch_method()
+        exe_path = get_winws_exe_for_method(method)
+
+        log(f"get_current_winws_exe(): method={method}, exe={os.path.basename(exe_path)}", "DEBUG")
+
+        return exe_path
+
+    except Exception as e:
+        # Fallback - возвращаем winws2.exe (Zapret 2) как основной вариант
+        log(f"get_current_winws_exe() error: {e}, fallback to winws2.exe", "DEBUG")
+        return WINWS2_EXE
+
+
+# ═══════════════════════════════════════════════════════════════════
+
+ICON_PATH = os.path.join(ICO_FOLDER, "Zapret2.ico")
+ICON_TEST_PATH = os.path.join(ICO_FOLDER, "ZapretDevLogo4.ico")
+
+OTHER_PATH = os.path.join(LISTS_FOLDER, "other.txt")
+OTHER_BASE_PATH = os.path.join(LISTS_FOLDER, "other.base.txt")
+OTHER_USER_PATH = os.path.join(LISTS_FOLDER, "other.user.txt")
+NETROGAT_PATH = os.path.join(LISTS_FOLDER, "netrogat.txt")
+NETROGAT2_PATH = os.path.join(LISTS_FOLDER, "netrogat2.txt")
+
+# ═══════════════════════════════════════════════════════════════════
+# APPDATA — файловое хранилище настроек
+# ═══════════════════════════════════════════════════════════════════
+APPDATA_DIR = get_zapret_userdata_dir()
+
+# ═══════════════════════════════════════════════════════════════════
+# ПУТИ РЕЕСТРА (все в одном месте)
+# ═══════════════════════════════════════════════════════════════════
+# Базовый путь зависит от канала сборки (stable/test)
+REGISTRY_PATH = r"Software\Zapret2DevReg" if CHANNEL == "test" else r"Software\Zapret2Reg"
+
+# Подпути внутри базового пути
+REGISTRY_PATH_GUI = rf"{REGISTRY_PATH}\GUI"                     # Настройки GUI (MAX blocker, donate и т.д.)
+REGISTRY_PATH_STRATEGIES = rf"{REGISTRY_PATH}\Strategies"       # Настройки стратегий
+REGISTRY_PATH_WINDOW = rf"{REGISTRY_PATH}\Window"               # Позиция и размер окна
+# ═══════════════════════════════════════════════════════════════════
+
+BASE_WIDTH = 1000  # Базовый размер для бокового меню в стиле Windows 11
+BASE_HEIGHT = 950  # Базовая высота для нового интерфейса
+MIN_WIDTH = 680    # Минимальная ширина (уменьшено для экранов 1366x768)
+MIN_HEIGHT = 580   # Минимальная высота (уменьшено для экранов 1366x768)
+
+def get_display_scale():
+    """Получает масштабирование экрана Windows (например, 1.0, 1.25, 1.5, 1.75, 2.0)"""
+    try:
+        import ctypes
+        # Включаем DPI awareness для получения реального масштаба
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except:
+            pass
+
+        # Получаем DPI экрана
+        hdc = ctypes.windll.user32.GetDC(0)
+        dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX = 88
+        ctypes.windll.user32.ReleaseDC(0, hdc)
+
+        # Стандартный DPI = 96, масштаб = DPI / 96
+        scale = dpi / 96.0
+        return scale
+    except Exception:
+        return 1.0
+
+def get_screen_resolution():
+    """Получает реальное разрешение экрана в пикселях"""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        # Включаем DPI awareness для получения реального разрешения
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except:
+            pass
+        screen_width = user32.GetSystemMetrics(0)   # SM_CXSCREEN
+        screen_height = user32.GetSystemMetrics(1)  # SM_CYSCREEN
+        return screen_width, screen_height
+    except Exception:
+        return 1920, 1080  # Значение по умолчанию
+
+def get_scaled_window_size():
+    """Возвращает размер окна с учетом масштабирования и разрешения экрана"""
+    scale = get_display_scale()
+    screen_width, screen_height = get_screen_resolution()
+
+    # Базовое разрешение для которого оптимизированы размеры окна
+    REFERENCE_WIDTH = 1920
+    REFERENCE_HEIGHT = 1080
+
+    # Начинаем с базовых размеров
+    width = BASE_WIDTH
+    height = BASE_HEIGHT
+
+    # Учитываем DPI масштабирование (при масштабе > 100% уменьшаем окно)
+    if scale > 1.0:
+        reduction = 1.0 / scale
+        width = int(width * reduction)
+        height = int(height * reduction)
+
+    # Учитываем разрешение экрана если оно меньше 1920x1080
+    if screen_width < REFERENCE_WIDTH or screen_height < REFERENCE_HEIGHT:
+        # Вычисляем коэффициенты масштабирования по ширине и высоте
+        width_ratio = screen_width / REFERENCE_WIDTH
+        height_ratio = screen_height / REFERENCE_HEIGHT
+
+        # Используем меньший коэффициент для сохранения пропорций
+        # и чтобы окно гарантированно поместилось на экране
+        screen_scale = min(width_ratio, height_ratio)
+
+        # Применяем масштабирование, оставляя немного места для панели задач и рамок
+        # Для маленьких экранов (1366x768) используем больший коэффициент
+        margin_factor = 0.92 if screen_height <= 768 else 0.9
+        width = int(BASE_WIDTH * screen_scale * margin_factor)
+        height = int(BASE_HEIGHT * screen_scale * margin_factor)
+
+    # Гарантируем минимальные размеры
+    width = max(width, MIN_WIDTH)
+    height = max(height, MIN_HEIGHT)
+
+    return width, height
+
+# Получаем актуальные размеры с учетом масштабирования
+WIDTH, HEIGHT = get_scaled_window_size()
+
+# Discord TCP конфигурации
+
+# DiscordFix (ALT v10)
+Ankddev10_1 = ""
+
+#$UDP6 = "--filter-udp=50000-65535 --dpi-desync=fake,split2 --dpi-desync-any-protocol --dpi-desync-cutoff=d2 --dpi-desync-fake-quic=quic_test_00.bin --new"
+
+# Отладочная информация (можно убрать в продакшене)
+if __name__ == "__main__":
+    print(f"MAIN_DIRECTORY: {MAIN_DIRECTORY}")
+    print(f"EXE_FOLDER: {EXE_FOLDER}")
+    print(f"Существует EXE_FOLDER: {os.path.exists(EXE_FOLDER)}")
+
+
+def get_window_position():
+    """Получает сохраненную позицию окна из реестра"""
+    try:
+        import winreg
+        from log import log
+
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_READ)
+        try:
+            x = winreg.QueryValueEx(key, "WindowX")[0]
+            y = winreg.QueryValueEx(key, "WindowY")[0]
+            winreg.CloseKey(key)
+            # Values are stored as DWORD. Decode signed 32-bit so multi-monitor
+            # setups (negative coordinates) work correctly.
+            if isinstance(x, int) and x >= 0x80000000:
+                x -= 0x100000000
+            if isinstance(y, int) and y >= 0x80000000:
+                y -= 0x100000000
+            return (x, y)
+        except FileNotFoundError:
+            winreg.CloseKey(key)
+            return None
+    except Exception as e:
+        log(f"Ошибка чтения позиции окна: {e}", "DEBUG")
+        return None
+
+def set_window_position(x, y):
+    """Сохраняет позицию окна в реестр"""
+    try:
+        import winreg
+        from log import log
+
+        # REG_DWORD is unsigned; store signed 32-bit coordinates as two's complement.
+        def _to_dword_signed(v):
+            try:
+                return int(v) & 0xFFFFFFFF
+            except Exception:
+                return 0
+
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH)
+        winreg.SetValueEx(key, "WindowX", 0, winreg.REG_DWORD, _to_dword_signed(x))
+        winreg.SetValueEx(key, "WindowY", 0, winreg.REG_DWORD, _to_dword_signed(y))
+        winreg.CloseKey(key)
+        log(f"Позиция окна сохранена: ({x}, {y})", "DEBUG")
+        return True
+    except Exception as e:
+        log(f"Ошибка сохранения позиции окна: {e}", "❌ ERROR")
+        return False
+
+def get_window_size():
+    """Получает сохраненный размер окна из реестра"""
+    try:
+        import winreg
+        from log import log
+
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_READ)
+        try:
+            width = winreg.QueryValueEx(key, "WindowWidth")[0]
+            height = winreg.QueryValueEx(key, "WindowHeight")[0]
+            winreg.CloseKey(key)
+            return (width, height)
+        except FileNotFoundError:
+            winreg.CloseKey(key)
+            return None
+    except Exception as e:
+        log(f"Ошибка чтения размера окна: {e}", "DEBUG")
+        return None
+
+def set_window_size(width, height):
+    """Сохраняет размер окна в реестр"""
+    try:
+        import winreg
+        from log import log
+
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH)
+        winreg.SetValueEx(key, "WindowWidth", 0, winreg.REG_DWORD, int(width))
+        winreg.SetValueEx(key, "WindowHeight", 0, winreg.REG_DWORD, int(height))
+        winreg.CloseKey(key)
+        log(f"Размер окна сохранен: ({width}x{height})", "DEBUG")
+        return True
+    except Exception as e:
+        log(f"Ошибка сохранения размера окна: {e}", "❌ ERROR")
+        return False
+
+def get_window_maximized():
+    """Получает сохранённое состояние "окно развернуто" из реестра"""
+    try:
+        import winreg
+        from log import log
+
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_READ)
+        try:
+            maximized = winreg.QueryValueEx(key, "WindowMaximized")[0]
+            winreg.CloseKey(key)
+            return bool(int(maximized))
+        except FileNotFoundError:
+            winreg.CloseKey(key)
+            return None
+    except Exception as e:
+        log(f"Ошибка чтения состояния maximized: {e}", "DEBUG")
+        return None
+
+def set_window_maximized(maximized: bool):
+    """Сохраняет состояние "окно развернуто" в реестр"""
+    try:
+        import winreg
+        from log import log
+
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH)
+        winreg.SetValueEx(key, "WindowMaximized", 0, winreg.REG_DWORD, int(bool(maximized)))
+        winreg.CloseKey(key)
+        log(f"Состояние maximized сохранено: {bool(maximized)}", "DEBUG")
+        return True
+    except Exception as e:
+        log(f"Ошибка сохранения состояния maximized: {e}", "❌ ERROR")
+        return False
+
+# ============================================================================
+# ФАЙЛ 2: src/utils/process_killer.py
+# ============================================================================
+# Местоположение: src/utils/process_killer.py
+# Описание: Завершение процессов через Windows API
+# Изменения: На Linux использовать os.kill() / psutil
+
+"""
+Утилита для остановки процессов через Windows API.
+Быстрее и надёжнее чем taskkill.exe
+"""
+
+import ctypes
+from ctypes import wintypes
+try:
+    import psutil  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - local test environments may not ship psutil
+    class _PsutilStub:
+        class NoSuchProcess(Exception):
+            pass
+
+        class AccessDenied(Exception):
+            pass
+
+        class TimeoutExpired(Exception):
+            pass
+
+        @staticmethod
+        def process_iter(*_args, **_kwargs):
+            return []
+
+        class Process:
+            def __init__(self, *_args, **_kwargs):
+                raise _PsutilStub.NoSuchProcess()
+
+    psutil = _PsutilStub()
+from log import log
+from typing import List, Optional
+
+# Windows API константы
+PROCESS_TERMINATE = 0x0001
+PROCESS_QUERY_INFORMATION = 0x0400
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+SYNCHRONIZE = 0x00100000
+
+# WaitForSingleObject константы
+WAIT_OBJECT_0 = 0x00000000
+WAIT_TIMEOUT = 0x00000102
+WAIT_FAILED = 0xFFFFFFFF
+INFINITE = 0xFFFFFFFF
+
+if hasattr(ctypes, "windll"):
+    kernel32 = ctypes.windll.kernel32
+
+    OpenProcess = kernel32.OpenProcess
+    OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    OpenProcess.restype = wintypes.HANDLE
+
+    TerminateProcess = kernel32.TerminateProcess
+    TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    TerminateProcess.restype = wintypes.BOOL
+
+    WaitForSingleObject = kernel32.WaitForSingleObject
+    WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    WaitForSingleObject.restype = wintypes.DWORD
+
+    CloseHandle = kernel32.CloseHandle
+    CloseHandle.argtypes = [wintypes.HANDLE]
+    CloseHandle.restype = wintypes.BOOL
+else:  # pragma: no cover - import safety for non-Windows environments
+    kernel32 = None
+    OpenProcess = None
+    TerminateProcess = None
+    WaitForSingleObject = None
+    CloseHandle = None
+
+
+def kill_process_by_pid(pid: int, force: bool = True, wait_timeout_ms: int = 3000) -> bool:
+    """
+    Завершает процесс по PID через Windows API с fallback на psutil.
+    Ждёт реального завершения процесса.
+
+    Args:
+        pid: ID процесса
+        force: True для принудительного завершения
+        wait_timeout_ms: Таймаут ожидания завершения в миллисекундах
+
+    Returns:
+        True если процесс успешно завершён
+    """
+    # Сначала пробуем через Win API с расширенными правами
+    try:
+        if OpenProcess is None or TerminateProcess is None or WaitForSingleObject is None or CloseHandle is None:
+            raise RuntimeError("WinAPI unavailable")
+        # Открываем процесс с максимальными правами
+        h_process = OpenProcess(
+            PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION | SYNCHRONIZE,
+            False,
+            pid
+        )
+
+        if h_process:
+            try:
+                # Завершаем процесс (код выхода = 1)
+                exit_code = 1
+                result = TerminateProcess(h_process, exit_code)
+
+                if result:
+                    # Ждём реального завершения процесса
+                    wait_result = WaitForSingleObject(h_process, wait_timeout_ms)
+
+                    if wait_result == WAIT_OBJECT_0:
+                        log(f"✅ Процесс PID={pid} завершён через Win API (подтверждено)", "DEBUG")
+                        return True
+                    elif wait_result == WAIT_TIMEOUT:
+                        log(f"⚠ Процесс PID={pid}: TerminateProcess успешен, но процесс не завершился за {wait_timeout_ms}мс", "WARNING")
+                        # Не возвращаем True - попробуем через psutil
+                    else:
+                        log(f"⚠ Процесс PID={pid}: WaitForSingleObject вернул {wait_result}", "WARNING")
+
+            finally:
+                # Всегда закрываем handle
+                CloseHandle(h_process)
+
+    except Exception as e:
+        log(f"Win API не сработал для PID={pid}: {e}", "DEBUG")
+
+    # Fallback на psutil (работает с любыми привилегиями)
+    try:
+        proc = psutil.Process(pid)
+        proc_name = proc.name()
+
+        if force:
+            proc.kill()  # SIGKILL
+        else:
+            proc.terminate()  # SIGTERM
+
+        # Ждём завершения через psutil
+        try:
+            proc.wait(timeout=wait_timeout_ms / 1000)
+            log(f"✅ Процесс {proc_name} (PID={pid}) завершён через psutil (подтверждено)", "DEBUG")
+            return True
+        except psutil.TimeoutExpired:
+            log(f"⚠ Процесс {proc_name} (PID={pid}) не завершился за {wait_timeout_ms}мс", "WARNING")
+            return False
+
+    except psutil.NoSuchProcess:
+        log(f"Процесс PID={pid} уже завершён", "DEBUG")
+        return True
+    except psutil.AccessDenied:
+        log(f"❌ Нет прав для завершения процесса PID={pid} (требуются права администратора)", "WARNING")
+        return False
+    except Exception as e:
+        log(f"❌ Ошибка завершения процесса PID={pid}: {e}", "WARNING")
+        return False
+
+
+def kill_process_by_name(process_name: str, kill_all: bool = True) -> int:
+    """
+    Завершает все процессы с указанным именем через Windows API.
+
+    Args:
+        process_name: Имя процесса (например "winws.exe")
+        kill_all: True для завершения всех найденных процессов
+
+    Returns:
+        Количество завершённых процессов
+    """
+    killed_count = 0
+    process_name_lower = process_name.lower()
+
+    try:
+        # Ищем все процессы с указанным именем через psutil
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                proc_name = proc.info['name']
+                if proc_name and proc_name.lower() == process_name_lower:
+                    pid = proc.info['pid']
+
+                    if kill_process_by_pid(pid):
+                        killed_count += 1
+
+                        if not kill_all:
+                            break
+
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+
+    except Exception as e:
+        log(f"Ошибка поиска процесса {process_name}: {e}", "WARNING")
+
+    if killed_count > 0:
+        log(f"Завершено {killed_count} процессов {process_name}", "INFO")
+    else:
+        log(f"Процессы {process_name} не найдены или уже завершены", "DEBUG")
+
+    return killed_count
+
+
+def kill_winws_all(max_retries: int = 3, retry_delay: float = 0.5) -> bool:
+    """
+    Завершает все процессы winws.exe и winws2.exe.
+    Проверяет что процессы действительно завершены и делает повторные попытки.
+
+    Args:
+        max_retries: Максимальное количество попыток
+        retry_delay: Задержка между попытками в секундах
+
+    Returns:
+        True если все процессы успешно завершены
+    """
+    import time
+
+    for attempt in range(1, max_retries + 1):
+        total_killed = 0
+
+        # Завершаем winws.exe
+        total_killed += kill_process_by_name("winws.exe", kill_all=True)
+
+        # Завершаем winws2.exe
+        total_killed += kill_process_by_name("winws2.exe", kill_all=True)
+
+        if total_killed > 0:
+            log(f"✅ Завершено {total_killed} процессов winws (попытка {attempt})", "INFO")
+
+        # Проверяем, что процессы действительно завершены
+        time.sleep(0.2)  # Небольшая пауза для обновления списка процессов
+
+        remaining_winws = get_process_pids("winws.exe")
+        remaining_winws2 = get_process_pids("winws2.exe")
+
+        if not remaining_winws and not remaining_winws2:
+            if total_killed > 0:
+                log(f"✅ Всего завершено {total_killed} процессов winws (подтверждено)", "INFO")
+            else:
+                log("Процессы winws не найдены", "DEBUG")
+            return True
+
+        # Есть ещё живые процессы
+        remaining_count = len(remaining_winws) + len(remaining_winws2)
+        log(f"⚠ Осталось {remaining_count} процессов winws после попытки {attempt}", "WARNING")
+
+        if attempt < max_retries:
+            log(f"Повторная попытка через {retry_delay}с...", "DEBUG")
+            time.sleep(retry_delay)
+
+    # После всех попыток ещё раз проверяем
+    remaining_winws = get_process_pids("winws.exe")
+    remaining_winws2 = get_process_pids("winws2.exe")
+
+    if remaining_winws or remaining_winws2:
+        all_remaining = remaining_winws + remaining_winws2
+        log(f"❌ Не удалось завершить процессы winws: PIDs={all_remaining}", "ERROR")
+        return False
+
+    return True
+
+
+def is_process_running(process_name: str) -> bool:
+    """
+    Быстрая проверка запущен ли процесс.
+
+    Args:
+        process_name: Имя процесса (например "winws.exe")
+
+    Returns:
+        True если процесс найден
+    """
+    process_name_lower = process_name.lower()
+
+    try:
+        for proc in psutil.process_iter(['name']):
+            try:
+                proc_name = proc.info['name']
+                if proc_name and proc_name.lower() == process_name_lower:
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+    except Exception as e:
+        log(f"Ошибка проверки процесса {process_name}: {e}", "DEBUG")
+
+    return False
+
+
+def get_process_pids(process_name: str) -> List[int]:
+    """
+    Возвращает список PID всех процессов с указанным именем.
+
+    Args:
+        process_name: Имя процесса
+
+    Returns:
+        Список PID процессов
+    """
+    pids = []
+    process_name_lower = process_name.lower()
+
+    try:
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                proc_name = proc.info['name']
+                if proc_name and proc_name.lower() == process_name_lower:
+                    pids.append(proc.info['pid'])
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+    except Exception as e:
+        log(f"Ошибка получения PID {process_name}: {e}", "DEBUG")
+
+    return pids
+
+
+def kill_process_tree(pid: int) -> bool:
+    """
+    Завершает процесс и все его дочерние процессы.
+
+    Args:
+        pid: ID родительского процесса
+
+    Returns:
+        True если процесс завершён
+    """
+    try:
+        parent = psutil.Process(pid)
+
+        # Сначала завершаем дочерние процессы
+        children = parent.children(recursive=True)
+        for child in children:
+            try:
+                kill_process_by_pid(child.pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        # Затем завершаем родительский процесс
+        return kill_process_by_pid(pid)
+
+    except psutil.NoSuchProcess:
+        log(f"Процесс PID={pid} уже завершён", "DEBUG")
+        return False
+    except Exception as e:
+        log(f"Ошибка завершения дерева процессов PID={pid}: {e}", "WARNING")
+        return False
+
+
+def get_taskkill_path() -> str:
+    """
+    Получает полный путь к taskkill.exe.
+    Ищет в System32 на диске где установлена Windows.
+
+    Returns:
+        Полный путь к taskkill.exe или 'taskkill' если не найден
+    """
+    import os
+
+    # 1. Через переменную среды SystemRoot
+    sys_root = os.getenv("SystemRoot")
+    if sys_root:
+        taskkill_path = os.path.join(sys_root, "System32", "taskkill.exe")
+        if os.path.exists(taskkill_path):
+            return taskkill_path
+
+    # 2. Через Win API GetSystemWindowsDirectoryW
+    try:
+        GetSystemWindowsDirectoryW = ctypes.windll.kernel32.GetSystemWindowsDirectoryW
+        GetSystemWindowsDirectoryW.argtypes = [wintypes.LPWSTR, wintypes.DWORD]
+        GetSystemWindowsDirectoryW.restype = wintypes.DWORD
+
+        buf = ctypes.create_unicode_buffer(260)
+        if GetSystemWindowsDirectoryW(buf, len(buf)):
+            taskkill_path = os.path.join(buf.value, "System32", "taskkill.exe")
+            if os.path.exists(taskkill_path):
+                return taskkill_path
+    except Exception:
+        pass
+
+    # 3. Fallback - просто taskkill (надеемся что в PATH)
+    return "taskkill"
+
+
+def force_kill_via_taskkill(process_name: str) -> bool:
+    """
+    Принудительное завершение процесса через taskkill /F /T.
+    Используется как последняя мера когда Win API и psutil не справились.
+
+    Args:
+        process_name: Имя процесса (например "winws2.exe")
+
+    Returns:
+        True если команда выполнена успешно
+    """
+    import subprocess
+
+    taskkill_exe = get_taskkill_path()
+
+    try:
+        result = subprocess.run(
+            [taskkill_exe, '/F', '/T', '/IM', process_name],
+            capture_output=True,
+            text=True,
+            encoding='cp866',
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            timeout=10
+        )
+
+        if result.returncode == 0:
+            log(f"✅ Процесс {process_name} завершён через taskkill /F /T", "INFO")
+            return True
+        elif "не найден" in result.stderr.lower() or "not found" in result.stderr.lower():
+            log(f"Процесс {process_name} не найден для taskkill", "DEBUG")
+            return True  # Процесса нет - это успех
+        else:
+            log(f"taskkill для {process_name} вернул код {result.returncode}: {result.stderr}", "WARNING")
+            return False
+
+    except subprocess.TimeoutExpired:
+        log(f"taskkill для {process_name} превысил таймаут", "WARNING")
+        return False
+    except Exception as e:
+        log(f"Ошибка taskkill для {process_name}: {e}", "WARNING")
+        return False
+
+
+def kill_via_wmi(process_name: str) -> bool:
+    """
+    Завершение процесса через WMI (Windows Management Instrumentation).
+    Работает когда другие методы не помогают.
+
+    Args:
+        process_name: Имя процесса (например "winws.exe")
+
+    Returns:
+        True если команда выполнена успешно
+    """
+    import subprocess
+
+    try:
+        # wmic process where name="winws.exe" delete
+        result = subprocess.run(
+            ['wmic', 'process', 'where', f'name="{process_name}"', 'delete'],
+            capture_output=True,
+            text=True,
+            encoding='cp866',
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            timeout=15
+        )
+
+        # wmic возвращает 0 даже если процесс не найден
+        if "No Instance" in result.stdout or "нет экземпляров" in result.stdout.lower():
+            log(f"WMI: процесс {process_name} не найден", "DEBUG")
+            return True
+
+        if result.returncode == 0:
+            log(f"✅ Процесс {process_name} завершён через WMI", "INFO")
+            return True
+        else:
+            log(f"WMI для {process_name} вернул код {result.returncode}: {result.stderr}", "DEBUG")
+            return False
+
+    except subprocess.TimeoutExpired:
+        log(f"WMI для {process_name} превысил таймаут", "WARNING")
+        return False
+    except Exception as e:
+        log(f"Ошибка WMI для {process_name}: {e}", "DEBUG")
+        return False
+
+
+def kill_winws_force() -> bool:
+    """
+    Агрессивное завершение всех процессов winws через все доступные методы.
+    Используется когда обычные методы не работают.
+
+    Returns:
+        True если все процессы завершены
+    """
+    import time
+
+    # Быстрая проверка - если процессов нет, сразу выходим
+    if not get_process_pids("winws.exe") and not get_process_pids("winws2.exe"):
+        log("Процессы winws не найдены", "DEBUG")
+        return True
+
+    # 1. Пробуем через Win API (быстро)
+    kill_winws_all(max_retries=2, retry_delay=0.3)
+
+    # 2. Проверяем остались ли процессы
+    remaining = get_process_pids("winws.exe") + get_process_pids("winws2.exe")
+
+    if not remaining:
+        return True  # Win API справился
+
+    # 3. Win API не справился - применяем taskkill /F /T
+    log(f"⚠ Осталось {len(remaining)} процессов, применяем taskkill", "WARNING")
+    force_kill_via_taskkill("winws.exe")
+    force_kill_via_taskkill("winws2.exe")
+
+    time.sleep(0.3)
+
+    # 4. Проверяем после taskkill
+    remaining = get_process_pids("winws.exe") + get_process_pids("winws2.exe")
+
+    if not remaining:
+        log("✅ Процессы winws завершены через taskkill", "INFO")
+        return True
+
+    # 5. Taskkill не справился - применяем WMI
+    log(f"⚠ Taskkill не справился, осталось {len(remaining)} процессов. Применяем WMI", "WARNING")
+    kill_via_wmi("winws.exe")
+    kill_via_wmi("winws2.exe")
+
+    time.sleep(0.3)
+
+    # 6. Финальная проверка
+    remaining = get_process_pids("winws.exe") + get_process_pids("winws2.exe")
+
+    if remaining:
+        log(f"❌ Не удалось завершить процессы winws: PIDs={remaining}", "ERROR")
+        # Пытаемся собрать диагностику
+        try:
+            for pid in remaining:
+                proc = psutil.Process(pid)
+                log(f"  PID={pid}: name={proc.name()}, status={proc.status()}, username={proc.username()}", "DEBUG")
+        except Exception:
+            pass
+        return False
+
+    log("✅ Процессы winws завершены через WMI", "INFO")
+    return True
+
+
+# ============================================================================
+# ФАЙЛ 3: src/utils/service_manager.py
+# ============================================================================
+# Местоположение: src/utils/service_manager.py
+# Описание: Управление службами Windows через Win API (WinDivert cleanup)
+# Изменения: На Linux — no-op или nfqueue/iptables cleanup
+
+"""
+Управление службами Windows через Win API
+Быстрее и надёжнее чем sc.exe
+"""
+
+import ctypes
+from ctypes import wintypes
+from typing import Optional, List
+import time
+from .winapi_service_types import SERVICE_STATUS
+
+# Безопасный импорт log
+try:
+    from log import log
+except ImportError:
+    def log(msg, level="INFO"):
+        print(f"[{level}] {msg}")
+
+
+# Windows API константы
+SC_MANAGER_ALL_ACCESS = 0xF003F
+SERVICE_ALL_ACCESS = 0xF01FF
+SERVICE_QUERY_STATUS = 0x0004
+SERVICE_STOP = 0x0020
+SERVICE_DELETE = 0x00010000
+
+SERVICE_STOPPED = 0x00000001
+SERVICE_STOP_PENDING = 0x00000003
+SERVICE_RUNNING = 0x00000004
+
+if hasattr(ctypes, "windll"):
+    advapi32 = ctypes.windll.advapi32
+
+    OpenSCManager = advapi32.OpenSCManagerW
+    OpenSCManager.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+    OpenSCManager.restype = wintypes.HANDLE
+
+    OpenService = advapi32.OpenServiceW
+    OpenService.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR, wintypes.DWORD]
+    OpenService.restype = wintypes.HANDLE
+
+    CloseServiceHandle = advapi32.CloseServiceHandle
+
+    # ВАЖНО: `ControlService`/`QueryServiceStatus` — это функции из одного общего `advapi32` на процесс.
+    # Если в разных местах объявлять разные `SERVICE_STATUS` и выставлять `argtypes` через POINTER(...),
+    # ctypes начнёт падать из-за несовместимых типов. Используем единый `SERVICE_STATUS` из
+    # `utils.winapi_service_types`.
+    ControlService = advapi32.ControlService
+    ControlService.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(SERVICE_STATUS)]
+    ControlService.restype = wintypes.BOOL
+
+    QueryServiceStatus = advapi32.QueryServiceStatus
+    QueryServiceStatus.argtypes = [wintypes.HANDLE, ctypes.POINTER(SERVICE_STATUS)]
+    QueryServiceStatus.restype = wintypes.BOOL
+
+    DeleteService = advapi32.DeleteService
+    DeleteService.argtypes = [wintypes.HANDLE]
+    DeleteService.restype = wintypes.BOOL
+else:  # pragma: no cover - import safety for non-Windows environments
+    advapi32 = None
+    OpenSCManager = None
+    OpenService = None
+    CloseServiceHandle = None
+    ControlService = None
+    QueryServiceStatus = None
+    DeleteService = None
+
+
+def stop_service(service_name: str) -> bool:
+    """
+    Останавливает службу через Win API
+
+    Args:
+        service_name: Имя службы
+
+    Returns:
+        True если служба остановлена
+    """
+    if advapi32 is None or OpenSCManager is None or OpenService is None or ControlService is None:
+        return False
+    try:
+        # Открываем Service Control Manager
+        sc_manager = OpenSCManager(None, None, SC_MANAGER_ALL_ACCESS)
+        if not sc_manager:
+            log(f"Не удалось открыть SCManager для {service_name}", "DEBUG")
+            return False
+
+        try:
+            # Открываем службу
+            service = OpenService(sc_manager, service_name, SERVICE_STOP | SERVICE_QUERY_STATUS)
+            if not service:
+                log(f"Служба {service_name} не найдена (уже удалена?)", "DEBUG")
+                return True  # Считаем что она не работает
+
+            try:
+                # Останавливаем службу
+                service_status = SERVICE_STATUS()
+                result = ControlService(service, 1, ctypes.byref(service_status))  # 1 = SERVICE_CONTROL_STOP
+
+                if result:
+                    log(f"✅ Служба {service_name} остановлена через Win API", "DEBUG")
+                    return True
+                else:
+                    error_code = ctypes.get_last_error()
+                    if error_code == 1062:  # ERROR_SERVICE_NOT_ACTIVE
+                        log(f"Служба {service_name} уже остановлена", "DEBUG")
+                        return True
+                    else:
+                        log(f"Не удалось остановить {service_name}, код: {error_code}", "DEBUG")
+                        return False
+
+            finally:
+                CloseServiceHandle(service)
+
+        finally:
+            CloseServiceHandle(sc_manager)
+
+    except Exception as e:
+        log(f"Ошибка остановки службы {service_name}: {e}", "DEBUG")
+        return False
+
+
+def delete_service(service_name: str) -> bool:
+    """
+    Удаляет службу через Win API
+
+    Args:
+        service_name: Имя службы
+
+    Returns:
+        True если служба удалена
+    """
+    if advapi32 is None or OpenSCManager is None or OpenService is None or DeleteService is None:
+        return False
+    try:
+        # Открываем Service Control Manager
+        sc_manager = OpenSCManager(None, None, SC_MANAGER_ALL_ACCESS)
+        if not sc_manager:
+            log(f"Не удалось открыть SCManager для удаления {service_name}", "DEBUG")
+            return False
+
+        try:
+            # Открываем службу
+            service = OpenService(sc_manager, service_name, SERVICE_DELETE)
+            if not service:
+                log(f"Служба {service_name} не найдена (уже удалена?)", "DEBUG")
+                return True  # Считаем успехом
+
+            try:
+                # Удаляем службу
+                result = DeleteService(service)
+
+                if result:
+                    log(f"✅ Служба {service_name} удалена через Win API", "DEBUG")
+                    return True
+                else:
+                    error_code = ctypes.get_last_error()
+                    if error_code == 1060:  # ERROR_SERVICE_DOES_NOT_EXIST
+                        log(f"Служба {service_name} не существует", "DEBUG")
+                        return True
+                    elif error_code == 1072:  # ERROR_SERVICE_MARKED_FOR_DELETE
+                        log(f"Служба {service_name} уже помечена для удаления", "DEBUG")
+                        return True
+                    else:
+                        log(f"Не удалось удалить {service_name}, код: {error_code}", "DEBUG")
+                        return False
+
+            finally:
+                CloseServiceHandle(service)
+
+        finally:
+            CloseServiceHandle(sc_manager)
+
+    except Exception as e:
+        log(f"Ошибка удаления службы {service_name}: {e}", "DEBUG")
+        return False
+
+
+def stop_and_delete_service(service_name: str, retry_count: int = 3) -> bool:
+    """
+    Останавливает и удаляет службу с повторными попытками
+
+    Args:
+        service_name: Имя службы
+        retry_count: Количество попыток
+
+    Returns:
+        True если служба остановлена и удалена
+    """
+    try:
+        # Сначала останавливаем
+        stop_service(service_name)
+        time.sleep(0.1)
+
+        # Пытаемся удалить несколько раз
+        for attempt in range(retry_count):
+            if delete_service(service_name):
+                return True
+
+            if attempt < retry_count - 1:
+                log(f"Попытка {attempt + 1}/{retry_count} удаления {service_name}", "DEBUG")
+                time.sleep(0.2)
+
+        return False
+
+    except Exception as e:
+        log(f"Ошибка при остановке и удалении {service_name}: {e}", "DEBUG")
+        return False
+
+
+def cleanup_windivert_services() -> bool:
+    """
+    Быстро очищает все службы WinDivert
+
+    Returns:
+        True если хотя бы одна служба была остановлена
+    """
+    service_names = ["WinDivert", "WinDivert14", "WinDivert64", "windivert", "Monkey"]
+
+    cleaned = False
+    for service_name in service_names:
+        if stop_and_delete_service(service_name, retry_count=1):
+            cleaned = True
+
+    return cleaned
+
+
+def unload_driver(driver_name: str) -> bool:
+    """
+    Выгружает драйвер через fltmc (через Win API пока не реализовано)
+
+    Args:
+        driver_name: Имя драйвера
+
+    Returns:
+        True если драйвер выгружен
+    """
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["fltmc", "unload", driver_name],
+            capture_output=True,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            timeout=3
+        )
+
+        if result.returncode == 0:
+            log(f"✅ Драйвер {driver_name} выгружен", "DEBUG")
+            return True
+        else:
+            log(f"Драйвер {driver_name} не выгружен (возможно не загружен)", "DEBUG")
+            return False
+
+    except Exception as e:
+        log(f"Ошибка выгрузки драйвера {driver_name}: {e}", "DEBUG")
+        return False
+
+
+def service_exists(service_name: str) -> bool:
+    """
+    Проверяет существует ли служба
+
+    Args:
+        service_name: Имя службы
+
+    Returns:
+        True если служба существует
+    """
+    try:
+        sc_manager = OpenSCManager(None, None, SC_MANAGER_ALL_ACCESS)
+        if not sc_manager:
+            return False
+
+        try:
+            service = OpenService(sc_manager, service_name, SERVICE_QUERY_STATUS)
+            if service:
+                CloseServiceHandle(service)
+                return True
+            return False
+
+        finally:
+            CloseServiceHandle(sc_manager)
+
+    except Exception as e:
+        log(f"Ошибка проверки службы {service_name}: {e}", "DEBUG")
+        return False
+
+
+def fast_cleanup_all() -> None:
+    """
+    Быстрая очистка всех служб и драйверов (не ждёт результата)
+    Для использования перед запуском когда нужна максимальная скорость
+    """
+    try:
+        # Очищаем службы
+        cleanup_windivert_services()
+
+        # Выгружаем драйверы (не ждём)
+        for driver in ["WinDivert", "WinDivert14", "WinDivert64", "Monkey"]:
+            try:
+                unload_driver(driver)
+            except:
+                pass
+
+    except Exception as e:
+        log(f"Ошибка быстрой очистки: {e}", "DEBUG")
+
+
+# ============================================================================
+# ФАЙЛ 4: src/utils/subproc.py
+# ============================================================================
+# Местоположение: src/utils/subproc.py
+# Описание: Единый "тихий" запуск процессов
+# Изменения: На Linux не использовать WIN_FLAGS, STARTUPINFO
+
+"""
+run_hidden – единый «тихий» запуск процессов (без всплывающего окна)
+Работает даже если вызывают с shell=True или передают строку команды.
+"""
+
+from __future__ import annotations
+import os, subprocess, sys, shlex
+from typing import Sequence, Union
+from functools import lru_cache
+
+
+import ctypes
+
+# WinAPI функции для получения системных путей
+if hasattr(ctypes, "windll"):
+    _kernel32 = ctypes.windll.kernel32
+else:
+    _kernel32 = None
+
+
+@lru_cache(maxsize=1)
+def get_system32_path() -> str:
+    """
+    Возвращает путь к System32 через WinAPI GetSystemDirectoryW.
+    Работает на любом диске (C:, D:, и т.д.).
+    """
+    if _kernel32 is not None:
+        buf = ctypes.create_unicode_buffer(260)
+        length = _kernel32.GetSystemDirectoryW(buf, 260)
+        if length > 0:
+            return buf.value
+    # Fallback через переменные окружения
+    system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
+    if system_root:
+        return os.path.join(system_root, "System32")
+    if os.name != "nt":
+        return "/usr/bin"
+    return r"C:\Windows\System32"
+
+
+@lru_cache(maxsize=1)
+def get_windows_path() -> str:
+    """
+    Возвращает путь к Windows через WinAPI GetWindowsDirectoryW.
+    """
+    if _kernel32 is not None:
+        buf = ctypes.create_unicode_buffer(260)
+        length = _kernel32.GetWindowsDirectoryW(buf, 260)
+        if length > 0:
+            return buf.value
+    if os.name != "nt":
+        return "/"
+    return os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
+
+
+@lru_cache(maxsize=1)
+def get_syswow64_path() -> str:
+    """
+    Возвращает путь к SysWOW64 (32-битные программы на 64-битной Windows).
+    """
+    return os.path.join(get_windows_path(), "SysWOW64")
+
+
+def get_system_exe(exe_name: str) -> str:
+    """
+    Возвращает полный путь к системному исполняемому файлу.
+    Пример: get_system_exe("tasklist.exe") -> "D:\\Windows\\System32\\tasklist.exe"
+    """
+    return os.path.join(get_system32_path(), exe_name)
+
+# Максимальный набор флагов для полного скрытия окон
+# NOTE: `CREATE_NEW_CONSOLE` can cause a visible console window (or "ghost" artifacts)
+# on some systems when combined with translucency/frameless Qt windows.
+# We keep `CREATE_NO_WINDOW` + `DETACHED_PROCESS` for reliably hidden execution.
+WIN_FLAGS = (
+    (
+        getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        | getattr(subprocess, "DETACHED_PROCESS", 0)
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        | 0x00000008  # CREATE_BREAKAWAY_FROM_JOB
+    )
+)
+
+WIN_OEM   = "cp866"
+UTF8      = "utf-8"
+
+
+def _default_encoding() -> str:
+    return WIN_OEM if os.name == "nt" else UTF8
+
+
+def _hidden_startupinfo() -> subprocess.STARTUPINFO:
+    if not hasattr(subprocess, "STARTUPINFO"):
+        return None  # type: ignore[return-value]
+    si = subprocess.STARTUPINFO()
+    # Используем только существующие константы из subprocess
+    si.dwFlags |= (subprocess.STARTF_USESHOWWINDOW |
+                   subprocess.STARTF_USESTDHANDLES)
+    si.wShowWindow = subprocess.SW_HIDE
+    return si
+
+
+def _prepare_cmd(cmd, use_shell: bool):
+    """
+    Если caller хочет shell=True / передал строку команды,
+    превращаем это в ['cmd','/Q','/C', ...] + shell=False,
+    чтобы всё равно прятать окно.
+    """
+    if sys.platform != "win32":
+        return cmd, use_shell      # на *nix не меняем
+
+    cmd_exe = get_system_exe("cmd.exe")
+
+    if use_shell:
+        if isinstance(cmd, str):
+            return [cmd_exe, '/Q', '/C', cmd], False
+        else:               # список + shell=True
+            return [cmd_exe, '/Q', '/C', *cmd], False
+
+    if isinstance(cmd, str):       # shell=False, но строка → тоже оборачиваем
+        return [cmd_exe, '/Q', '/C', cmd], False
+
+    return cmd, use_shell
+
+
+def run_hidden(cmd: Union[str, Sequence[str]],
+               *,
+               wait: bool = False,
+               capture_output: bool = False,
+               timeout: int | None = None,
+               text: bool | None = None,
+               encoding: str | None = None,
+               errors: str = "replace",
+               shell: bool = False,
+               cwd: str | None = None,
+               env: dict | None = None,
+               **kw):
+    """
+    Параметры совпадают с subprocess.run/Popen.
+    На Windows shell=True игнорируется – команда оборачивается вручную.
+    """
+
+    # --- подготовка команды / shell ---
+    cmd, shell = _prepare_cmd(cmd, shell)
+
+    # --- Windows: прячем окно ---
+    if sys.platform == "win32":
+        kw.setdefault("creationflags", WIN_FLAGS)
+        kw.setdefault("startupinfo", _hidden_startupinfo())
+
+        # Если не захватываем вывод, перенаправляем в DEVNULL
+        if not capture_output:
+            kw.setdefault("stdin",  subprocess.DEVNULL)
+            kw.setdefault("stdout", subprocess.DEVNULL)
+            kw.setdefault("stderr", subprocess.DEVNULL)
+
+        # Устанавливаем переменные окружения для скрытия окон дочерних процессов
+        if env is None:
+            env = os.environ.copy()
+        else:
+            env = env.copy()
+
+        # Переменные для скрытия консолей
+        env.update({
+            '__COMPAT_LAYER': 'RunAsInvoker',
+            'PYTHONWINDOWMODE': 'hide',
+            'PROMPT': '$G',  # Минимальный prompt
+            'COMSPEC': get_system_exe("cmd.exe"),  # Полный путь к cmd.exe
+        })
+        kw['env'] = env
+
+    # --- добавляем cwd если указан ---
+    if cwd:
+        kw['cwd'] = cwd
+
+    # --- нужно ли run() ---
+    need_run = wait or capture_output
+    if capture_output:
+        need_run = True
+        kw["stdout"] = subprocess.PIPE
+        kw["stderr"] = subprocess.PIPE
+
+    if need_run:
+        kw["text"]     = text if text is not None else True
+        kw["encoding"] = encoding or _default_encoding()
+        kw["errors"]   = errors
+        if timeout is not None:
+            kw["timeout"] = timeout
+
+    # --- запуск ---
+    try:
+        if need_run:
+            return subprocess.run(cmd, shell=shell, **kw)
+        else:
+            return subprocess.Popen(cmd, shell=shell, **kw)
+    except Exception as e:
+        # Если не удалось с агрессивными флагами, пробуем с базовыми
+        if sys.platform == "win32" and "creationflags" in kw:
+            kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+            if need_run:
+                return subprocess.run(cmd, shell=shell, **kw)
+            else:
+                return subprocess.Popen(cmd, shell=shell, **kw)
+        raise
+
+
+# ============================================================================
+# ФАЙЛ 5: src/direct_launch/runners/constants.py
+# ============================================================================
+# Местоположение: src/direct_launch/runners/constants.py
+# Описание: Константы для системы стратегий
+# Изменения: На Linux значения должны быть 0
+
+# direct_launch/runners/constants.py
+
+"""
+Константы для системы стратегий Zapret
+"""
+
+# Метки для стратегий
+LABEL_RECOMMENDED = "recommended"
+LABEL_CAUTION = "caution"
+LABEL_EXPERIMENTAL = "experimental"
+LABEL_STABLE = "stable"
+LABEL_GAME = "game"
+LABEL_WARP = "warp"
+
+# Константы для скрытого запуска
+SW_HIDE = 0
+CREATE_NO_WINDOW = 0x08000000
+STARTF_USESHOWWINDOW = 0x00000001
+
+# Настройки отображения меток
+LABEL_COLORS = {
+    LABEL_RECOMMENDED: "#00B900",  # Зеленый для рекомендуемых
+    LABEL_CAUTION: "#FF6600",      # Оранжевый для стратегий с осторожностью
+    LABEL_EXPERIMENTAL: "#CC0000", # Красный для экспериментальных
+    LABEL_STABLE: "#006DDA",       # Синий для стабильных
+    LABEL_GAME: "#FFC862",         # Оранжевый для игровых
+    LABEL_WARP: "#EE850C"          # Оранжевый для WARP
+}
+
+LABEL_TEXTS = {
+    LABEL_RECOMMENDED: "Рекомендуется",
+    LABEL_CAUTION: "Осторожно",
+    LABEL_EXPERIMENTAL: "Эксперимент",
+    LABEL_STABLE: "Стабильная",
+    LABEL_GAME: "Для игр",
+    LABEL_WARP: "WARP"
+}
+
+MINIMUM_WIDTH_STRAG = 800  # Увеличиваем ширину для таблицы
+MINIMUM_WIDTH = 900  # Уменьшаем минимальную ширину основного окна
+MINIMIM_HEIGHT = 650  # Минимальная высота окна
+
+
+# ============================================================================
+# ФАЙЛ 6: src/direct_launch/runners/runner_base.py
+# ============================================================================
+# Местоположение: src/direct_launch/runners/runner_base.py
+# Описание: Базовый класс для запуска стратегий
+# Изменения: Убрать WinDivert cleanup на Linux, condition STARTUPINFO
+
+# direct_launch/runners/runner_base.py
+"""Base class for strategy runners with shared functionality"""
+
+import os
+import subprocess
+import time
+from abc import ABC, abstractmethod
+from typing import Optional, List, Dict
+
+from log import log
+from .args_filters import apply_all_filters
+from .constants import SW_HIDE, CREATE_NO_WINDOW, STARTF_USESHOWWINDOW
+from .preset_runner_support import wait_for_process_exit
+from direct_launch.health.process_health_check import (
+    check_process_health, get_last_crash_info, check_common_crash_causes,
+    check_conflicting_processes, get_conflicting_processes_report, diagnose_startup_error
+)
+from utils.args_resolver import resolve_args_paths
+from utils.service_manager import (
+    cleanup_windivert_services, stop_and_delete_service, unload_driver, service_exists
+)
+from utils.process_killer import kill_process_by_name, kill_winws_force
+
+
+class StrategyRunnerBase(ABC):
+    """Abstract base class for strategy runners"""
+
+    def __init__(self, winws_exe_path: str):
+        """
+        Initialize base strategy runner.
+
+        Args:
+            winws_exe_path: Path to winws.exe or winws2.exe
+        """
+        self.winws_exe = os.path.abspath(winws_exe_path)
+        self.running_process: Optional[subprocess.Popen] = None
+        self.current_launch_label: Optional[str] = None
+        self.current_strategy_args: Optional[List[str]] = None
+
+        # Verify exe exists
+        if not os.path.exists(self.winws_exe):
+            raise FileNotFoundError(f"Executable not found: {self.winws_exe}")
+
+        # Determine working directories
+        exe_dir = os.path.dirname(self.winws_exe)
+        self.work_dir = os.path.dirname(exe_dir)
+        self.bin_dir = os.path.join(self.work_dir, "bin")
+        self.lists_dir = os.path.join(self.work_dir, "lists")
+
+        log(f"{self.__class__.__name__} initialized. exe: {self.winws_exe}", "INFO")
+        log(f"Working directory: {self.work_dir}", "DEBUG")
+        log(f"Lists folder: {self.lists_dir}", "DEBUG")
+        log(f"Bin folder: {self.bin_dir}", "DEBUG")
+
+    @abstractmethod
+    def start_from_preset_file(self, preset_path: str, strategy_name: str = "Preset") -> bool:
+        """
+        Starts strategy directly from existing preset file.
+
+        This is the preferred method for launching DPI in the current
+        preset-based direct architecture.
+
+        Concrete runners must implement this explicitly. Preset launch is the
+        only supported direct-start contract in the current architecture.
+
+        Args:
+            preset_path: Path to the preset file
+            strategy_name: Strategy name for logs
+
+        Returns:
+            True if strategy started successfully
+        """
+        pass
+
+    def _create_startup_info(self):
+        """Creates STARTUPINFO for hidden process launch"""
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags = STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = SW_HIDE
+        return startupinfo
+
+    def get_runner_state_snapshot(self):
+        """Optional public state snapshot hook for newer preset runners."""
+        return None
+
+    def stop_background_watchers(self) -> None:
+        """Public lifecycle hook for stopping background watchers before invalidation."""
+        return None
+
+    def _clear_process_runtime_state(self) -> None:
+        """Clear shared process-related runtime fields."""
+        self.running_process = None
+        self.current_launch_label = None
+        self.current_strategy_args = None
+
+    def _resolve_file_paths(self, args: List[str]) -> List[str]:
+        """Resolves relative file paths"""
+        from config import WINDIVERT_FILTER
+        return resolve_args_paths(args, self.lists_dir, self.bin_dir, WINDIVERT_FILTER)
+
+    def _fast_cleanup_services(self):
+        """Fast service cleanup via Win API (for normal startup)"""
+        try:
+            cleanup_windivert_services()
+        except Exception as e:
+            log(f"Fast cleanup error: {e}", "DEBUG")
+
+    def _unload_known_windivert_drivers(self) -> None:
+        """Best-effort unload of known WinDivert-related drivers before spawn."""
+        try:
+            for driver in ["WinDivert", "WinDivert14", "WinDivert64", "Monkey"]:
+                try:
+                    unload_driver(driver)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _perform_standard_windivert_cleanup(self) -> None:
+        """Canonical lightweight cleanup before ordinary preset start."""
+        log("Cleaning up previous winws processes...", "DEBUG")
+        kill_winws_force()
+        self._fast_cleanup_services()
+        self._unload_known_windivert_drivers()
+        time.sleep(0.3)
+
+    def _force_cleanup_multiple_services(self, service_names: List[str], retry_count: int = 3):
+        """Force cleanup multiple services"""
+        for service_name in service_names:
+            try:
+                stop_and_delete_service(service_name, retry_count=retry_count)
+            except Exception as e:
+                log(f"Error cleaning up service {service_name}: {e}", "DEBUG")
+
+    def _is_windivert_conflict_error(self, stderr: str, exit_code: int) -> bool:
+        """Checks if error is a retryable WinDivert conflict (GUID/LUID collision).
+
+        This does NOT include system-level errors like service disabled (1058),
+        driver blocked (1275), or Secure Boot (577) — those are not fixable
+        by cleanup/retry.
+        """
+        # Exit code 9 = ERROR_INVALID_BLOCK — stale WinDivert state
+        if exit_code == 9:
+            return True
+
+        stderr_lower = (stderr or "").lower()
+        conflict_signatures = [
+            "guid or luid already exists",
+            "object with that guid",
+        ]
+        return any(sig in stderr_lower for sig in conflict_signatures)
+
+    def _is_windivert_system_error(self, stderr: str, exit_code: int) -> bool:
+        """Checks if error is a non-retryable WinDivert system error.
+
+        These errors require user action (Secure Boot, AV, adapter, etc.)
+        and should NOT be retried.
+        """
+        non_retryable_codes = {577, 1058, 1060, 1068, 1275, 654}
+        if exit_code in non_retryable_codes:
+            return True
+
+        stderr_lower = (stderr or "").lower()
+        system_signatures = [
+            "the service cannot be started",
+            "service is disabled",
+            "invalid image hash",
+            "driver blocked",
+            "disable secure boot",
+            "driver failed prior unload",
+        ]
+        return any(sig in stderr_lower for sig in system_signatures)
+
+    def _aggressive_windivert_cleanup(self):
+        """Aggressive WinDivert cleanup via Win API - for cases when normal cleanup doesn't help"""
+        log("Performing aggressive WinDivert cleanup via Win API...", "INFO")
+
+        # 1. Kill ALL processes that may hold handles
+        self._kill_all_winws_processes()
+        time.sleep(0.3)
+
+        # 2. Unload drivers via fltmc (before deleting services!)
+        drivers = ["WinDivert", "WinDivert14", "WinDivert64", "Monkey"]
+        for driver in drivers:
+            try:
+                unload_driver(driver)
+            except:
+                pass
+
+        time.sleep(0.2)
+
+        # 3. Stop and delete services via Win API
+        services = ["WinDivert", "WinDivert14", "WinDivert64", "windivert", "Monkey"]
+        for service in services:
+            try:
+                stop_and_delete_service(service, retry_count=3)
+            except:
+                pass
+
+        time.sleep(0.3)
+
+        # 4. Final process cleanup
+        self._kill_all_winws_processes()
+
+        log("Aggressive cleanup completed", "INFO")
+
+    def stop(self) -> bool:
+        """Stops running process"""
+        try:
+            success = True
+
+            if self.running_process and self.is_running():
+                pid = self.running_process.pid
+                strategy_name = self.current_launch_label or "unknown"
+
+                log(f"Stopping strategy '{strategy_name}' (PID: {pid})", "INFO")
+
+                # Soft stop
+                self.running_process.terminate()
+
+                if wait_for_process_exit(self.running_process, timeout=5.0):
+                    log(f"Process stopped (PID: {pid})", "SUCCESS")
+                else:
+                    log("Soft stop failed, using force kill", "WARNING")
+                    self.running_process.kill()
+                    wait_for_process_exit(self.running_process, timeout=1.0)
+                    log(f"Process forcefully terminated (PID: {pid})", "SUCCESS")
+            else:
+                log("No running process to stop", "INFO")
+
+            # Additional cleanup
+            self._stop_windivert_service()
+            self._stop_monkey_service()
+            self._kill_all_winws_processes()
+
+            # Clear state
+            self._clear_process_runtime_state()
+
+            return success
+
+        except Exception as e:
+            log(f"Error stopping process: {e}", "ERROR")
+            return False
+
+    def _stop_windivert_service(self):
+        """Stops and deletes WinDivert service via Win API"""
+        for service_name in ["WinDivert", "windivert", "WinDivert14", "WinDivert64"]:
+            stop_and_delete_service(service_name, retry_count=3)
+
+    def _stop_monkey_service(self):
+        """Stops and deletes Monkey service via Win API"""
+        stop_and_delete_service("Monkey", retry_count=3)
+
+    def _force_delete_service(self, service_name: str):
+        """Force delete a service"""
+        try:
+            stop_and_delete_service(service_name, retry_count=5)
+        except Exception as e:
+            log(f"Force delete service {service_name} error: {e}", "DEBUG")
+
+    def _kill_all_winws_processes(self):
+        """Forcefully terminates all winws.exe and winws2.exe processes via Win API"""
+        try:
+            kill_winws_force()
+        except Exception as e:
+            log(f"Error killing winws processes: {e}", "DEBUG")
+
+    def is_running(self) -> bool:
+        """Checks if process is running"""
+        if not self.running_process:
+            return False
+
+        poll_result = self.running_process.poll()
+        is_running = poll_result is None
+
+        if not is_running and self.current_launch_label:
+            log(f"Strategy process exited (code: {poll_result})", "WARNING")
+
+        return is_running
+
+    def get_current_strategy_info(self) -> Dict:
+        """Returns information about current running strategy"""
+        if not self.is_running():
+            return {}
+
+        return {
+            'name': self.current_launch_label,
+            'pid': self.running_process.pid if self.running_process else None,
+            'args_count': len(self.current_strategy_args) if self.current_strategy_args else 0
+        }
+
+    def get_process(self) -> Optional[subprocess.Popen]:
+        """Returns current running process for output reading"""
+        if self.is_running():
+            return self.running_process
+        return None
+
+
+# ============================================================================
+# ФАЙЛ 7: src/altmenu/defender_manager.py
+# ============================================================================
+# Местоположение: src/altmenu/defender_manager.py
+# Описание: Управление Windows Defender (скрыть на Linux)
+# Изменения: На Linux — no-op или скрыть UI
+
+# altmenu/defender_manager.py
+#
+# ОТКАЗ ОТ ОТВЕТСТВЕННОСТИ / DISCLAIMER:
+# Данный модуль НЕ является вредоносным ПО (malware).
+# Отключение Windows Defender выполняется ИСКЛЮЧИТЕЛЬНО по явному запросу пользователя,
+# после двойного подтверждения через диалоговые окна в GUI.
+# Пользователь самостоятельно принимает решение и осознаёт последствия.
+# Все изменения обратимы — Defender можно включить обратно через тот же интерфейс.
+#
+# This module is NOT malware. Windows Defender is disabled ONLY upon explicit
+# user request after a two-step confirmation dialog in the GUI.
+# The user makes this decision voluntarily and is fully informed of the consequences.
+# All changes are reversible — Defender can be re-enabled via the same interface.
+
+import os
+import subprocess
+import winreg
+from typing import Callable, Optional, List, Tuple
+from log import log
+from config import REGISTRY_PATH
+
+def set_defender_disabled(enabled: bool):
+    """Сохраняет настройку отключения Windows Defender"""
+    try:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH) as key:
+            winreg.SetValueEx(key, "DefenderDisabled", 0, winreg.REG_DWORD, int(enabled))
+    except Exception as e:
+        from log import log
+        log(f"Ошибка при сохранении настройки Defender: {e}", "❌ ERROR")
+
+class WindowsDefenderManager:
+    """Менеджер для управления Windows Defender"""
+
+    def __init__(self, status_callback: Optional[Callable] = None):
+        self.status_callback = status_callback or (lambda x: None)
+
+    def _set_status(self, message: str):
+        """Обновляет статус в GUI"""
+        self.status_callback(message)
+
+    def _run_reg_command(self, command: str) -> bool:
+        """Выполняет команду реестра с правами администратора"""
+        try:
+            # Проверяем, запущена ли программа с правами администратора
+            import ctypes
+            if not ctypes.windll.shell32.IsUserAnAdmin():
+                log("Требуются права администратора для изменения Windows Defender", "⚠️ WARNING")
+                return False
+
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, encoding='cp866', errors='replace')
+            if result.returncode == 0:
+                return True
+            else:
+                # Логируем только если есть реальная ошибка
+                if result.stderr and result.stderr.strip():
+                    log(f"Ошибка выполнения команды: {result.stderr}", "❌ ERROR")
+                return False
+        except Exception as e:
+            log(f"Ошибка при выполнении команды реестра: {e}", "❌ ERROR")
+            return False
+
+    def is_defender_disabled(self) -> bool:
+        """Проверяет, отключен ли Windows Defender"""
+        try:
+            # Проверяем несколько ключей для более точного определения
+            keys_to_check = [
+                (r"SOFTWARE\Policies\Microsoft\Windows Defender", "DisableAntiSpyware"),
+                (r"SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection", "DisableRealtimeMonitoring"),
+            ]
+
+            disabled_count = 0
+            for key_path, value_name in keys_to_check:
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_READ) as key:
+                        value, _ = winreg.QueryValueEx(key, value_name)
+                        if value == 1:
+                            disabled_count += 1
+                except:
+                    pass
+
+            # Считаем отключенным, если хотя бы один ключ установлен
+            return disabled_count > 0
+
+        except Exception as e:
+            log(f"Ошибка при проверке состояния Defender: {e}", "❌ ERROR")
+            return False
+
+    def disable_defender(self) -> Tuple[bool, int]:
+        """
+        Отключает Windows Defender.
+        Вызывается ТОЛЬКО после двойного подтверждения пользователем через GUI.
+        Пользователь осознанно соглашается на отключение защиты.
+        Возвращает (успех, количество успешных команд)
+        """
+        commands = [
+            # Основные настройки
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender" /v DisableRealtimeMonitoring /t REG_DWORD /d 1 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender" /v DisableAntiVirus /t REG_DWORD /d 1 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender" /v DisableSpecialRunningModes /t REG_DWORD /d 1 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender" /v DisableRoutinelyTakingAction /t REG_DWORD /d 1 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender" /v ServiceKeepAlive /t REG_DWORD /d 0 /f',
+
+            # Real-Time Protection
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection" /v DisableRealtimeMonitoring /t REG_DWORD /d 1 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection" /v DisableBehaviorMonitoring /t REG_DWORD /d 1 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection" /v DisableOnAccessProtection /t REG_DWORD /d 1 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection" /v DisableScanOnRealtimeEnable /t REG_DWORD /d 1 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection" /v DisableIOAVProtection /t REG_DWORD /d 1 /f',
+
+            # SmartScreen и обновления
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\SmartScreen" /v ConfigureAppInstallControlEnabled /t REG_DWORD /d 0 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Signature Updates" /v ForceUpdateFromMU /t REG_DWORD /d 0 /f',
+
+            # Spynet
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Spynet" /v DisableBlockAtFirstSeen /t REG_DWORD /d 1 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Spynet" /v SubmitSamplesConsent /t REG_DWORD /d 2 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Spynet" /v SpynetReporting /t REG_DWORD /d 0 /f',
+
+            # Tamper Protection и дополнительные настройки
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Defender\\Features" /v TamperProtection /t REG_DWORD /d 0 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Defender" /v ServiceStartStates /t REG_DWORD /d 1 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f',
+            'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Defender" /v DisableAntiVirus /t REG_DWORD /d 1 /f',
+        ]
+
+        success_count = 0
+        total = len(commands)
+
+        self._set_status("Отключение Windows Defender...")
+        log("Начинаем отключение Windows Defender", "INFO")
+
+        for i, cmd in enumerate(commands):
+            self._set_status(f"Применение настроек... ({i+1}/{total})")
+            if self._run_reg_command(cmd):
+                success_count += 1
+
+        # Пытаемся остановить службу
+        self._set_status("Остановка службы Windows Defender...")
+        stop_result = subprocess.run('sc stop WinDefend', shell=True, capture_output=True, text=True, encoding='cp866', errors='replace')
+        if stop_result.returncode == 0:
+            log("✅ Служба WinDefend остановлена", "INFO")
+        else:
+            log(f"⚠️ Не удалось остановить службу WinDefend: {stop_result.stderr or 'Служба уже остановлена'}", "WARNING")
+
+        # Отключаем автозапуск службы
+        disable_result = subprocess.run('sc config WinDefend start=disabled', shell=True, capture_output=True, text=True, encoding='cp866', errors='replace')
+        if disable_result.returncode == 0:
+            log("✅ Автозапуск службы WinDefend отключен", "INFO")
+        else:
+            log(f"⚠️ Не удалось отключить автозапуск WinDefend: {disable_result.stderr}", "WARNING")
+
+        success = success_count > 0
+        if success:
+            log(f"Windows Defender отключен: {success_count}/{total} команд выполнено успешно", "✅ INFO")
+        else:
+            log("Не удалось отключить Windows Defender", "❌ ERROR")
+
+        return success, success_count
+
+    def enable_defender(self) -> Tuple[bool, int]:
+        """
+        Включает Windows Defender обратно
+        Возвращает (успех, количество успешных команд)
+        """
+        # Удаляем ключи реестра для включения Defender
+        commands = [
+            'reg delete "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender" /f',
+            'reg delete "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Defender" /v DisableAntiSpyware /f',
+            'reg delete "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Defender" /v DisableAntiVirus /f',
+            'reg delete "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Defender" /v ServiceStartStates /f',
+        ]
+
+        success_count = 0
+        total = len(commands)
+
+        self._set_status("Включение Windows Defender...")
+        log("Начинаем включение Windows Defender", "INFO")
+
+        for i, cmd in enumerate(commands):
+            self._set_status(f"Восстановление настроек... ({i+1}/{total})")
+            # Игнорируем ошибки удаления (ключ может не существовать)
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='cp866', errors='replace')
+            if result.returncode == 0:
+                success_count += 1
+
+        # Включаем автозапуск службы
+        enable_result = subprocess.run('sc config WinDefend start=auto', shell=True, capture_output=True, text=True, encoding='cp866', errors='replace')
+        if enable_result.returncode == 0:
+            success_count += 1
+            log("✅ Автозапуск службы WinDefend включен", "INFO")
+        else:
+            log(f"⚠️ Не удалось включить автозапуск WinDefend: {enable_result.stderr}", "WARNING")
+
+        # Запускаем службу
+        self._set_status("Запуск службы Windows Defender...")
+        start_result = subprocess.run('sc start WinDefend', shell=True, capture_output=True, text=True, encoding='cp866', errors='replace')
+        if start_result.returncode == 0:
+            success_count += 1
+            log("✅ Служба WinDefend запущена", "INFO")
+        else:
+            log(f"⚠️ Не удалось запустить службу WinDefend: {start_result.stderr or 'Возможно, требуется перезагрузка'}", "WARNING")
+
+        success = success_count > 0
+        if success:
+            log(f"Windows Defender включен: {success_count} операций выполнено", "✅ INFO")
+        else:
+            log("Не удалось включить Windows Defender", "❌ ERROR")
+
+        return success, success_count
+
+    def get_defender_status(self) -> str:
+        """Получает текущий статус Windows Defender"""
+        try:
+            # Проверяем состояние службы
+            result = subprocess.run('sc query WinDefend', shell=True, capture_output=True, text=True, encoding='cp866', errors='replace')
+            if "RUNNING" in result.stdout:
+                return "Служба запущена"
+            elif "STOPPED" in result.stdout:
+                return "Служба остановлена"
+            else:
+                return "Неизвестно"
+        except Exception as e:
+            log(f"Ошибка при проверке статуса службы: {e}", "❌ ERROR")
+            return "Ошибка проверки"
+
+
+# ============================================================================
+# ФАЙЛ 8: src/startup/single_instance.py
+# ============================================================================
+# Местоположение: src/startup/single_instance.py
+# Описание: Single instance через Mutex (Windows)
+# Изменения: На Linux использовать flock или socket
+
+# single_instance.py
+
+import ctypes
+
+ERROR_ALREADY_EXISTS = 183
+_kernel32 = ctypes.windll.kernel32
+
+def create_mutex(name: str):
+    """
+    Пытаемся создать именованный mutex.
+    Возвращает (handle, already_running: bool)
+    """
+    _kernel32.SetLastError(0)
+    handle = _kernel32.CreateMutexW(None, False, name)
+    last_error = _kernel32.GetLastError()
+    already_running = last_error == ERROR_ALREADY_EXISTS
+
+    if not handle:
+        return None, False
+
+    return handle, already_running
+
+def release_mutex(handle):
+    if handle:
+        _kernel32.ReleaseMutex(handle)
+        _kernel32.CloseHandle(handle)
+
+
+# ============================================================================
+# ФАЙЛ 9: src/startup/admin_check.py
+# ============================================================================
+# Местоположение: src/startup/admin_check.py
+# Описание: Проверка прав администратора через WinAPI
+# Изменения: На Linux использовать os.geteuid()
+
+# admin_utils.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
+import ctypes
+import sys
+import os
+from log import log
+
+def is_admin():
+    """Проверяет, запущено ли приложение с правами администратора"""
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
+
+def ensure_admin_rights():
+    """Убеждается, что приложение запущено с правами администратора"""
+    # Если уже есть права админа - просто возвращаем True
+    if is_admin():
+        log("✅ Приложение запущено с правами администратора", level="INFO")
+        return True
+
+    # Проверяем, не был ли уже сделан запрос на повышение прав
+    if "--elevated" in sys.argv:
+        # Если мы уже пытались повысить права, но они все еще недостаточны
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "Не удалось получить права администратора.\n"
+            "Попробуйте запустить приложение от имени администратора вручную:\n\n"
+            "1. Нажмите правой кнопкой на файле программы\n"
+            "2. Выберите 'Запуск от имени администратора'",
+            "Zapret - Ошибка получения прав",
+            0x10  # MB_ICONERROR
+        )
+        return False
+
+    log("⚠️ Приложение запущено БЕЗ прав администратора", level="⚠ WARNING")
+
+    # Показываем диалог
+    result = ctypes.windll.user32.MessageBoxW(
+        None,
+        "Zapret требует права администратора для корректной работы.\n\n"
+        "Нажмите OK для перезапуска с правами администратора.",
+        "Zapret - Требуются права администратора",
+        0x41  # MB_OKCANCEL | MB_ICONINFORMATION
+    )
+
+    if result == 1:  # OK
+        try:
+            # Формируем параметры
+            args = sys.argv[1:] + ["--elevated"]
+            params = " ".join(f'"{arg}"' if " " in arg else arg for arg in args)
+
+            # Получаем путь к исполняемому файлу
+            if getattr(sys, 'frozen', False):
+                # Если это скомпилированный exe
+                exe_path = sys.executable
+            else:
+                # Если это Python скрипт
+                exe_path = sys.executable
+                script_path = os.path.abspath(sys.argv[0])
+                params = f'"{script_path}" {params}'
+
+            log(f"Запуск с правами администратора: {exe_path} {params}", level="INFO")
+
+            # ShellExecuteW для запуска с правами администратора
+            ret = ctypes.windll.shell32.ShellExecuteW(
+                None,
+                "runas",
+                exe_path,
+                params,
+                None,
+                1  # SW_SHOWNORMAL
+            )
+
+            if ret > 32:
+                return False  # Сигнал для выхода из текущего процесса
+            else:
+                ctypes.windll.user32.MessageBoxW(
+                    None,
+                    "Не удалось запустить приложение с правами администратора.\n"
+                    "Возможно, UAC заблокировал запрос.",
+                    "Zapret - Ошибка",
+                    0x10  # MB_ICONERROR
+                )
+
+        except Exception as e:
+            log(f"Ошибка при запуске с правами администратора: {e}", level="❌ ERROR")
+            ctypes.windll.user32.MessageBoxW(
+                None,
+                f"Ошибка при попытке получить права администратора:\n{str(e)}",
+                "Zapret - Ошибка",
+                0x10  # MB_ICONERROR
+            )
+
+    return False
+
+
+# ============================================================================
+# ФАЙЛ 10: src/main/shell.py
+# ============================================================================
+# Местоположение: src/main/shell.py
+# Описание: Bootstrap приложения с повышением прав
+# Изменения: На Linux убрать ctypes.windll, использовать os.geteuid()
+
+from __future__ import annotations
+
+import atexit
+import ctypes
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+from config import APP_VERSION
+from log import log
+from startup.admin_check import is_admin
+from utils import run_hidden
+
+
+def handle_update_mode(argv: list[str] | None = None) -> None:
+    args = list(argv or sys.argv)
+    if len(args) < 4:
+        log("--update: недостаточно аргументов", "❌ ERROR")
+        return
+
+    old_exe, new_exe = args[2], args[3]
+
+    for _ in range(10):
+        if not os.path.exists(old_exe) or os.access(old_exe, os.W_OK):
+            break
+        time.sleep(0.5)
+
+    try:
+        shutil.copy2(new_exe, old_exe)
+        run_hidden([old_exe])
+        log("Файл обновления применён", "INFO")
+    except Exception as exc:
+        log(f"Ошибка в режиме --update: {exc}", "❌ ERROR")
+    finally:
+        try:
+            os.remove(new_exe)
+        except FileNotFoundError:
+            pass
+
+
+def shell_bootstrap(argv: list[str] | None = None) -> bool:
+    args = list(argv or sys.argv)
+
+    if "--version" in args:
+        ctypes.windll.user32.MessageBoxW(None, APP_VERSION, "Zapret – версия", 0x40)
+        sys.exit(0)
+
+    if "--update" in args and len(args) > 3:
+        handle_update_mode(args)
+        sys.exit(0)
+
+    start_in_tray = "--tray" in args
+
+    if not is_admin():
+        params = subprocess.list2cmdline(list(args[1:]))
+        shell_exec_result = ctypes.windll.shell32.ShellExecuteW(
+            None,
+            "runas",
+            sys.executable,
+            params,
+            None,
+            1,
+        )
+        if int(shell_exec_result) <= 32:
+            ctypes.windll.user32.MessageBoxW(
+                None,
+                "Не удалось запросить права администратора.",
+                "Zapret",
+                0x10,
+            )
+        sys.exit(0)
+
+    from startup.single_instance import create_mutex, release_mutex
+    from startup.ipc_manager import IPCManager
+
+    mutex_handle, already_running = create_mutex("ZapretSingleInstance")
+    if already_running:
+        ipc = IPCManager()
+        if ipc.send_show_command():
+            log("Отправлена команда показать окно запущенному экземпляру", "INFO")
+        else:
+            ctypes.windll.user32.MessageBoxW(
+                None,
+                "Экземпляр Zapret уже запущен, но не удалось показать окно!",
+                "Zapret",
+                0x40,
+            )
+        sys.exit(0)
+
+    atexit.register(lambda: release_mutex(mutex_handle))
+    return bool(start_in_tray)
+
+
+# ============================================================================
+# ФАЙЛ 11: src/tray.py (ПЕРВЫЕ 200 СТРОК)
+# ============================================================================
+# Местоположение: src/tray.py
+# Описание: System tray через Win32 API (1123 строки)
+# Изменения: На Linux использовать QSystemTrayIcon из Qt
+
+# tray.py
+
+from __future__ import annotations
+
+import ctypes
+import os
+import sys
+import time
+from ctypes import wintypes
+
+from PyQt6.QtCore import QTimer, QPoint
+from PyQt6.QtGui import QAction, QCursor, QFontMetrics
+from PyQt6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMenu, QWidget
+
+from ui.theme import get_themed_qta_icon
+
+try:
+    import qtawesome as qta
+
+    HAS_QTAWESOME = True
+except Exception:
+    qta = None
+    HAS_QTAWESOME = False
+
+try:
+    from qfluentwidgets import RoundMenu, Action, FluentIcon
+
+    _HAS_FLUENT_MENU = True
+except Exception:
+    RoundMenu = None
+    Action = None
+    FluentIcon = None
+    _HAS_FLUENT_MENU = False
+
+try:
+    from log import log
+except Exception:
+    def log(*args, **kwargs):  # type: ignore[no-redef]
+        return None
+
+from ui.popup_menu import exec_popup_menu
+from ui.window_adapter import ensure_window_adapter
+
+
+def _toggle_github_api_removal(*, status_callback=None) -> bool:
+    """Переключает флаг удаления api.github.com из hosts при запуске."""
+    from config import get_remove_github_api, set_remove_github_api
+
+    try:
+        current_state = bool(get_remove_github_api())
+        new_state = not current_state
+
+        if set_remove_github_api(new_state):
+            state_text = "включено" if new_state else "отключено"
+            message = f"Удаление api.github.com из hosts {state_text}"
+            log(message, "INFO")
+            if status_callback:
+                status_callback(message)
+            return True
+
+        error_message = "Ошибка при сохранении настройки удаления GitHub API"
+        log(error_message, "❌ ERROR")
+        if status_callback:
+            status_callback(error_message)
+        return False
+    except Exception as exc:
+        error_message = f"Ошибка при переключении удаления GitHub API: {exc}"
+        log(error_message, "❌ ERROR")
+        if status_callback:
+            status_callback(error_message)
+        return False
+
+
+if sys.platform == "win32":
+    user32 = ctypes.windll.user32
+    shell32 = ctypes.windll.shell32
+    kernel32 = ctypes.windll.kernel32
+    _PTR_IS_64 = ctypes.sizeof(ctypes.c_void_p) == 8
+    WPARAM = ctypes.c_uint64 if _PTR_IS_64 else ctypes.c_uint
+    LPARAM = ctypes.c_int64 if _PTR_IS_64 else ctypes.c_long
+    LRESULT = getattr(
+        ctypes,
+        "c_ssize_t",
+        ctypes.c_int64 if _PTR_IS_64 else ctypes.c_long,
+    )
+
+    IMAGE_ICON = 1
+    LR_LOADFROMFILE = 0x0010
+    LR_DEFAULTSIZE = 0x0040
+
+    NIM_ADD = 0x00000000
+    NIM_MODIFY = 0x00000001
+    NIM_DELETE = 0x00000002
+    NIM_SETFOCUS = 0x00000003
+    NIM_SETVERSION = 0x00000004
+
+    NIF_MESSAGE = 0x00000001
+    NIF_ICON = 0x00000002
+    NIF_TIP = 0x00000004
+    NIF_INFO = 0x00000010
+    NIF_SHOWTIP = 0x00000080
+
+    NOTIFYICON_VERSION_4 = 4
+    NIIF_NONE = 0x00000000
+    NIIF_INFO = 0x00000001
+
+    WM_APP = 0x8000
+    WM_NULL = 0x0000
+    WM_DESTROY = 0x0002
+    WM_CLOSE = 0x0010
+    WM_CONTEXTMENU = 0x007B
+    WM_LBUTTONUP = 0x0202
+    WM_RBUTTONUP = 0x0205
+    WM_LBUTTONDBLCLK = 0x0203
+    VK_LBUTTON = 0x01
+    VK_RBUTTON = 0x02
+
+    NIN_SELECT = WM_USER = 0x0400
+    NIN_KEYSELECT = WM_USER + 1
+
+    MF_STRING = 0x00000000
+    MF_SEPARATOR = 0x00000800
+    MF_POPUP = 0x00000010
+    MF_GRAYED = 0x00000001
+
+    TPM_LEFTALIGN = 0x0000
+    TPM_BOTTOMALIGN = 0x0020
+    TPM_RIGHTBUTTON = 0x0002
+    TPM_RETURNCMD = 0x0100
+    TPM_NONOTIFY = 0x0080
+
+    IDI_APPLICATION = 32512
+    CW_USEDEFAULT = 0x80000000
+
+    TRAY_CALLBACK_MESSAGE = WM_APP + 100
+
+    CMD_SHOW_WINDOW = 1001
+    CMD_HIDE_TO_TRAY = 1002
+    CMD_TG_PROXY_TOGGLE = 1003
+    CMD_OPEN_CONSOLE = 1004
+    CMD_EXIT_ONLY = 1005
+    CMD_EXIT_AND_STOP = 1006
+    CMD_OPACITY_BASE = 1100
+
+
+    class GUID(ctypes.Structure):
+        _fields_ = [
+            ("Data1", wintypes.DWORD),
+            ("Data2", wintypes.WORD),
+            ("Data3", wintypes.WORD),
+            ("Data4", ctypes.c_ubyte * 8),
+        ]
+
+
+    class _NotifyIconTimeoutUnion(ctypes.Union):
+        _fields_ = [
+            ("uTimeout", wintypes.UINT),
+            ("uVersion", wintypes.UINT),
+        ]
+
+
+    class NOTIFYICONDATAW(ctypes.Structure):
+        _anonymous_ = ("timeout_version",)
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("hWnd", wintypes.HWND),
+            ("uID", wintypes.UINT),
+            ("uFlags", wintypes.UINT),
+            ("uCallbackMessage", wintypes.UINT),
+            ("hIcon", wintypes.HANDLE),
+            ("szTip", wintypes.WCHAR * 128),
+            ("dwState", wintypes.DWORD),
+            ("dwStateMask", wintypes.DWORD),
+            ("szInfo", wintypes.WCHAR * 256),
+            ("timeout_version", _NotifyIconTimeoutUnion),
+            ("szInfoTitle", wintypes.WCHAR * 64),
+            ("dwInfoFlags", wintypes.DWORD),
+            ("guidItem", GUID),
+            ("hBalloonIcon", wintypes.HANDLE),
+        ]
+
+
+    WNDPROC = ctypes.WINFUNCTYPE(
+        LRESULT,
+        wintypes.HWND,
+        wintypes.UINT,
+        WPARAM,
+        LPARAM,
+    )
+
+
+    class WNDCLASSEXW(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.UINT),
+            ("style", wintypes.UINT),
+            ("lpfnWndProc", WNDPROC),
+            ("cbClsExtra", ctypes.c_int),
+            ("cbWndExtra", ctypes.c_int),
+            ("hInstance", wintypes.HINSTANCE),
+            ("hIcon", wintypes.HICON),
