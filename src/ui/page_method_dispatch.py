@@ -5,7 +5,13 @@ from PyQt6.QtCore import QTimer
 from ui.navigation_targets import resolve_strategy_page_for_method
 from ui.page_contracts import PageMethodName, get_page_method
 from ui.page_names import PageName
-from ui.window_adapter import ensure_window_adapter
+
+
+def _get_loaded_page(window, page_name: PageName):
+    page_host = getattr(window, "_page_host", None)
+    if page_host is None:
+        return None
+    return page_host.get_loaded_page(page_name)
 
 
 def get_active_strategy_page_name(window) -> PageName | None:
@@ -26,7 +32,7 @@ def call_loaded_page_method(
     *args,
     delay_ms: int = 0,
 ) -> bool:
-    page = ensure_window_adapter(window).get_loaded_page(page_name)
+    page = _get_loaded_page(window, page_name)
     if page is None:
         return False
 

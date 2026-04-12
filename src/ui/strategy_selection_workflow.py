@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import QWidget
 
-from ui.window_display_state import update_current_strategy_display
+from ui.window_display_state import (
+    get_direct_strategy_summary,
+    update_current_strategy_display,
+)
 from ui.navigation_targets import resolve_strategy_page_for_method
 from ui.window_adapter import ensure_window_adapter
 
@@ -22,7 +25,7 @@ def resolve_strategy_selection_display_name(
 ) -> str:
     normalized = str(launch_method or "").strip().lower()
     if normalized == "direct_zapret2" and sender is get_strategy_selection_source_page(window, normalized):
-        return window._get_direct_strategy_summary()
+        return get_direct_strategy_summary(window)
     return strategy_name
 
 

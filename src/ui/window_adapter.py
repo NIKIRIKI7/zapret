@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from ui.navigation.navigation_controller import ensure_navigation_controller
-from ui.page_method_dispatch import call_loaded_page_method
 from ui.window_display_state import update_current_strategy_display
 from ui.page_names import PageName
 
@@ -17,11 +15,11 @@ class WindowUiAdapter:
     def __init__(self, window):
         self._window = window
 
-    def show_page(self, page_name: PageName) -> bool:
+    def show_page(self, page_name: PageName, *, allow_internal: bool = False) -> bool:
         page_host = getattr(self._window, "_page_host", None)
         if page_host is None:
             return False
-        return page_host.show_page(page_name)
+        return page_host.show_page(page_name, allow_internal=allow_internal)
 
     def ensure_page(self, page_name: PageName):
         page_host = getattr(self._window, "_page_host", None)
@@ -43,19 +41,14 @@ class WindowUiAdapter:
         return page_host.pages
 
     def update_titlebar_search_width(self) -> None:
+        from ui.navigation.navigation_controller import ensure_navigation_controller
+
         ensure_navigation_controller(self._window).update_titlebar_search_width()
 
     def route_search_result(self, page_name: PageName, tab_key: str = "") -> bool:
-        return ensure_navigation_controller(self._window).route_search_result(page_name, tab_key)
+        from ui.navigation.navigation_controller import ensure_navigation_controller
 
-    def call_loaded_page_method(self, page_name: PageName, method_name: str, *args, delay_ms: int = 0) -> bool:
-        return call_loaded_page_method(
-            self._window,
-            page_name,
-            method_name,
-            *args,
-            delay_ms=delay_ms,
-        )
+        return ensure_navigation_controller(self._window).route_search_result(page_name, tab_key)
 
     def persist_window_geometry(self) -> None:
         controller = getattr(self._window, "window_geometry_controller", None)

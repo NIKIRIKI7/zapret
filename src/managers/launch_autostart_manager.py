@@ -26,7 +26,7 @@ class LaunchAutostartManager(QObject):
             self._mark_runtime_stopped()
             return
 
-        from strategy_menu import get_strategy_launch_method
+        from settings.dpi.strategy_settings import get_strategy_launch_method
         resolved_method = str(launch_method or get_strategy_launch_method() or "").strip().lower()
 
         supported_methods = {

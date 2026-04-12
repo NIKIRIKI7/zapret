@@ -5,7 +5,7 @@
 Все страницы добавляются через addSubInterface() вместо ручного SideNavBar + QStackedWidget.
 Бизнес-логика (сигналы, обработчики) сохранена без изменений.
 """
-from PyQt6.QtCore import QTimer, pyqtSignal, QModelIndex
+from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QCompleter
 from typing import Any, cast
 
@@ -28,30 +28,7 @@ except ImportError:
 from ui.page_names import PageName
 from ui.text_catalog import tr as tr_catalog
 from ui.navigation.navigation_controller import ensure_navigation_controller
-from ui.mode_switch_workflow import (
-    auto_start_after_method_switch,
-    complete_launch_method_switch,
-)
-from ui.window_display_state import (
-    get_direct_strategy_summary,
-    set_status_text,
-    update_autostart_display,
-    update_current_strategy_display,
-    update_subscription_display,
-)
-from ui.window_bootstrap_runtime import (
-    get_current_launch_method_for_preset_runtime,
-    resolve_active_preset_watch_path,
-)
-from ui.startup_ui_metrics import (
-    log_startup_page_init_summary,
-    pump_startup_ui,
-    record_startup_page_init_metric,
-)
-from ui.window_state_refresh import (
-    refresh_pages_after_preset_switch,
-)
-from ui.ui_workflows import ensure_ui_workflows
+from ui.window_display_state import get_direct_strategy_summary
 from ui.ui_root import WindowUiRoot
 
 # ---------------------------------------------------------------------------
@@ -191,12 +168,6 @@ class MainWindowUI:
             self._ui_root = ui_root
         return ui_root
 
-    def _get_navigation_controller(self):
-        return ensure_navigation_controller(self)
-
-    def _get_ui_workflows(self):
-        return ensure_ui_workflows(self)
-
     def build_ui(self, width: int, height: int):
         """Build UI: create pages and populate FluentWindow navigation sidebar.
 
@@ -225,113 +196,14 @@ class MainWindowUI:
         """
         self._get_ui_root().finish_bootstrap()
 
-    @staticmethod
-    def _get_current_launch_method_for_preset_runtime() -> str:
-        return get_current_launch_method_for_preset_runtime()
-
-    def _resolve_active_preset_watch_path(self) -> str:
-        return resolve_active_preset_watch_path(self)
-
-    def _pump_startup_ui(self, force: bool = False) -> None:
-        pump_startup_ui(self, force=force)
-
-    def _record_startup_page_init_metric(self, page_name: PageName, elapsed_ms: int) -> None:
-        record_startup_page_init_metric(self, page_name, elapsed_ms)
-
-    def _log_startup_page_init_summary(self) -> None:
-        log_startup_page_init_summary(self)
-
     def _get_launch_method(self) -> str:
         try:
-            from strategy_menu import get_strategy_launch_method
+            from settings.dpi.strategy_settings import get_strategy_launch_method
 
             method = (get_strategy_launch_method() or "").strip().lower()
         except Exception:
             method = ""
         return method or "direct_zapret2"
 
-    def _add_nav_item(self, page_name: PageName, position) -> None:
-        self._get_navigation_controller().add_nav_item(page_name, position)
-
-    # ------------------------------------------------------------------
-    # Navigation setup (FluentWindow sidebar)
-    # ------------------------------------------------------------------
-
-    def _init_navigation(self):
-        self._get_navigation_controller().init_navigation()
-
-    def _attach_sidebar_search_to_titlebar(self) -> None:
-        self._get_navigation_controller().attach_sidebar_search_to_titlebar()
-
-    def _update_titlebar_search_width(self) -> None:
-        self._get_navigation_controller().update_titlebar_search_width()
-
-    def _on_sidebar_search_changed(self, text: str) -> None:
-        self._get_navigation_controller().on_sidebar_search_changed(text)
-
-    def _apply_nav_visibility_filter(self) -> None:
-        self._get_navigation_controller().apply_nav_visibility_filter()
-
-    def _resolve_ui_language(self) -> str:
-        return self._get_navigation_controller().resolve_ui_language()
-
-    def _get_nav_label(self, page_name: PageName) -> str:
-        return self._get_navigation_controller().get_nav_label(page_name)
-
-    def _get_sidebar_search_pages(self) -> set[PageName]:
-        return self._get_navigation_controller().get_sidebar_search_pages()
-
-    def _setup_sidebar_search_completer(self) -> None:
-        self._get_navigation_controller().setup_sidebar_search_completer()
-
-    def _update_sidebar_search_suggestions(self) -> None:
-        self._get_navigation_controller().update_sidebar_search_suggestions()
-
-    def _on_sidebar_search_result_activated(self, index: QModelIndex) -> None:
-        self._get_navigation_controller().on_sidebar_search_result_activated(index)
-
-    def _on_sidebar_search_result_text_activated(self, text: str) -> None:
-        self._get_navigation_controller().on_sidebar_search_result_text_activated(text)
-
-    def _route_sidebar_search_by_text(self, text: str, prefer_first: bool = False) -> bool:
-        return self._get_navigation_controller().route_sidebar_search_by_text(text, prefer_first=prefer_first)
-
-    def get_loaded_page(self, name: PageName) -> QWidget | None:
-        return self._get_ui_root().get_loaded_page(name)
-
-    def show_page(self, name: PageName) -> bool:
-        return self._get_ui_root().show_page(name)
-
-    # ------------------------------------------------------------------
-    # All handler methods — PRESERVED from original
-    # ------------------------------------------------------------------
-
-    def _refresh_pages_after_preset_switch(self):
-        refresh_pages_after_preset_switch(self)
-
-    def _complete_method_switch(self, method: str):
-        complete_launch_method_switch(self, method)
-
-    def _redirect_to_strategies_page_for_method(self, method: str) -> None:
-        self._get_ui_workflows().redirect_to_strategies_page_for_method(method)
-
-    def _auto_start_after_method_switch(self, method: str):
-        auto_start_after_method_switch(self, method)
-
-    def _get_direct_strategy_summary(self, max_items: int = 2) -> str:
-        return get_direct_strategy_summary(self, max_items=max_items)
-
-    def update_current_strategy_display(self, strategy_name: str):
-        update_current_strategy_display(self, strategy_name)
-
-    def update_autostart_display(self, enabled: bool, strategy_name: str = None):
-        update_autostart_display(self, enabled, strategy_name)
-
-    def update_subscription_display(self, is_premium: bool, days: int = None):
-        update_subscription_display(self, is_premium, days)
-
-    def set_status_text(self, text: str, status: str = "neutral"):
-        set_status_text(self, text, status)
-
-    def _navigate_to_dpi_settings(self):
-        self.show_page(PageName.DPI_SETTINGS)
+    # Window-facing API intentionally kept minimal. Page opening and routing go
+    # through window_adapter/page_host/workflow layers, not through this mixin.

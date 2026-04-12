@@ -5,10 +5,18 @@ from PyQt6.QtWidgets import QWidget
 from log import log
 from ui.navigation.navigation_controller import ensure_navigation_controller
 from ui.page_dependencies import inject_page_dependencies
-from ui.navigation.schema import get_page_route_key
+from ui.navigation.schema import (
+    get_page_route_key,
+    is_page_allowed_for_method,
+    is_page_direct_open_allowed,
+)
 from ui.page_names import PageName
 from ui.page_performance import log_page_metric
 from ui.page_registry import get_page_performance_profile
+from ui.startup_ui_metrics import (
+    pump_startup_ui,
+    record_startup_page_init_metric,
+)
 
 
 class WindowPageHost:
@@ -30,13 +38,13 @@ class WindowPageHost:
         started_at = _time.perf_counter()
         for page_name in page_names:
             self.ensure_page(page_name)
-            self._window._pump_startup_ui()
+            pump_startup_ui(self._window)
 
         log(
             f"⏱ Startup: _create_pages core {(_time.perf_counter() - started_at) * 1000:.0f}ms",
             "DEBUG",
         )
-        self._window._pump_startup_ui(force=True)
+        pump_startup_ui(self._window, force=True)
 
     def get_loaded_page(self, page_name: PageName) -> QWidget | None:
         return self.pages.get(page_name)
@@ -108,7 +116,23 @@ class WindowPageHost:
         except Exception:
             pass
 
+    def _current_launch_method(self) -> str:
+        getter = getattr(self._window, "_get_launch_method", None)
+        if callable(getter):
+            try:
+                return str(getter() or "").strip().lower()
+            except Exception:
+                return ""
+        return ""
+
+    def _is_page_allowed(self, page_name: PageName) -> bool:
+        return is_page_allowed_for_method(page_name, self._current_launch_method())
+
     def ensure_page(self, page_name: PageName) -> QWidget | None:
+        if not self._is_page_allowed(page_name):
+            log(f"[PAGE_HOST] skip ensure_page for disallowed page {page_name.name}", "DEBUG")
+            return None
+
         page = self.pages.get(page_name)
         if page is not None:
             inject_page_dependencies(page, self._window)
@@ -134,7 +158,7 @@ class WindowPageHost:
             self._connect_page_signals(self._window, page_name, page)
             self.ensure_page_in_stacked_widget(page)
 
-        self._window._record_startup_page_init_metric(page_name, created_page.elapsed_ms)
+        record_startup_page_init_metric(self._window, page_name, created_page.elapsed_ms)
         log_page_metric(
             page_name,
             "constructor",
@@ -143,7 +167,15 @@ class WindowPageHost:
         )
         return page
 
-    def show_page(self, page_name: PageName) -> bool:
+    def show_page(self, page_name: PageName, *, allow_internal: bool = False) -> bool:
+        if not self._is_page_allowed(page_name):
+            log(f"[PAGE_HOST] reject show_page for disallowed page {page_name.name}", "WARNING")
+            return False
+
+        if not allow_internal and not is_page_direct_open_allowed(page_name):
+            log(f"[PAGE_HOST] reject direct-open for internal/detail page {page_name.name}", "WARNING")
+            return False
+
         page = self.ensure_page(page_name)
         if page is None:
             return False

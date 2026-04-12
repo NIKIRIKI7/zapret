@@ -4,6 +4,7 @@ from PyQt6.QtCore import QTimer
 
 from log import log
 from ui.navigation.navigation_controller import ensure_navigation_controller
+from ui.ui_workflows import ensure_ui_workflows
 
 
 def handle_launch_method_changed(window, method: str) -> None:
@@ -111,7 +112,7 @@ def complete_launch_method_switch(window, method: str) -> None:
         )
 
     try:
-        window._redirect_to_strategies_page_for_method(method)
+        ensure_ui_workflows(window).redirect_to_strategies_page_for_method(method)
     except Exception:
         pass
 

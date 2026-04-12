@@ -3,7 +3,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QTimer
 
 from log import log
-from strategy_menu import get_strategy_launch_method
+from settings.dpi.strategy_settings import get_strategy_launch_method
 from ui.runtime_ui_bridge import ensure_runtime_ui_bridge
 
 from .thread_runtime import start_worker_thread

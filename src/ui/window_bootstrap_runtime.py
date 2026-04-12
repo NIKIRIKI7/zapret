@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
-from ui.page_signal_connector import connect_lazy_page_signals
+from ui.page_signals import connect_lazy_page_signals
 from ui.startup_ui_metrics import log_startup_page_init_summary
 from ui.window_signal_bindings import connect_window_page_signals
 from ui.navigation.navigation_controller import (
@@ -14,6 +14,7 @@ from ui.page_registry import PAGE_CLASS_SPECS
 from ui.runtime_ui_bridge import ensure_runtime_ui_bridge
 from ui.ui_workflows import WindowUiWorkflows
 from ui.window_adapter import WindowUiAdapter
+from ui.window_state_refresh import refresh_pages_after_preset_switch
 
 
 def initialize_build_ui_state(
@@ -60,8 +61,8 @@ def initialize_build_ui_state(
 def create_preset_runtime_coordinator(window) -> PresetRuntimeCoordinator:
     return PresetRuntimeCoordinator(
         window,
-        get_launch_method=window._get_current_launch_method_for_preset_runtime,
-        get_active_preset_path=window._resolve_active_preset_watch_path,
+        get_launch_method=get_current_launch_method_for_preset_runtime,
+        get_active_preset_path=lambda: resolve_active_preset_watch_path(window),
         is_dpi_running=lambda: bool(
             hasattr(window, "launch_controller")
             and window.launch_controller
@@ -69,7 +70,7 @@ def create_preset_runtime_coordinator(window) -> PresetRuntimeCoordinator:
         ),
         restart_dpi_async=lambda: window.launch_controller.restart_dpi_async(),
         switch_direct_preset_async=lambda method: window.launch_controller.switch_direct_preset_async(method),
-        refresh_after_switch=window._refresh_pages_after_preset_switch,
+        refresh_after_switch=lambda: refresh_pages_after_preset_switch(window),
     )
 
 
@@ -100,7 +101,7 @@ def finish_ui_bootstrap(window) -> None:
 
 def get_current_launch_method_for_preset_runtime() -> str:
     try:
-        from strategy_menu import get_strategy_launch_method
+        from settings.dpi.strategy_settings import get_strategy_launch_method
 
         return str(get_strategy_launch_method() or "").strip().lower()
     except Exception:

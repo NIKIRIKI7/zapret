@@ -6,7 +6,7 @@ import os
 import time
 
 from PyQt6.QtCore import QTimer
-from strategy_menu import get_strategy_launch_method
+from settings.dpi.strategy_settings import get_strategy_launch_method
 from log import log
 from direct_launch.health.process_health_check import (
     check_conflicting_processes,
@@ -250,7 +250,6 @@ class DirectLaunchController:
             runtime_service.begin_start(
                 launch_method=launch_method,
                 expected_process=self._expected_process_name(launch_method),
-                expected_preset_path=self._expected_preset_path(selected_mode),
             )
 
     def _mark_runtime_running(self) -> None:
@@ -261,7 +260,7 @@ class DirectLaunchController:
     def _mark_runtime_failed(self, error_message: str, *, exit_code: int | None = None) -> None:
         runtime_service = self._runtime_service()
         if runtime_service is not None:
-            runtime_service.mark_start_failed(error_message, exit_code=exit_code)
+            runtime_service.mark_start_failed(error_message)
 
     def _begin_runtime_stop(self) -> None:
         runtime_service = self._runtime_service()

@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.runtime.direct_ui_snapshot_service import DirectTargetDetailSnapshotWorker
+from ui.page_dependencies import require_page_app_context
 try:
     from qfluentwidgets import (
         BodyLabel, CaptionLabel, StrongBodyLabel, SubtitleLabel,
@@ -61,7 +62,7 @@ from ui.compat_widgets import ActionButton, ResetActionButton, SettingsRow, set_
 from ui.widgets.win11_controls import Win11ToggleRow, Win11ComboRow, Win11NumberRow
 from filters.ui import StrategyTree, StrategyTreeRow
 from ui.popup_menu import exec_popup_menu
-from strategy_menu.args_preview_dialog import ArgsPreviewDialog
+from filters.strategy_detail.args_preview_dialog import ArgsPreviewDialog
 from blobs.service import get_blobs_info
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from log import log
@@ -249,6 +250,12 @@ class StrategyDetailPage(BasePage):
         self._ui_state_unsubscribe = None
         self._cleanup_in_progress = False
 
+        app_context = require_page_app_context(
+            self,
+            parent=parent,
+            error_message="AppContext is required for Zapret2 strategy detail page",
+        )
+
         # Direct preset facade for target settings storage
         from core.presets.direct_facade import DirectPresetFacade
 
@@ -257,13 +264,6 @@ class StrategyDetailPage(BasePage):
             app_context=app_context,
             on_dpi_reload_needed=self._on_dpi_reload_needed,
         )
-        app_context = getattr(self, "app_context", None)
-        if app_context is None:
-            app_context = getattr(parent, "app_context", None)
-        if app_context is None:
-            app_context = getattr(self.window(), "app_context", None)
-        if app_context is None:
-            raise RuntimeError("AppContext is required for Zapret2 strategy detail page")
         self._marks_store = app_context.strategy_marks_store
         self._favorites_store = app_context.strategy_favorites_store
         self._favorite_strategy_ids = set()
@@ -1209,12 +1209,11 @@ class StrategyDetailPage(BasePage):
         return payload
 
     def _require_app_context(self):
-        app_context = getattr(self, "app_context", None)
-        if app_context is None:
-            app_context = getattr(self.window(), "app_context", None)
-        if app_context is None:
-            raise RuntimeError("AppContext is required for Zapret2 strategy detail page")
-        return app_context
+        return require_page_app_context(
+            self,
+            parent=self.parent(),
+            error_message="AppContext is required for Zapret2 strategy detail page",
+        )
 
     def _get_direct_ui_snapshot_service(self):
         return self._require_app_context().direct_ui_snapshot_service
@@ -2300,12 +2299,11 @@ class StrategyDetailPage(BasePage):
             return  # Уже подключены
 
         try:
-            if self.parent_app and hasattr(self.parent_app, 'process_monitor'):
-                process_monitor = self.parent_app.process_monitor
-                if process_monitor is not None:
-                    process_monitor.processStatusChanged.connect(self._on_process_status_changed)
-                    self._process_monitor_connected = True
-                    log("StrategyDetailPage: подключен к processStatusChanged", "DEBUG")
+            process_monitor = getattr(self, "process_monitor", None)
+            if process_monitor is not None:
+                process_monitor.processStatusChanged.connect(self._on_process_status_changed)
+                self._process_monitor_connected = True
+                log("StrategyDetailPage: подключен к processStatusChanged", "DEBUG")
         except Exception as e:
             log(f"StrategyDetailPage: ошибка подключения к process_monitor: {e}", "DEBUG")
 
@@ -2374,10 +2372,9 @@ class StrategyDetailPage(BasePage):
         self._host_window = None
 
         try:
-            if self._process_monitor_connected and self.parent_app and hasattr(self.parent_app, 'process_monitor'):
-                process_monitor = self.parent_app.process_monitor
-                if process_monitor is not None:
-                    process_monitor.processStatusChanged.disconnect(self._on_process_status_changed)
+            process_monitor = getattr(self, "process_monitor", None)
+            if self._process_monitor_connected and process_monitor is not None:
+                process_monitor.processStatusChanged.disconnect(self._on_process_status_changed)
         except Exception:
             pass
         self._process_monitor_connected = False

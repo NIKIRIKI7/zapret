@@ -35,7 +35,7 @@ def on_open_target_detail(window, target_key: str, current_strategy_id: str) -> 
 
 
 def on_strategy_detail_back(window) -> None:
-    from strategy_menu import get_strategy_launch_method
+    from settings.dpi.strategy_settings import get_strategy_launch_method
 
     method = get_strategy_launch_method()
     ensure_window_adapter(window).show_page(resolve_strategy_detail_back_page_for_method(method))

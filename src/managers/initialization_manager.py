@@ -188,7 +188,7 @@ class InitializationManager:
             import time as _t
             t0 = _t.perf_counter()
             try:
-                from strategy_menu import get_strategy_launch_method
+                from settings.dpi.strategy_settings import get_strategy_launch_method
 
                 method = get_strategy_launch_method()
 
@@ -279,7 +279,7 @@ class InitializationManager:
         try:
             from direct_launch.runtime import DirectLaunchRuntimeApi
             from config import get_winws_exe_for_method, is_zapret2_mode
-            from strategy_menu import get_strategy_launch_method
+            from settings.dpi.strategy_settings import get_strategy_launch_method
 
             # Выбираем исполняемый файл в зависимости от режима запуска
             launch_method = get_strategy_launch_method()
@@ -412,7 +412,7 @@ class InitializationManager:
 
     def _on_start_clicked(self):
         """Обработчик нажатия кнопки запуска с проверкой выбранной стратегии"""
-        from strategy_menu import get_strategy_launch_method
+        from settings.dpi.strategy_settings import get_strategy_launch_method
 
         launch_method = get_strategy_launch_method()
 
@@ -501,7 +501,7 @@ class InitializationManager:
                 launch_runtime_api = getattr(self.app, "launch_runtime_api", None)
                 if runtime_service is not None and launch_runtime_api is not None:
                     from config import get_winws_exe_for_method
-                    from strategy_menu import get_strategy_launch_method
+                    from settings.dpi.strategy_settings import get_strategy_launch_method
                     import os
 
                     launch_method = str(get_strategy_launch_method() or "").strip().lower()
@@ -807,7 +807,7 @@ class InitializationManager:
             # Быструю часть post-init оставляем в критическом пути,
             # а реальный автозапуск передаём в единый dispatcher после возврата в event loop.
             t_method = _time.perf_counter()
-            from strategy_menu import get_strategy_launch_method
+            from settings.dpi.strategy_settings import get_strategy_launch_method
             launch_method = get_strategy_launch_method()
             self._log_startup_step(
                 "PostInitResolveMethod",
@@ -864,7 +864,7 @@ class InitializationManager:
         try:
             import os
             from config import get_winws_exe_for_method
-            from strategy_menu import get_strategy_launch_method
+            from settings.dpi.strategy_settings import get_strategy_launch_method
 
             launch_method = get_strategy_launch_method()
             target_file = get_winws_exe_for_method(launch_method)

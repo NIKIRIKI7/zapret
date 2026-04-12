@@ -17,7 +17,6 @@ from ui.navigation.schema import (
     get_sidebar_search_pages_for_method,
 )
 from ui.page_names import PageName
-from ui.window_adapter import ensure_window_adapter
 from ui.text_catalog import (
     find_search_entries,
     format_search_result,
@@ -26,12 +25,39 @@ from ui.text_catalog import (
     tr as tr_catalog,
 )
 from ui.page_method_dispatch import switch_page_tab
+from ui.startup_ui_metrics import pump_startup_ui
 
 
 @dataclass(frozen=True)
 class SidebarSearchTarget:
     page_name: PageName
     tab_key: str = ""
+
+
+def _get_page_host(window):
+    return getattr(window, "_page_host", None)
+
+
+def _ensure_page(window, page_name: PageName):
+    page_host = _get_page_host(window)
+    if page_host is None:
+        return None
+    return page_host.ensure_page(page_name)
+
+
+def _show_page(window, page_name: PageName) -> bool:
+    page_host = _get_page_host(window)
+    if page_host is None:
+        return False
+    return bool(page_host.show_page(page_name))
+
+
+def _get_loaded_pages(window) -> dict[PageName, QWidget]:
+    page_host = _get_page_host(window)
+    pages = getattr(page_host, "pages", None)
+    if isinstance(pages, dict):
+        return pages
+    return {}
 
 
 def add_nav_item(window, page_name: PageName, position, *, initial_visible: bool | None = None) -> None:
@@ -51,7 +77,7 @@ def add_nav_item(window, page_name: PageName, position, *, initial_visible: bool
     eager_pages = set(get_eager_page_names_for_method(window._get_launch_method()))
 
     if page_name in eager_pages:
-        page = ensure_window_adapter(window).ensure_page(page_name)
+        page = _ensure_page(window, page_name)
         if page is None:
             log(f"[NAV] _add eager {page_name.name}: page is None - skip", "DEBUG")
             return
@@ -68,7 +94,7 @@ def add_nav_item(window, page_name: PageName, position, *, initial_visible: bool
             routeKey=route_key,
             icon=icon,
             text=text,
-            onClick=lambda checked=False, target=page_name, adapter=ensure_window_adapter(window): adapter.show_page(target),
+            onClick=lambda checked=False, target=page_name, current_window=window: _show_page(current_window, target),
             selectable=True,
             position=position,
         )
@@ -84,7 +110,7 @@ def add_nav_item(window, page_name: PageName, position, *, initial_visible: bool
     else:
         log(f"[NAV] addSubInterface returned None for {page_name.name} - not in _nav_items!", "WARNING")
 
-    window._pump_startup_ui()
+    pump_startup_ui(window)
 
 
 def init_navigation(window) -> None:
@@ -118,7 +144,9 @@ def init_navigation(window) -> None:
         widget_cls = getattr(window, "_sidebar_search_widget_cls", None)
         if widget_cls is not None:
             window._sidebar_search_nav_widget = widget_cls()
-            window._sidebar_search_nav_widget.textChanged.connect(window._on_sidebar_search_changed)
+            window._sidebar_search_nav_widget.textChanged.connect(
+                lambda text, current_window=window: on_sidebar_search_changed(current_window, text)
+            )
             window._sidebar_search_nav_widget.set_placeholder_text(
                 tr_catalog("sidebar.search.placeholder", language=window._ui_language)
             )
@@ -158,12 +186,12 @@ def init_navigation(window) -> None:
     window._nav_headers.append((appearance_header, appearance_pages, appearance_header_key))
 
     for hidden in get_hidden_pages_for_method(current_method):
-        page = ensure_window_adapter(window).pages.get(hidden)
+        page = _get_loaded_pages(window).get(hidden)
         if page is not None:
             if not page.objectName():
                 page.setObjectName(page.__class__.__name__)
             window.stackedWidget.addWidget(page)
-            window._pump_startup_ui()
+            pump_startup_ui(window)
 
     window.navigationInterface.setMinimumExpandWidth(700)
     sync_nav_visibility(window)
@@ -211,7 +239,7 @@ def sync_nav_visibility(window, method: str | None = None) -> None:
 
     if method is None:
         try:
-            from strategy_menu import get_strategy_launch_method
+            from settings.dpi.strategy_settings import get_strategy_launch_method
             method = (get_strategy_launch_method() or "").strip().lower()
         except Exception:
             method = "direct_zapret2"
@@ -301,13 +329,21 @@ def setup_sidebar_search_completer(window) -> None:
     completer.setFilterMode(Qt.MatchFlag.MatchContains)
     completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
     completer.setMaxVisibleItems(10)
-    completer.activated[QModelIndex].connect(window._on_sidebar_search_result_activated)
-    completer.activated[str].connect(window._on_sidebar_search_result_text_activated)
+    completer.activated[QModelIndex].connect(
+        lambda index, current_window=window: on_sidebar_search_result_activated(current_window, index)
+    )
+    completer.activated[str].connect(
+        lambda text, current_window=window: on_sidebar_search_result_text_activated(current_window, text)
+    )
     try:
         popup = completer.popup()
         if popup is not None:
-            popup.clicked.connect(window._on_sidebar_search_result_activated)
-            popup.activated.connect(window._on_sidebar_search_result_activated)
+            popup.clicked.connect(
+                lambda index, current_window=window: on_sidebar_search_result_activated(current_window, index)
+            )
+            popup.activated.connect(
+                lambda index, current_window=window: on_sidebar_search_result_activated(current_window, index)
+            )
     except Exception:
         pass
 
@@ -506,7 +542,7 @@ def route_sidebar_search_by_text(window, text: str, prefer_first: bool = False) 
 
 
 def route_search_result(window, page_name: PageName, tab_key: str = "") -> bool:
-    if not ensure_window_adapter(window).show_page(page_name):
+    if not _show_page(window, page_name):
         return False
 
     if not tab_key:

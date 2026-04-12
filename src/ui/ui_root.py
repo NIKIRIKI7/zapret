@@ -64,12 +64,6 @@ class WindowUiRoot:
     def finish_bootstrap(self) -> None:
         finish_ui_bootstrap(self._window)
 
-    def ensure_page(self, page_name: PageName):
-        page_host = getattr(self._window, "_page_host", None)
-        if page_host is None:
-            return None
-        return page_host.ensure_page(page_name)
-
     def get_loaded_page(self, page_name: PageName):
         page_host = getattr(self._window, "_page_host", None)
         if page_host is None:

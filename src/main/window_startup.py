@@ -38,7 +38,7 @@ class WindowStartupMixin:
     def __init__(self, start_in_tray: bool = False, *, app_context):
         super().__init__()
 
-        from strategy_menu import get_strategy_launch_method
+        from settings.dpi.strategy_settings import get_strategy_launch_method
 
         current_method = get_strategy_launch_method()
         log(f"Метод запуска стратегий: {current_method}", "INFO")

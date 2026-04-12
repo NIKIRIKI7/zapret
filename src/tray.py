@@ -886,10 +886,10 @@ class SystemTrayManager:
 
     def _cleanup_loaded_detail_page_overlays(self) -> None:
         try:
-            from ui.navigation_targets import get_zapret2_strategy_detail_pages
+            from ui.navigation_targets import get_strategy_detail_pages
             from ui.page_method_dispatch import close_page_transient_overlays
 
-            for page_name in get_zapret2_strategy_detail_pages():
+            for page_name in get_strategy_detail_pages():
                 try:
                     close_page_transient_overlays(self.parent, page_name)
                 except Exception:
@@ -901,18 +901,6 @@ class SystemTrayManager:
         try:
             from ui.widgets.strategies_tooltip import strategies_tooltip_manager
             strategies_tooltip_manager.hide_immediately()
-        except Exception:
-            pass
-
-        try:
-            from strategy_menu.hover_tooltip import tooltip_manager
-            tooltip_manager.hide_immediately()
-        except Exception:
-            pass
-
-        try:
-            from strategy_menu.args_preview_dialog import preview_manager
-            preview_manager.cleanup()
         except Exception:
             pass
 

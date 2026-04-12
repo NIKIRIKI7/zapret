@@ -11,19 +11,22 @@ from utils import run_hidden
 
 class WindowActionsMixin:
     def set_status(self, text: str) -> None:
-        """Sets the status text."""
-        status_type = "neutral"
+        """Пишет пользовательский статус в лог.
+
+        Раньше этот helper складывал текст в window-level UI store, но отдельного
+        глобального потребителя у такого канала больше нет. Оставляем единый
+        entry-point для вызовов, но без декоративной записи в неиспользуемое
+        состояние окна.
+        """
+        level = "INFO"
         lower_text = text.lower()
         if "работает" in lower_text or "запущен" in lower_text or "успешно" in lower_text:
-            status_type = "running"
+            level = "INFO"
         elif "останов" in lower_text or "ошибка" in lower_text or "выключен" in lower_text:
-            status_type = "stopped"
+            level = "WARNING"
         elif "внимание" in lower_text or "предупреждение" in lower_text:
-            status_type = "warning"
-
-        store = getattr(self, "ui_state_store", None)
-        if store is not None:
-            store.set_status_message(text, status_type)
+            level = "WARNING"
+        log(str(text or ""), level)
 
     def delayed_dpi_start(self) -> None:
         """Выполняет отложенный запуск DPI с проверкой наличия автозапуска."""
@@ -35,7 +38,7 @@ class WindowActionsMixin:
         try:
             log(f"Выбрана стратегия: {strategy_name} (ID: {strategy_id})", level="INFO")
 
-            from strategy_menu import get_strategy_launch_method
+            from settings.dpi.strategy_settings import get_strategy_launch_method
 
             launch_method = get_strategy_launch_method()
 

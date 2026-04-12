@@ -15,7 +15,7 @@ class WindowStateSyncMixin:
         """Честное стартовое состояние UI до реальной проверки и автозапуска."""
         try:
             from config import get_dpi_autostart, get_winws_exe_for_method
-            from strategy_menu import get_strategy_launch_method
+            from settings.dpi.strategy_settings import get_strategy_launch_method
 
             autostart_enabled = bool(get_dpi_autostart())
             launch_method = str(get_strategy_launch_method() or "").strip().lower()
@@ -31,6 +31,7 @@ class WindowStateSyncMixin:
 
             if autostart_enabled and launch_method in autostart_pending_methods:
                 return AppUiState(
+                    launch_method=launch_method,
                     launch_phase="autostart_pending",
                     launch_running=False,
                     launch_expected_process=expected_process,
@@ -38,6 +39,7 @@ class WindowStateSyncMixin:
                 )
 
             return AppUiState(
+                launch_method=launch_method,
                 launch_phase="stopped",
                 launch_running=False,
                 launch_expected_process=expected_process,
