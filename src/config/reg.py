@@ -1,9 +1,20 @@
-# reg.py ─ универсальный helper для работы с реестром
+# reg.py ─ универсальный helper для работы с настройками
+# Windows: реестр
+# Linux: JSON config store
 import sys
-import winreg
 
-HKCU = winreg.HKEY_CURRENT_USER
-HKLM = winreg.HKEY_LOCAL_MACHINE
+IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
+
+if IS_WINDOWS:
+    import winreg
+    HKCU = winreg.HKEY_CURRENT_USER
+    HKLM = winreg.HKEY_LOCAL_MACHINE
+else:
+    # Linux stubs
+    winreg = None
+    HKCU = None
+    HKLM = None
 
 def _log(msg, level="INFO"):
     """Отложенный импорт log для избежания циклических зависимостей"""
@@ -39,25 +50,33 @@ def reg(subkey: str,
         *,
         root=HKCU):
     """
-    Упрощённый доступ к реестру.
-
-    Аргументы
-    ---------
-    subkey : str
-        Путь относительно root, например 'Software\\Zapret'
-    name : str | None
-        Имя параметра.  Если None → работаем с default-value.
-    value :  _UNSET  → чтение,
-             None    → удаление параметра,
-             любое другое → запись этого значения.
-    root  : winreg.HKEY_*
-        Hive (по-умолчанию HKCU).
-
-    Возврат
-    -------
-    • при чтении – возвращает значение или None, если нет,
-    • при записи / удалении – True/False (успех).
+    Упрощённый доступ к настройкам (platform-aware).
+    
+    Windows: реестр
+    Linux: JSON config store
     """
+    # Linux: use JSON config store
+    if IS_LINUX:
+        try:
+            from platform.config_store import get_linux_store
+            store = get_linux_store()
+            key = f"{subkey}\\{name}" if name else subkey
+
+            if value is _UNSET:
+                # Read
+                return store.get_value(key)
+            elif value is None:
+                # Delete
+                return store.delete_value(key)
+            else:
+                # Write
+                store.set_value(key, value)
+                return True
+        except Exception as e:
+            _log(f"reg() error (Linux) [{subkey}\\{name}]: {e}", "ERROR")
+            return None if value is _UNSET else False
+
+    # Windows: registry
     try:
         # --- чтение --------------------------------------------------
         if value is _UNSET:
@@ -313,7 +332,11 @@ def set_accent_color(hex_color: str) -> bool:
 # ───────────── Системный акцент Windows ─────────────
 
 def get_windows_system_accent() -> str | None:
-    """Read Windows system accent color from registry (ABGR format in AccentColorMenu)."""
+    """Read Windows system accent color from registry (ABGR format in AccentColorMenu).
+    On Linux returns None.
+    """
+    if not IS_WINDOWS:
+        return None
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Accent",
@@ -659,11 +682,24 @@ def set_tg_proxy_upstream_pass(password: str) -> bool:
 
 def reg_enumerate_values(subkey: str, *, root=HKCU) -> dict:
     """
-    Перечисляет все значения в ключе реестра.
-
-    Returns:
-        {name: value, ...} или {} если ключ не существует
+    Перечисляет все значения в ключе (platform-aware).
+    Windows: реестр
+    Linux: JSON config store
     """
+    if IS_LINUX:
+        try:
+            from platform.config_store import get_linux_store
+            store = get_linux_store()
+            # Return all values under this subkey prefix
+            result = {}
+            for key, value in store.data.items():
+                if key.startswith(subkey):
+                    result[key] = value
+            return result
+        except Exception as e:
+            _log(f"reg_enumerate_values error (Linux) [{subkey}]: {e}", "DEBUG")
+        return {}
+
     result = {}
     try:
         with winreg.OpenKey(root, subkey, 0, winreg.KEY_READ) as k:
@@ -684,15 +720,18 @@ def reg_enumerate_values(subkey: str, *, root=HKCU) -> dict:
 
 def reg_delete_value(subkey: str, name: str, *, root=HKCU) -> bool:
     """
-    Удаляет одно значение из ключа реестра.
-
-    Args:
-        subkey: путь к ключу
-        name: имя значения для удаления
-
-    Returns:
-        True если успешно, False при ошибке
+    Удаляет одно значение из ключа (platform-aware).
     """
+    if IS_LINUX:
+        try:
+            from platform.config_store import get_linux_store
+            store = get_linux_store()
+            key = f"{subkey}\\{name}"
+            return store.delete_value(key)
+        except Exception as e:
+            _log(f"reg_delete_value error (Linux) [{subkey}\\{name}]: {e}", "DEBUG")
+        return False
+
     try:
         with winreg.OpenKey(root, subkey, 0, winreg.KEY_ALL_ACCESS) as k:
             winreg.DeleteValue(k, name)
@@ -706,11 +745,21 @@ def reg_delete_value(subkey: str, name: str, *, root=HKCU) -> bool:
 
 def reg_delete_all_values(subkey: str, *, root=HKCU) -> bool:
     """
-    Удаляет все значения в ключе реестра (сам ключ остаётся).
-
-    Returns:
-        True если успешно, False при ошибке
+    Удаляет все значения в ключе (platform-aware).
     """
+    if IS_LINUX:
+        try:
+            from platform.config_store import get_linux_store
+            store = get_linux_store()
+            # Delete all values under this subkey prefix
+            keys_to_delete = [k for k in store.data.keys() if k.startswith(subkey)]
+            for key in keys_to_delete:
+                store.delete_value(key)
+            return True
+        except Exception as e:
+            _log(f"reg_delete_all_values error (Linux) [{subkey}]: {e}", "ERROR")
+        return False
+
     try:
         with winreg.OpenKey(root, subkey, 0, winreg.KEY_ALL_ACCESS) as k:
             # Сначала получаем список имён
