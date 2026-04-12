@@ -1,24 +1,24 @@
 # utils/validators.py
 """
-Utilities for network address validation
+Утилиты для валидации сетевых адресов
 """
 import ipaddress
 from typing import Tuple
 
 
 class IPValidator:
-    """IP address validator"""
-
+    """Валидатор IP-адресов"""
+    
     @staticmethod
     def is_valid_ipv4(address: str) -> bool:
         """
-        Checks if the address is a valid IPv4 address
-
+        Проверяет, является ли адрес валидным IPv4
+        
         Args:
-            address: String with IP address
-
+            address: Строка с IP-адресом
+            
         Returns:
-            True if valid IPv4, otherwise False
+            True если валидный IPv4, иначе False
         """
         if not address or not address.strip():
             return False
@@ -27,17 +27,17 @@ class IPValidator:
             return True
         except (ValueError, ipaddress.AddressValueError):
             return False
-
+    
     @staticmethod
     def is_valid_ipv6(address: str) -> bool:
         """
-        Checks if the address is a valid IPv6 address
-
+        Проверяет, является ли адрес валидным IPv6
+        
         Args:
-            address: String with IP address
-
+            address: Строка с IP-адресом
+            
         Returns:
-            True if valid IPv6, otherwise False
+            True если валидный IPv6, иначе False
         """
         if not address or not address.strip():
             return False
@@ -46,18 +46,18 @@ class IPValidator:
             return True
         except (ValueError, ipaddress.AddressValueError):
             return False
-
+    
     @staticmethod
     def is_valid_ip(address: str, family: str = "IPv4") -> bool:
         """
-        Validates IP address of the specified family
-
+        Проверяет валидность IP-адреса указанного семейства
+        
         Args:
-            address: String with IP address
-            family: "IPv4" or "IPv6"
-
+            address: Строка с IP-адресом
+            family: "IPv4" или "IPv6"
+            
         Returns:
-            True if valid IP address of the specified family
+            True если валидный адрес указанного семейства
         """
         if family.lower() == "ipv6":
             return IPValidator.is_valid_ipv6(address)
@@ -66,8 +66,8 @@ class IPValidator:
 
 
 class DNSValidator:
-    """DNS configuration validator"""
-
+    """Валидатор DNS-конфигурации"""
+    
     @staticmethod
     def validate_dns_pair(
         primary: str,
@@ -75,35 +75,35 @@ class DNSValidator:
         family: str = "IPv4"
     ) -> Tuple[bool, str]:
         """
-        Validates a pair of DNS addresses
-
+        Валидирует пару DNS-адресов
+        
         Args:
-            primary: Primary DNS
-            secondary: Secondary DNS (optional)
-            family: "IPv4" or "IPv6"
-
+            primary: Первичный DNS
+            secondary: Вторичный DNS (опционально)
+            family: "IPv4" или "IPv6"
+            
         Returns:
-            Tuple (valid, error message)
+            Кортеж (валидно, сообщение об ошибке)
         """
         if not primary or not primary.strip():
-            return False, "Primary DNS not specified"
-
+            return False, "Первичный DNS не указан"
+        
         primary = primary.strip()
-
-        # Validate primary DNS
+        
+        # Валидация первичного DNS
         if not IPValidator.is_valid_ip(primary, family):
             family_name = "IPv6" if family.lower() == "ipv6" else "IPv4"
-            return False, f"Invalid {family_name} format: {primary}"
-
-        # Validate secondary DNS (if specified)
+            return False, f"Неверный формат {family_name}: {primary}"
+        
+        # Валидация вторичного DNS (если указан)
         if secondary and secondary.strip():
             secondary = secondary.strip()
             if not IPValidator.is_valid_ip(secondary, family):
                 family_name = "IPv6" if family.lower() == "ipv6" else "IPv4"
-                return False, f"Invalid {family_name} format (secondary): {secondary}"
-
+                return False, f"Неверный формат {family_name} (вторичный): {secondary}"
+        
         return True, "OK"
-
+    
     @staticmethod
     def validate_dual_stack_dns(
         ipv4_primary: str = None,
@@ -112,35 +112,35 @@ class DNSValidator:
         ipv6_secondary: str = None,
     ) -> Tuple[bool, str]:
         """
-        Validates dual-stack DNS configuration (IPv4 + IPv6)
-
+        Валидирует dual-stack DNS конфигурацию (IPv4 + IPv6)
+        
         Args:
-            ipv4_primary: Primary IPv4 DNS
-            ipv4_secondary: Secondary IPv4 DNS
-            ipv6_primary: Primary IPv6 DNS
-            ipv6_secondary: Secondary IPv6 DNS
-
+            ipv4_primary: Первичный IPv4 DNS
+            ipv4_secondary: Вторичный IPv4 DNS
+            ipv6_primary: Первичный IPv6 DNS
+            ipv6_secondary: Вторичный IPv6 DNS
+            
         Returns:
-            Tuple (valid, error message)
+            Кортеж (валидно, сообщение об ошибке)
         """
-        # Validate IPv4 (if specified)
+        # Валидация IPv4 (если указан)
         if ipv4_primary and ipv4_primary.strip():
             valid, msg = DNSValidator.validate_dns_pair(
                 ipv4_primary, ipv4_secondary, "IPv4"
             )
             if not valid:
                 return valid, msg
-
-        # Validate IPv6 (if specified)
+        
+        # Валидация IPv6 (если указан)
         if ipv6_primary and ipv6_primary.strip():
             valid, msg = DNSValidator.validate_dns_pair(
                 ipv6_primary, ipv6_secondary, "IPv6"
             )
             if not valid:
                 return valid, msg
-
-        # Check that at least one family is specified
+        
+        # Проверка что хотя бы одно семейство указано
         if not ipv4_primary and not ipv4_secondary and not ipv6_primary and not ipv6_secondary:
-            return False, "DNS servers not specified"
-
+            return False, "Не указаны DNS-серверы"
+        
         return True, "OK"
