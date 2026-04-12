@@ -14,21 +14,21 @@ from ui.compat_widgets import ActionButton, RefreshButton, SettingsCard
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.widgets.direct_zapret2_strategies_tree import DirectZapret2StrategiesTree
 from ui.text_catalog import tr as tr_catalog
-from core.presets.ui.strategy_detail_shared import (
+from filters.strategy_detail.shared import (
     build_detail_subtitle_widgets,
     build_strategies_tree_widget,
     run_args_editor_dialog,
 )
-from preset_zapret2.ui.strategy_detail.apply import apply_tree_selected_strategy_state
-from preset_zapret1.ui.strategy_detail.controller import StrategyDetailPageV1Controller
-from preset_zapret1.ui.strategy_detail.build import build_strategy_detail_v1_main_sections
-from preset_zapret1.ui.strategy_detail.build import build_strategy_detail_v1_header
-from preset_zapret1.ui.strategy_detail.args import ArgsEditorDialogV1
-from preset_zapret1.ui.strategy_detail.args_workflow import (
+from filters.strategy_detail.zapret2.apply import apply_tree_selected_strategy_state
+from filters.strategy_detail.zapret1.controller import StrategyDetailPageV1Controller
+from filters.strategy_detail.zapret1.build import build_strategy_detail_v1_main_sections
+from filters.strategy_detail.zapret1.build import build_strategy_detail_v1_header
+from filters.strategy_detail.zapret1.args import ArgsEditorDialogV1
+from filters.strategy_detail.zapret1.args_workflow import (
     open_args_editor_dialog_v1,
     save_custom_args_v1,
 )
-from preset_zapret1.ui.strategy_detail.data_helpers import (
+from filters.strategy_detail.zapret1.data_helpers import (
     get_target_details_v1,
     load_current_strategy_id_v1,
     load_target_filter_mode_v1,
@@ -36,26 +36,26 @@ from preset_zapret1.ui.strategy_detail.data_helpers import (
     require_app_context_v1,
     target_supports_filter_switch_v1,
 )
-from preset_zapret1.ui.strategy_detail.feedback_helpers import (
+from filters.strategy_detail.zapret1.feedback_helpers import (
     hide_success_feedback_v1,
     show_loading_feedback_v1,
     show_success_feedback_v1,
 )
-from preset_zapret1.ui.strategy_detail.filtering_helpers import (
+from filters.strategy_detail.zapret1.filtering_helpers import (
     apply_search_filter_v1,
     apply_sort_mode_v1,
     normalize_search_text,
     rebuild_tree_rows_v1,
     resolve_sort_mode_change,
 )
-from preset_zapret1.ui.strategy_detail.payload_workflow import (
+from filters.strategy_detail.zapret1.payload_workflow import (
     apply_loaded_target_payload_v1,
     apply_missing_payload_v1,
     apply_preset_refresh_v1,
     handle_loaded_payload_v1,
     start_target_payload_request_v1,
 )
-from preset_zapret1.ui.strategy_detail.page_workflow import (
+from filters.strategy_detail.zapret1.page_workflow import (
     activate_page_v1,
     bind_ui_state_store_v1,
     cleanup_page_v1,
@@ -65,12 +65,12 @@ from preset_zapret1.ui.strategy_detail.page_workflow import (
     reload_target_v1,
     show_target_v1,
 )
-from preset_zapret1.ui.strategy_detail.selection_workflow import (
+from filters.strategy_detail.zapret1.selection_workflow import (
     handle_enable_toggle_v1,
     handle_filter_mode_change_v1,
     handle_strategy_selection_v1,
 )
-from preset_zapret1.ui.strategy_detail.runtime_helpers import (
+from filters.strategy_detail.zapret1.runtime_helpers import (
     apply_strategy_detail_v1_language,
     refresh_args_preview,
     sync_target_controls,

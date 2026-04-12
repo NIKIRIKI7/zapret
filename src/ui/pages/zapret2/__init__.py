@@ -8,7 +8,7 @@ from importlib import import_module
 _PAGE_EXPORTS: dict[str, tuple[str, str]] = {
     "Zapret2DirectControlPage": ("dpi.ui.direct_zapret2.page", "Zapret2DirectControlPage"),
     "Zapret2StrategiesPageNew": ("filters.pages.direct_zapret2_targets_page", "Zapret2StrategiesPageNew"),
-    "StrategyDetailPage": ("preset_zapret2.ui.strategy_detail.page", "StrategyDetailPage"),
+    "StrategyDetailPage": ("filters.strategy_detail.zapret2.page", "StrategyDetailPage"),
     "Zapret2PresetDetailPage": ("preset_zapret2.ui.preset_detail_page", "Zapret2PresetDetailPage"),
     "Zapret2UserPresetsPage": ("preset_zapret2.ui.user_presets_page", "Zapret2UserPresetsPage"),
 }

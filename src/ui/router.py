@@ -79,7 +79,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET2_STRATEGY_DETAIL: PageRouteSpec(
         page_name=PageName.ZAPRET2_STRATEGY_DETAIL,
         attr_name="strategy_detail_page",
-        module_name="preset_zapret2.ui.strategy_detail.page",
+        module_name="filters.strategy_detail.zapret2.page",
         class_name="StrategyDetailPage",
         route_key="StrategyDetailPage",
         is_top_level=False,
@@ -139,7 +139,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET1_STRATEGY_DETAIL: PageRouteSpec(
         page_name=PageName.ZAPRET1_STRATEGY_DETAIL,
         attr_name="zapret1_strategy_detail_page",
-        module_name="preset_zapret1.ui.strategy_detail.page",
+        module_name="filters.strategy_detail.zapret1.page",
         class_name="Zapret1StrategyDetailPage",
         route_key="Zapret1StrategyDetailPage",
         is_top_level=False,

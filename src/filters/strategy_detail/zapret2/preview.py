@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.presets.ui.strategy_detail_z2 import ensure_preview_dialog, show_strategy_preview_dialog
+from filters.strategy_detail.zapret2.common import ensure_preview_dialog, show_strategy_preview_dialog
 
 
 def close_preview_dialog(preview_dialog, *, preview_pinned: bool, force: bool = False) -> tuple[object | None, bool]:

@@ -635,7 +635,7 @@ class StrategyDetailPageController:
         loaded_tcp_phase_mode: bool,
         tr,
     ) -> StrategyDetailPayloadApplyPlan:
-        from preset_zapret2.ui.strategy_detail.mode_policy import build_strategy_detail_mode_policy
+        from filters.strategy_detail.zapret2.mode_policy import build_strategy_detail_mode_policy
 
         target_info = getattr(payload, "target_item", None)
         policy = build_strategy_detail_mode_policy(
@@ -698,7 +698,7 @@ class StrategyDetailPageController:
         custom_strategy_id: str,
         tr,
     ) -> StrategyDetailStrategiesLoadPlan:
-        from preset_zapret2.ui.strategy_detail.mode_policy import build_strategy_detail_mode_policy
+        from filters.strategy_detail.zapret2.mode_policy import build_strategy_detail_mode_policy
 
         resolved_policy = policy or build_strategy_detail_mode_policy(
             target_info,
@@ -1250,7 +1250,7 @@ class StrategyDetailPageController:
                 "send_ip_id": "none",
                 "send_badsum": False,
             }
-            from preset_zapret2.ui.strategy_detail.mode_policy import is_udp_like_protocol
+            from filters.strategy_detail.zapret2.mode_policy import is_udp_like_protocol
 
             if is_udp_like_protocol(protocol):
                 fallback["enabled"] = False

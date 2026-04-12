@@ -65,8 +65,8 @@ from strategy_menu.args_preview_dialog import ArgsPreviewDialog
 from blobs.service import get_blobs_info
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from log import log
-from preset_zapret2.ui.strategy_detail.controller import StrategyDetailPageController
-from preset_zapret2.ui.strategy_detail.apply import (
+from filters.strategy_detail.zapret2.controller import StrategyDetailPageController
+from filters.strategy_detail.zapret2.apply import (
     apply_args_editor_state,
     apply_current_strategy_tree_state,
     apply_filter_mode_selector_state,
@@ -84,12 +84,12 @@ from preset_zapret2.ui.strategy_detail.apply import (
     apply_target_payload_shell_state,
     apply_tree_selected_strategy_state,
 )
-from core.presets.ui.strategy_detail_shared import (
+from filters.strategy_detail.shared import (
     build_detail_subtitle_widgets,
     build_strategies_tree_widget,
     run_args_editor_dialog,
 )
-from core.presets.ui.strategy_detail_z2 import (
+from filters.strategy_detail.zapret2.common import (
     STRATEGY_TECHNIQUE_FILTERS,
     TCP_EMBEDDED_FAKE_TECHNIQUES,
     TCP_PHASE_COMMAND_ORDER,
@@ -106,19 +106,19 @@ from core.presets.ui.strategy_detail_z2 import (
     prepare_compact_setting_group as _prepare_compact_setting_group,
     tr_text as _tr_text,
 )
-from preset_zapret2.ui.strategy_detail.mode_policy import StrategyDetailModePolicy
+from filters.strategy_detail.zapret2.mode_policy import StrategyDetailModePolicy
 from preset_zapret2.ui.preset_dialogs import PresetNameDialog
-from preset_zapret2.ui.strategy_detail.args_editor import (
+from filters.strategy_detail.zapret2.args_editor import (
     hide_args_editor_state,
     open_args_editor_dialog,
     refresh_args_editor_state,
 )
-from preset_zapret2.ui.strategy_detail.preset_workflow import (
+from filters.strategy_detail.zapret2.preset_workflow import (
     present_preset_action_result,
     present_preset_exception,
     prompt_preset_name,
 )
-from preset_zapret2.ui.strategy_detail.filtering_ui import (
+from filters.strategy_detail.zapret2.filtering_ui import (
     apply_filter_plan_to_tree,
     apply_sort_plan_to_tree,
     populate_sort_combo,
@@ -126,40 +126,40 @@ from preset_zapret2.ui.strategy_detail.filtering_ui import (
     update_strategies_summary,
     update_technique_filter_ui,
 )
-from preset_zapret2.ui.strategy_detail.tcp_phase_ui import (
+from filters.strategy_detail.zapret2.tcp_phase_ui import (
     apply_tcp_phase_tabs_visibility,
     select_default_tcp_phase_tab,
     set_active_phase_chip,
     sync_tree_selection_to_active_phase,
     update_tcp_phase_chip_markers,
 )
-from preset_zapret2.ui.strategy_detail.tcp_phase_workflow import (
+from filters.strategy_detail.zapret2.tcp_phase_workflow import (
     apply_tcp_phase_row_click_result,
     apply_tcp_phase_save_result,
     build_strategy_args_lookup,
     load_tcp_phase_state,
 )
-from preset_zapret2.ui.strategy_detail.sort_menu import show_sort_menu
-from preset_zapret2.ui.strategy_detail.target_ui import (
+from filters.strategy_detail.zapret2.sort_menu import show_sort_menu
+from filters.strategy_detail.zapret2.target_ui import (
     set_target_block_dimmed,
     set_target_enabled_ui,
 )
-from preset_zapret2.ui.strategy_detail.target_payload_workflow import (
+from filters.strategy_detail.zapret2.target_payload_workflow import (
     apply_preset_refresh,
     handle_loaded_payload,
     start_target_payload_request,
 )
-from preset_zapret2.ui.strategy_detail.target_payload_apply import (
+from filters.strategy_detail.zapret2.target_payload_apply import (
     apply_payload_reuse_plan,
     finalize_target_payload_apply_ui,
     prepare_target_payload_apply_ui,
 )
-from preset_zapret2.ui.strategy_detail.preview import (
+from filters.strategy_detail.zapret2.preview import (
     close_preview_dialog,
     ensure_preview_dialog_instance,
     show_preview_dialog_for_strategy,
 )
-from preset_zapret2.ui.strategy_detail.helpers import (
+from filters.strategy_detail.zapret2.helpers import (
     TTLButtonSelector,
     extract_desync_technique_from_arg as _extract_desync_technique_from_arg,
     map_desync_technique_to_tcp_phase as _map_desync_technique_to_tcp_phase,
