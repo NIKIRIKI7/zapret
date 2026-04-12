@@ -1120,3 +1120,137 @@ class _TrayMessageWindow:
             log(f"Ошибка обработки native tray message: {e}", "DEBUG")
 
         return user32.DefWindowProcW(hwnd, message, w_param, l_param)
+
+
+# ============================================================================
+# LINUX IMPLEMENTATION (QSystemTrayIcon)
+# ============================================================================
+if sys.platform.startswith("linux"):
+    from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QApplication
+    from PyQt6.QtGui import QIcon, QAction
+    from PyQt6.QtCore import QObject, pyqtSignal
+
+    class LinuxTrayManager(QObject):
+        """
+        Реализация системного трея для Linux на базе Qt QSystemTrayIcon.
+        Заменяет низкоуровневые WinAPI вызовы (NOTIFYICONDATAW) из Windows-версии.
+        Использует сигналы (pyqtSignal) вместо оконных сообщений (WM_COMMAND).
+        """
+
+        # Сигналы, эквивалентные константам CMD_* в Windows
+        cmd_show_window = pyqtSignal()
+        cmd_hide_to_tray = pyqtSignal()
+        cmd_toggle_proxy = pyqtSignal()
+        cmd_open_console = pyqtSignal()
+        cmd_exit_only = pyqtSignal()
+        cmd_exit_and_stop = pyqtSignal()
+        cmd_set_opacity = pyqtSignal(int)  # передаёт % прозрачности
+
+        def __init__(self, main_window, app_name="Zapret2", icon_path=None):
+            super().__init__(main_window)
+            self.main_window = main_window
+            self.app_name = app_name
+
+            # Инициализация системного трея
+            self.tray_icon = QSystemTrayIcon(self)
+
+            # Установка иконки
+            self._setup_icon(icon_path)
+            self.tray_icon.setToolTip(self.app_name)
+
+            # Создание контекстного меню
+            self.menu = QMenu()
+            self._build_menu()
+            self.tray_icon.setContextMenu(self.menu)
+
+            # Обработка кликов по иконке
+            self.tray_icon.activated.connect(self._on_activated)
+
+        def _setup_icon(self, icon_path):
+            """Загружает иконку или использует стандартную из системы"""
+            if icon_path and os.path.exists(icon_path):
+                self.tray_icon.setIcon(QIcon(icon_path))
+            else:
+                # Фоллбэк: ищем системную иконку сети/щита
+                fallback_icon = QIcon.fromTheme("network-wired")
+                if fallback_icon.isNull():
+                    fallback_icon = QIcon.fromTheme("security-high")
+                if fallback_icon.isNull():
+                    fallback_icon = QIcon.fromTheme("application-x-executable")
+                self.tray_icon.setIcon(fallback_icon)
+
+        def _build_menu(self):
+            """Сборка контекстного меню трея"""
+
+            # Показать окно
+            action_show = QAction("Показать окно", self)
+            action_show.triggered.connect(self.cmd_show_window.emit)
+            self.menu.addAction(action_show)
+
+            # Скрыть окно
+            action_hide = QAction("Скрыть в трей", self)
+            action_hide.triggered.connect(self.cmd_hide_to_tray.emit)
+            self.menu.addAction(action_hide)
+
+            self.menu.addSeparator()
+
+            # Утилиты
+            action_proxy = QAction("Переключить прокси", self)
+            action_proxy.triggered.connect(self.cmd_toggle_proxy.emit)
+            self.menu.addAction(action_proxy)
+
+            action_console = QAction("Открыть консоль", self)
+            action_console.triggered.connect(self.cmd_open_console.emit)
+            self.menu.addAction(action_console)
+
+            self.menu.addSeparator()
+
+            # Подменю прозрачности (Opacity)
+            opacity_menu = self.menu.addMenu("Прозрачность")
+            for percent in [100, 90, 80, 70, 60, 50]:
+                action_op = QAction(f"{percent}%", self)
+                action_op.triggered.connect(lambda checked, p=percent: self.cmd_set_opacity.emit(p))
+                opacity_menu.addAction(action_op)
+
+            self.menu.addSeparator()
+
+            # Выход
+            action_exit = QAction("Выход (оставить процессы)", self)
+            action_exit.triggered.connect(self.cmd_exit_only.emit)
+            self.menu.addAction(action_exit)
+
+            action_exit_stop = QAction("Выход и остановка Zapret", self)
+            action_exit_stop.triggered.connect(self.cmd_exit_and_stop.emit)
+            self.menu.addAction(action_exit_stop)
+
+        def _on_activated(self, reason):
+            """Обработчик действий с треем (ЛКМ, СКМ)"""
+            if reason == QSystemTrayIcon.ActivationReason.Trigger:
+                # ЛКМ: переключаем видимость окна
+                if self.main_window.isHidden() or self.main_window.isMinimized():
+                    self.cmd_show_window.emit()
+                else:
+                    self.cmd_hide_to_tray.emit()
+
+        def show_message(self, title: str, msg: str, timeout_ms: int = 3000):
+            """Показывает системное уведомление (в Linux маршрутизируется через D-Bus)"""
+            if self.tray_icon.supportsMessages():
+                self.tray_icon.showMessage(
+                    title,
+                    msg,
+                    QSystemTrayIcon.MessageIcon.Information,
+                    timeout_ms
+                )
+            else:
+                log(f"Уведомление: {title} - {msg}", "INFO")
+
+        def start(self):
+            """Запуск отображения трея"""
+            self.tray_icon.show()
+            log("Системный трей (Linux/Qt) запущен", "INFO")
+
+        def stop(self):
+            """Освобождение ресурсов трея перед закрытием приложения"""
+            self.tray_icon.hide()
+            log("Системный трей (Linux/Qt) остановлен", "DEBUG")
+

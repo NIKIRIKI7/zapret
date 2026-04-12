@@ -1,23 +1,26 @@
 # direct_launch/runners/zapret2_runner.py
 """
-Strategy runner for Zapret 2 (winws2.exe) with hot-reload support.
+Strategy runner for Zapret 2 (winws2.exe / nfqws2) with hot-reload support.
 
 This version:
 - Supports hot-reload via ConfigFileWatcher
 - Monitors the preset file for changes
 - Automatically restarts process when config changes
-- Uses winws2.exe executable
+- Uses winws2.exe (Windows) or nfqws2 (Linux) executable
+- On Linux: manages iptables rules for NFQUEUE redirect
 """
 
 import os
 import re
 import subprocess
+import sys
 import time
 import threading
 from typing import Optional
 
 from log import log
 from .runner_base import StrategyRunnerBase
+from .constants import CREATE_NO_WINDOW, IS_LINUX
 from .preset_runner_support import (
     controller_transition_in_progress,
     ConfigFileWatcher,
@@ -40,10 +43,13 @@ from core.direct_preset_core.common.circular_preset_support import (
     is_circular_source_preset,
     normalize_action_lines_for_preset,
 )
-from .constants import CREATE_NO_WINDOW
 from direct_launch.health.process_health_check import (
     diagnose_startup_error
 )
+
+# Linux iptables manager
+if IS_LINUX:
+    from platform.iptables_manager import IptablesManager
 
 
 _WINDOWS_ABS_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
@@ -154,12 +160,13 @@ def _strip_outer_quotes(value: str) -> str:
 
 class StrategyRunnerV2(StrategyRunnerBase):
     """
-    Runner for Zapret 2 (winws2.exe) with hot-reload support.
+    Runner for Zapret 2 (winws2.exe / nfqws2) with hot-reload support.
 
     Features:
     - Hot-reload: automatically restarts when the preset file changes
     - Full Lua support
-    - Uses winws2.exe executable
+    - Uses winws2.exe (Windows) or nfqws2 (Linux) executable
+    - On Linux: manages iptables rules for NFQUEUE redirect
     """
 
     def __init__(self, winws_exe_path: str):
@@ -167,7 +174,7 @@ class StrategyRunnerV2(StrategyRunnerBase):
         Initialize V2 strategy runner.
 
         Args:
-            winws_exe_path: Path to winws2.exe
+            winws_exe_path: Path to winws2.exe (Windows) or nfqws2 (Linux)
         """
         super().__init__(winws_exe_path)
         self._config_watcher: Optional[ConfigFileWatcher] = None
@@ -180,7 +187,13 @@ class StrategyRunnerV2(StrategyRunnerBase):
         self._last_spawn_exit_code: Optional[int] = None
         self._last_spawn_stderr: str = ""
 
-        log(f"StrategyRunnerV2 initialized with hot-reload support", "INFO")
+        # Linux: iptables manager for NFQUEUE redirect
+        if IS_LINUX:
+            self._iptables_manager: Optional[IptablesManager] = IptablesManager(queue_num=200)
+            log("StrategyRunnerV2 initialized with iptables support (Linux)", "INFO")
+        else:
+            self._iptables_manager = None
+            log(f"StrategyRunnerV2 initialized with hot-reload support", "INFO")
 
     def _set_last_error(self, message: Optional[str]) -> None:
         try:

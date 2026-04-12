@@ -211,7 +211,7 @@ class StrategyRunnerBase(ABC):
         log("Aggressive cleanup completed", "INFO")
 
     def stop(self) -> bool:
-        """Stops running process"""
+        """Stops running process and cleans up platform-specific resources."""
         try:
             success = True
 
@@ -234,10 +234,12 @@ class StrategyRunnerBase(ABC):
             else:
                 log("No running process to stop", "INFO")
 
-            # Additional cleanup
-            self._stop_windivert_service()
-            self._stop_monkey_service()
-            self._kill_all_winws_processes()
+            # Platform-specific cleanup
+            if IS_WINDOWS:
+                self._stop_windivert_service()
+                self._stop_monkey_service()
+                self._kill_all_winws_processes()
+            # Linux: iptables cleanup handled by runner or iptables_manager
 
             # Clear state
             self._clear_process_runtime_state()
@@ -263,6 +265,34 @@ class StrategyRunnerBase(ABC):
             stop_and_delete_service(service_name, retry_count=5)
         except Exception as e:
             log(f"Force delete service {service_name} error: {e}", "DEBUG")
+
+    def _setup_linux_iptables(self, preset_content: str | None = None) -> bool:
+        """Настроить iptables для nfqws (Linux only)."""
+        if not IS_LINUX:
+            return True
+
+        try:
+            from platform.iptables_manager import IptablesManager
+            manager = IptablesManager(queue_num=200)
+            success = manager.setup(preset_content=preset_content)
+            if success:
+                log("✅ iptables правила для nfqws применены", "INFO")
+            return success
+        except Exception as e:
+            log(f"⚠ Ошибка настройки iptables: {e}", "WARNING")
+            return False
+
+    def _cleanup_linux_iptables(self) -> None:
+        """Очистить iptables правила для nfqws (Linux only)."""
+        if not IS_LINUX:
+            return
+
+        try:
+            from platform.iptables_manager import IptablesManager
+            manager = IptablesManager(queue_num=200)
+            manager.cleanup()
+        except Exception as e:
+            log(f"⚠ Ошибка очистки iptables: {e}", "DEBUG")
 
     def _kill_all_winws_processes(self):
         """Forcefully terminates all winws.exe and winws2.exe processes via Win API"""

@@ -1,17 +1,47 @@
 from __future__ import annotations
 
 import atexit
-import ctypes
 import os
 import shutil
 import subprocess
 import sys
 import time
 
-from config import APP_VERSION
+from config import APP_VERSION, IS_WINDOWS, IS_LINUX
 from log import log
 from startup.admin_check import is_admin
 from utils import run_hidden
+
+
+def _show_message_box(title: str, message: str, *, error: bool = False) -> None:
+    """Показывает сообщение — platform-aware.
+    
+    Windows: ctypes.windll MessageBoxW
+    Linux: Qt QMessageBox (если QApplication существует) или print
+    """
+    if IS_WINDOWS:
+        import ctypes
+        icon = 0x10 if error else 0x40  # MB_ICONERROR or MB_ICONINFORMATION
+        try:
+            ctypes.windll.user32.MessageBoxW(None, message, title, icon)
+        except Exception:
+            print(f"[{title}] {message}")
+    else:
+        # Linux: try Qt, fallback to print
+        try:
+            from PyQt6.QtWidgets import QMessageBox, QApplication
+            app = QApplication.instance()
+            if app is not None:
+                icon = QMessageBox.Critical if error else QMessageBox.Information
+                msg_box = QMessageBox()
+                msg_box.setIcon(icon)
+                msg_box.setWindowTitle(title)
+                msg_box.setText(message)
+                msg_box.exec()
+                return
+        except Exception:
+            pass
+        print(f"[{title}] {message}")
 
 
 def handle_update_mode(argv: list[str] | None = None) -> None:
@@ -44,7 +74,7 @@ def shell_bootstrap(argv: list[str] | None = None) -> bool:
     args = list(argv or sys.argv)
 
     if "--version" in args:
-        ctypes.windll.user32.MessageBoxW(None, APP_VERSION, "Zapret – версия", 0x40)
+        _show_message_box("Zapret – версия", APP_VERSION)
         sys.exit(0)
 
     if "--update" in args and len(args) > 3:
@@ -53,25 +83,32 @@ def shell_bootstrap(argv: list[str] | None = None) -> bool:
 
     start_in_tray = "--tray" in args
 
+    # Linux: check root via is_admin() (uses geteuid), no ShellExecuteW needed
     if not is_admin():
-        params = subprocess.list2cmdline(list(args[1:]))
-        shell_exec_result = ctypes.windll.shell32.ShellExecuteW(
-            None,
-            "runas",
-            sys.executable,
-            params,
-            None,
-            1,
-        )
-        if int(shell_exec_result) <= 32:
-            ctypes.windll.user32.MessageBoxW(
-                None,
-                "Не удалось запросить права администратора.",
-                "Zapret",
-                0x10,
-            )
-        sys.exit(0)
+        if IS_LINUX:
+            # admin_check.ensure_admin_rights() already handles pkexec + sys.exit(0)
+            from startup.admin_check import ensure_admin_rights
+            ensure_admin_rights()
+            # If we get here, pkexec failed or was cancelled
+            _show_message_box("Zapret", "Не удалось получить права root.", error=True)
+            sys.exit(1)
 
+        if IS_WINDOWS:
+            params = subprocess.list2cmdline(list(args[1:]))
+            import ctypes
+            shell_exec_result = ctypes.windll.shell32.ShellExecuteW(
+                None,
+                "runas",
+                sys.executable,
+                params,
+                None,
+                1,
+            )
+            if int(shell_exec_result) <= 32:
+                _show_message_box("Zapret", "Не удалось запросить права администратора.", error=True)
+            sys.exit(0)
+
+    # Single instance check (platform-aware: Mutex on Windows, fcntl on Linux)
     from startup.single_instance import create_mutex, release_mutex
     from startup.ipc_manager import IPCManager
 
@@ -81,11 +118,9 @@ def shell_bootstrap(argv: list[str] | None = None) -> bool:
         if ipc.send_show_command():
             log("Отправлена команда показать окно запущенному экземпляру", "INFO")
         else:
-            ctypes.windll.user32.MessageBoxW(
-                None,
-                "Экземпляр Zapret уже запущен, но не удалось показать окно!",
+            _show_message_box(
                 "Zapret",
-                0x40,
+                "Экземпляр Zapret уже запущен, но не удалось показать окно!",
             )
         sys.exit(0)
 

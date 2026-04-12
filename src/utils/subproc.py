@@ -11,18 +11,20 @@ from functools import lru_cache
 
 import ctypes
 
+IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
+
 # WinAPI функции для получения системных путей
-if hasattr(ctypes, "windll"):
+if IS_WINDOWS and hasattr(ctypes, "windll"):
     _kernel32 = ctypes.windll.kernel32
 else:
     _kernel32 = None
 
 
-@lru_cache(maxsize=1)
 def get_system32_path() -> str:
     """
-    Возвращает путь к System32 через WinAPI GetSystemDirectoryW.
-    Работает на любом диске (C:, D:, и т.д.).
+    Возвращает путь к System32 через WinAPI GetSystemDirectoryW (Windows).
+    На Linux возвращает /usr/bin.
     """
     if _kernel32 is not None:
         buf = ctypes.create_unicode_buffer(260)
@@ -33,32 +35,34 @@ def get_system32_path() -> str:
     system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
     if system_root:
         return os.path.join(system_root, "System32")
-    if os.name != "nt":
-        return "/usr/bin"
-    return r"C:\Windows\System32"
+    # Linux path
+    return "/usr/bin"
 
 
 @lru_cache(maxsize=1)
 def get_windows_path() -> str:
     """
-    Возвращает путь к Windows через WinAPI GetWindowsDirectoryW.
+    Возвращает путь к Windows через WinAPI GetWindowsDirectoryW (Windows).
+    На Linux возвращает '/'.
     """
     if _kernel32 is not None:
         buf = ctypes.create_unicode_buffer(260)
         length = _kernel32.GetWindowsDirectoryW(buf, 260)
         if length > 0:
             return buf.value
-    if os.name != "nt":
-        return "/"
-    return os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
+    return "/"
 
 
 @lru_cache(maxsize=1)
 def get_syswow64_path() -> str:
     """
     Возвращает путь к SysWOW64 (32-битные программы на 64-битной Windows).
+    На Linux возвращает '/usr/lib32'.
     """
-    return os.path.join(get_windows_path(), "SysWOW64")
+    win_path = get_windows_path()
+    if win_path != "/":
+        return os.path.join(win_path, "SysWOW64")
+    return "/usr/lib32"
 
 
 def get_system_exe(exe_name: str) -> str:
@@ -68,33 +72,38 @@ def get_system_exe(exe_name: str) -> str:
     """
     return os.path.join(get_system32_path(), exe_name)
 
-# Максимальный набор флагов для полного скрытия окон
+# Максимальный набор флагов для полного скрытия окон (Windows only).
 # NOTE: `CREATE_NEW_CONSOLE` can cause a visible console window (or "ghost" artifacts)
 # on some systems when combined with translucency/frameless Qt windows.
 # We keep `CREATE_NO_WINDOW` + `DETACHED_PROCESS` for reliably hidden execution.
-WIN_FLAGS = (
-    (
-        getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        | getattr(subprocess, "DETACHED_PROCESS", 0)
-        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        | 0x00000008  # CREATE_BREAKAWAY_FROM_JOB
+# На Linux эти флаги не используются.
+if IS_WINDOWS:
+    WIN_FLAGS = (
+        (
+            getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | 0x00000008  # CREATE_BREAKAWAY_FROM_JOB
+        )
     )
-)
+else:
+    WIN_FLAGS = 0
 
 WIN_OEM   = "cp866"
 UTF8      = "utf-8"
 
 
 def _default_encoding() -> str:
-    return WIN_OEM if os.name == "nt" else UTF8
+    return WIN_OEM if IS_WINDOWS else UTF8
 
 
-def _hidden_startupinfo() -> subprocess.STARTUPINFO:
-    if not hasattr(subprocess, "STARTUPINFO"):
-        return None  # type: ignore[return-value]
+def _hidden_startupinfo() -> subprocess.STARTUPINFO | None:
+    """Создаёт STARTUPINFO для скрытия окна (только Windows)."""
+    if not IS_WINDOWS or not hasattr(subprocess, "STARTUPINFO"):
+        return None
     si = subprocess.STARTUPINFO()
     # Используем только существующие константы из subprocess
-    si.dwFlags |= (subprocess.STARTF_USESHOWWINDOW | 
+    si.dwFlags |= (subprocess.STARTF_USESHOWWINDOW |
                    subprocess.STARTF_USESTDHANDLES)
     si.wShowWindow = subprocess.SW_HIDE
     return si
@@ -103,11 +112,12 @@ def _hidden_startupinfo() -> subprocess.STARTUPINFO:
 def _prepare_cmd(cmd, use_shell: bool):
     """
     Если caller хочет shell=True / передал строку,
-    превращаем это в ['cmd','/Q','/C', ...] + shell=False,
+    превращаем это в ['cmd','/Q','/C', ...] + shell=False (Windows),
     чтобы всё равно прятать окно.
+    На Linux не меняем команду.
     """
-    if sys.platform != "win32":
-        return cmd, use_shell      # на *nix не меняем
+    if not IS_WINDOWS:
+        return cmd, use_shell      # на Linux не меняем
 
     cmd_exe = get_system_exe("cmd.exe")
 
@@ -144,7 +154,7 @@ def run_hidden(cmd: Union[str, Sequence[str]],
     cmd, shell = _prepare_cmd(cmd, shell)
 
     # --- Windows: прячем окно ---
-    if sys.platform == "win32":
+    if IS_WINDOWS:
         kw.setdefault("creationflags", WIN_FLAGS)
         kw.setdefault("startupinfo", _hidden_startupinfo())
         
@@ -195,7 +205,7 @@ def run_hidden(cmd: Union[str, Sequence[str]],
             return subprocess.Popen(cmd, shell=shell, **kw)
     except Exception as e:
         # Если не удалось с агрессивными флагами, пробуем с базовыми
-        if sys.platform == "win32" and "creationflags" in kw:
+        if IS_WINDOWS and "creationflags" in kw:
             kw["creationflags"] = subprocess.CREATE_NO_WINDOW
             if need_run:
                 return subprocess.run(cmd, shell=shell, **kw)
