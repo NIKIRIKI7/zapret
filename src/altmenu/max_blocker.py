@@ -1,18 +1,29 @@
 """
-Модуль для блокировки установки и работы программы MAX
+Модуль для блокировки установки и работы программы MAX (Windows-only feature)
+Linux: no-op stubs (MAX is a Windows program)
 """
 
+import sys
 import os
-import winreg
-import ctypes
-import subprocess
-from pathlib import Path
 from typing import Optional, Callable, List, Tuple
 from log import log
 
-# Ключ в реестре для хранения настройки
-from config import REGISTRY_PATH_GUI
-REGISTRY_KEY_MAX_BLOCKED = "MaxBlocked"
+IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
+
+# Windows-only imports
+if IS_WINDOWS:
+    import winreg
+    import ctypes
+    import subprocess
+    from pathlib import Path
+    from config import REGISTRY_PATH_GUI
+    REGISTRY_KEY_MAX_BLOCKED = "MaxBlocked"
+else:
+    # Linux stubs
+    winreg = None
+    ctypes = None
+    REGISTRY_KEY_MAX_BLOCKED = "MaxBlocked"
 
 # Путь к политикам Explorer для блокировки запуска
 EXPLORER_POLICIES_PATH = r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"

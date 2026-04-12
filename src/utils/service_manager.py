@@ -259,21 +259,24 @@ def cleanup_windivert_services() -> bool:
 
 def unload_driver(driver_name: str) -> bool:
     """
-    Выгружает драйвер через fltmc (через Win API пока не реализовано)
-    
+    Выгружает драйвер через fltmc (Windows only).
+
     Args:
         driver_name: Имя драйвера
-        
+
     Returns:
         True если драйвер выгружен
     """
+    if not IS_WINDOWS:
+        return False  # fltmc is Windows-only
+
     try:
         import subprocess
-        
+
         result = subprocess.run(
             ["fltmc", "unload", driver_name],
             capture_output=True,
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            creationflags=0x08000000 if IS_WINDOWS else 0,  # CREATE_NO_WINDOW
             timeout=3
         )
         

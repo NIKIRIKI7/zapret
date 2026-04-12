@@ -284,10 +284,11 @@ class NetworkPageController:
         for name, host in test_hosts:
             try:
                 result = subprocess.run(
-                    ["ping", "-n", "1", "-w", "2000", host],
+                    ["ping", "-n", "1", "-w", "2000", host] if sys.platform == "win32"
+                    else ["ping", "-c", "1", "-W", "2", host],
                     capture_output=True,
                     text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
                 )
                 results.append((name, host, result.returncode == 0))
             except Exception:

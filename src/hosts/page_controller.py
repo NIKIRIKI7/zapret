@@ -884,13 +884,29 @@ class HostsPageController:
     def open_hosts_file() -> HostsOperationResult:
         import ctypes
         import os
+        import sys
 
         hosts_path = HostsPageController.get_hosts_path_str()
         if not os.path.exists(hosts_path):
             return HostsOperationResult(False, f"Файл не найден: {hosts_path}")
 
         try:
-            ctypes.windll.shell32.ShellExecuteW(None, "runas", "notepad.exe", hosts_path, None, 1)
+            if sys.platform == "win32":
+                import ctypes
+                ctypes.windll.shell32.ShellExecuteW(None, "runas", "notepad.exe", hosts_path, None, 1)
+            else:
+                # Linux: try pkexec with graphical editor, fallback to sudo nano
+                import subprocess
+                editors = ["gedit", "kate", "xdg-open", "nano"]
+                for editor in editors:
+                    try:
+                        subprocess.Popen(["pkexec", editor, hosts_path])
+                        break
+                    except (FileNotFoundError, subprocess.SubprocessError):
+                        continue
+                else:
+                    # Last resort: sudo nano
+                    subprocess.Popen(["sudo", "nano", hosts_path])
             return HostsOperationResult(True, hosts_path)
         except Exception as exc:
             return HostsOperationResult(False, str(exc))

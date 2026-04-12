@@ -357,10 +357,10 @@ class ControlPageController:
 
     @staticmethod
     def is_user_admin() -> bool:
+        """Проверяет права администратора (platform-aware)."""
         try:
-            import ctypes
-
-            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+            from startup.admin_check import is_admin
+            return is_admin()
         except Exception:
             return False
 

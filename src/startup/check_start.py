@@ -3,7 +3,20 @@ import os
 import sys
 import ctypes
 import subprocess
-import winreg
+
+IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
+
+# Linux: import winreg stub (raises on use)
+# Windows: import real winreg
+if IS_WINDOWS:
+    import winreg
+else:
+    # Stub that raises on use
+    try:
+        import winreg
+    except ImportError:
+        winreg = None
 
 # Импортируем константы из конфига
 from app_notifications import advisory_notification, blocking_notification, notification_action
@@ -16,10 +29,26 @@ import psutil
 
 def _native_message(title: str, text: str, style=0x00000010):  # MB_ICONERROR
     """
-    Показывает нативное окно MessageBox (не требует QApplication)
-    style: 0x10 = MB_ICONERROR,  0x30 = MB_ICONWARNING | MB_YESNO
+    Показывает нативное окно (platform-aware).
+    Windows: MessageBoxW
+    Linux: try notify-send, fallback print
     """
-    ctypes.windll.user32.MessageBoxW(0, text, title, style)
+    if IS_WINDOWS:
+        try:
+            ctypes.windll.user32.MessageBoxW(0, text, title, style)
+        except Exception:
+            print(f"[{title}] {text}")
+    else:
+        # Linux: try notify-send (libnotify)
+        try:
+            import subprocess
+            urgency = "critical" if style & 0x10 else "normal"
+            subprocess.run(
+                ["notify-send", "--urgency", urgency, title, text],
+                timeout=3
+            )
+        except Exception:
+            print(f"[{title}] {text}")
 
 def check_system_commands() -> tuple[bool, str]:
     """

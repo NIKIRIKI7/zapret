@@ -429,7 +429,7 @@ def force_kill_via_taskkill(process_name: str) -> bool:
             capture_output=True,
             text=True,
             encoding='cp866',
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            creationflags=0x08000000 if IS_WINDOWS else 0,  # CREATE_NO_WINDOW
             timeout=10
         )
 
@@ -471,7 +471,7 @@ def kill_via_wmi(process_name: str) -> bool:
             capture_output=True,
             text=True,
             encoding='cp866',
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            creationflags=0x08000000 if IS_WINDOWS else 0,  # CREATE_NO_WINDOW
             timeout=15
         )
 

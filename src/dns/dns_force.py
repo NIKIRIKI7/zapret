@@ -1,16 +1,30 @@
 # dns/dns_force.py
 """
-Менеджер принудительной установки DNS (упрощенная версия на Win32 API)
+Менеджер принудительной установки DNS
+Windows: через Registry
+Linux: через /etc/resolv.conf или systemd-resolved
 """
 from __future__ import annotations
 
-import winreg
+import sys
 import time
 from typing import List, Tuple, Optional, Dict
 import socket
 
+IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
+
+# Platform-aware winreg import
+if IS_WINDOWS:
+    import winreg
+else:
+    try:
+        import winreg  # stub on Linux
+    except ImportError:
+        winreg = None
+
 from log import log
-from config import REGISTRY_PATH
+from config import REGISTRY_PATH, IS_WINDOWS as CONFIG_IS_WINDOWS
 from .dns_core import DNSManager, DEFAULT_EXCLUSIONS, _normalize_alias
 
 # ──────────────────────────────────────────────────────────────────────

@@ -124,7 +124,16 @@ def application_bootstrap() -> QApplication:
 
         install_qt_crash_handler(app)
     except Exception as exc:
-        ctypes.windll.user32.MessageBoxW(None, f"Ошибка инициализации Qt: {exc}", "Zapret", 0x10)
+        import sys
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, f"Ошибка инициализации Qt: {exc}", "Zapret", 0x10)
+        else:
+            try:
+                import subprocess
+                subprocess.run(["notify-send", "--urgency", "critical", "Zapret", f"Ошибка инициализации Qt: {exc}"], timeout=3)
+            except Exception:
+                print(f"[ERROR] Ошибка инициализации Qt: {exc}", file=sys.stderr)
 
     from qfluentwidgets import Theme, setTheme
     from qfluentwidgets.common.config import qconfig

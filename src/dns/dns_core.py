@@ -1,66 +1,86 @@
 # dns/dns_core.py
 """
-Базовые утилиты и DNSManager на Win32 API.
-Быстрая работа без PowerShell/netsh.
+Базовые утилиты и DNSManager.
+Windows: Win32 API (IP Helper, Registry)
+Linux: /etc/resolv.conf, systemd-resolved, NetworkManager
 """
 from __future__ import annotations
 
-import ctypes, socket, struct, platform, sys, winreg
-from ctypes import wintypes, windll, POINTER, Structure, c_ulong, c_wchar_p
+import sys
+import socket
+import platform
 from functools import lru_cache
 from typing import List, Tuple, Dict, Optional
 from log import log
 
+IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
+
 # ──────────────────────────────────────────────────────────────────────
-#  Win32 API структуры и константы
+#  Windows: Win32 API (IP Helper)
+#  Linux: Stub implementations
 # ──────────────────────────────────────────────────────────────────────
 
-# IP Helper API
-iphlpapi = windll.iphlpapi
+if IS_WINDOWS:
+    import ctypes
+    import winreg
+    from ctypes import wintypes, windll, POINTER, Structure, c_ulong, c_wchar_p
 
-# Константы
-MAX_ADAPTER_NAME_LENGTH = 256
-MAX_ADAPTER_DESCRIPTION_LENGTH = 128
-MAX_ADAPTER_ADDRESS_LENGTH = 8
-ERROR_SUCCESS = 0
-ERROR_BUFFER_OVERFLOW = 111
-MIB_IF_TYPE_ETHERNET = 6
-MIB_IF_TYPE_PPP = 23
-MIB_IF_TYPE_LOOPBACK = 24
+    # IP Helper API
+    iphlpapi = windll.iphlpapi
 
-class IP_ADDR_STRING(Structure):
-    pass
+    # Константы
+    MAX_ADAPTER_NAME_LENGTH = 256
+    MAX_ADAPTER_DESCRIPTION_LENGTH = 128
+    MAX_ADAPTER_ADDRESS_LENGTH = 8
+    ERROR_SUCCESS = 0
+    ERROR_BUFFER_OVERFLOW = 111
+    MIB_IF_TYPE_ETHERNET = 6
+    MIB_IF_TYPE_PPP = 23
+    MIB_IF_TYPE_LOOPBACK = 24
 
-IP_ADDR_STRING._fields_ = [
-    ('Next', POINTER(IP_ADDR_STRING)),
-    ('IpAddress', c_wchar_p * 16),
-    ('IpMask', c_wchar_p * 16),
-    ('Context', wintypes.DWORD),
-]
+    class IP_ADDR_STRING(Structure):
+        pass
 
-class IP_ADAPTER_INFO(Structure):
-    pass
+    IP_ADDR_STRING._fields_ = [
+        ('Next', POINTER(IP_ADDR_STRING)),
+        ('IpAddress', c_wchar_p * 16),
+        ('IpMask', c_wchar_p * 16),
+        ('Context', wintypes.DWORD),
+    ]
 
-IP_ADAPTER_INFO._fields_ = [
-    ('Next', POINTER(IP_ADAPTER_INFO)),
-    ('ComboIndex', wintypes.DWORD),
-    ('AdapterName', ctypes.c_char * (MAX_ADAPTER_NAME_LENGTH + 4)),
-    ('Description', ctypes.c_char * (MAX_ADAPTER_DESCRIPTION_LENGTH + 4)),
-    ('AddressLength', wintypes.UINT),
-    ('Address', ctypes.c_byte * MAX_ADAPTER_ADDRESS_LENGTH),
-    ('Index', wintypes.DWORD),
-    ('Type', wintypes.UINT),
-    ('DhcpEnabled', wintypes.UINT),
-    ('CurrentIpAddress', POINTER(IP_ADDR_STRING)),
-    ('IpAddressList', IP_ADDR_STRING),
-    ('GatewayList', IP_ADDR_STRING),
-    ('DhcpServer', IP_ADDR_STRING),
-    ('HaveWins', wintypes.BOOL),
-    ('PrimaryWinsServer', IP_ADDR_STRING),
-    ('SecondaryWinsServer', IP_ADDR_STRING),
-    ('LeaseObtained', ctypes.c_int64),
-    ('LeaseExpires', ctypes.c_int64),
-]
+    class IP_ADAPTER_INFO(Structure):
+        pass
+
+    IP_ADAPTER_INFO._fields_ = [
+        ('Next', POINTER(IP_ADAPTER_INFO)),
+        ('ComboIndex', wintypes.DWORD),
+        ('AdapterName', ctypes.c_char * (MAX_ADAPTER_NAME_LENGTH + 4)),
+        ('Description', ctypes.c_char * (MAX_ADAPTER_DESCRIPTION_LENGTH + 4)),
+        ('AddressLength', wintypes.UINT),
+        ('Address', ctypes.c_byte * MAX_ADAPTER_ADDRESS_LENGTH),
+    ]
+else:
+    # Linux stubs
+    ctypes = None
+    wintypes = None
+    windll = None
+    POINTER = None
+    Structure = None
+    c_ulong = None
+    c_wchar_p = None
+    iphlpapi = None
+    ERROR_SUCCESS = 0
+    ERROR_BUFFER_OVERFLOW = 111
+    MIB_IF_TYPE_ETHERNET = 6
+    MIB_IF_TYPE_PPP = 23
+    MIB_IF_TYPE_LOOPBACK = 24
+    IP_ADDR_STRING = None
+    IP_ADAPTER_INFO = None
+
+# ──────────────────────────────────────────────────────────────────────
+#  DNSManager
+# ──────────────────────────────────────────────────────────────────────
 
 # ──────────────────────────────────────────────────────────────────────
 #  Константы исключений
