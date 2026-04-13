@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
-from log import log
+from log.log import log
+
 
 
 @dataclass(slots=True)

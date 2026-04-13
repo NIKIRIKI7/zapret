@@ -101,7 +101,8 @@ class ControlPageController:
         max_blocked = False
 
         try:
-            from config import get_dpi_autostart
+            from config.reg import get_dpi_autostart
+
 
             auto_dpi_enabled = bool(get_dpi_autostart())
         except Exception:
@@ -130,7 +131,8 @@ class ControlPageController:
     @staticmethod
     def save_auto_dpi(enabled: bool) -> ControlAutoDpiPlan:
         try:
-            from config import set_dpi_autostart
+            from config.reg import set_dpi_autostart
+
 
             set_dpi_autostart(bool(enabled))
         except Exception:
@@ -151,7 +153,8 @@ class ControlPageController:
     def build_stop_button_plan(*, language: str) -> ControlStopButtonPlan:
         try:
             from settings.dpi.strategy_settings import get_strategy_launch_method
-            from config import get_winws_exe_for_method
+            from config.config import get_winws_exe_for_method
+
             from ui.text_catalog import tr as tr_catalog
 
             method = get_strategy_launch_method()

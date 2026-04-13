@@ -48,7 +48,8 @@ def build_app_context(*, initial_ui_state: AppUiState | None = None) -> AppConte
     from app_state.app_runtime_state import AppRuntimeState
     from app_state.launch_runtime_service import LaunchRuntimeService
     from app_state.main_window_state import AppUiState, MainWindowStateStore
-    from config import get_zapret_userdata_dir
+    from config.config import get_zapret_userdata_dir
+
     from winws_runtime.flow.direct_flow import DirectFlowCoordinator
     from core.paths import AppPaths
     from core.presets.preset_file_store import PresetFileStore

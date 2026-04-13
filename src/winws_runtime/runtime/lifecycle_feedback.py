@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QTimer
 
-from log import log
+from log.log import log
+
 from ui.runtime_ui_bridge import ensure_runtime_ui_bridge
 
 def show_launch_error_top(controller, message: str) -> None:
@@ -38,7 +39,7 @@ def verify_dpi_process_running(controller, verify_gen=None):
             log(f"verify_dpi_process_running: refresh_now failed: {e}", "DEBUG")
     elif runtime_service is not None:
         try:
-            from winws_runtime.runtime import get_canonical_winws_process_pids
+            from winws_runtime.runtime.process_probe import get_canonical_winws_process_pids
 
             runtime_service.observe_process_details(get_canonical_winws_process_pids())
         except Exception as e:

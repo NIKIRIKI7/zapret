@@ -38,8 +38,9 @@ from ui.compat_widgets import (
 )
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
-from log import log
-from dns import DNS_PROVIDERS
+from log.log import log
+
+from dns.dns_providers import DNS_PROVIDERS
 from dns.network_page_controller import NetworkPageController
 from dns.ui.adapters import build_adapter_cards, refresh_adapter_cards
 from dns.ui.cards import DNSProviderCard, AdapterCard

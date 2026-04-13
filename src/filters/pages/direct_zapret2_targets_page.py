@@ -24,7 +24,8 @@ from filters.pages.direct_zapret2_targets_selection import (
 )
 from app_state.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
-from log import log
+from log.log import log
+
 
 from qfluentwidgets import (
     BreadcrumbBar,

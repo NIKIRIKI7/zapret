@@ -90,7 +90,8 @@ def _normalize_path(path: str) -> str:
 
 def get_expected_winws_paths() -> dict[str, str]:
     try:
-        from config import WINWS_EXE, WINWS2_EXE
+        from config.config import WINWS_EXE, WINWS2_EXE
+
     except Exception:
         return {}
 

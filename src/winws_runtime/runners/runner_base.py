@@ -7,7 +7,8 @@ import time
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict
 
-from log import log
+from log.log import log
+
 from .args_filters import apply_all_filters
 from .constants import SW_HIDE, CREATE_NO_WINDOW, STARTF_USESHOWWINDOW
 from .preset_runner_support import wait_for_process_exit
@@ -95,7 +96,8 @@ class StrategyRunnerBase(ABC):
 
     def _resolve_file_paths(self, args: List[str]) -> List[str]:
         """Resolves relative file paths"""
-        from config import WINDIVERT_FILTER
+        from config.config import WINDIVERT_FILTER
+
         return resolve_args_paths(args, self.lists_dir, self.bin_dir, WINDIVERT_FILTER)
 
     def _fast_cleanup_services(self):

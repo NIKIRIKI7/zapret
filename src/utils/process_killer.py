@@ -5,7 +5,8 @@
 
 import ctypes
 from ctypes import wintypes
-from log import log
+from log.log import log
+
 from typing import List
 from utils.windows_process_probe import iter_process_records_winapi
 

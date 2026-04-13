@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from log import log
+from log.log import log
+
 
 from ui.page_method_dispatch import dispatch_detail_page_result
 from ui.page_contracts import PageMethodName

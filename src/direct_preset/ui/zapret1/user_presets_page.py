@@ -110,7 +110,8 @@ except ImportError:
 
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from ui.theme_semantic import get_semantic_palette
-from log import log
+from log.log import log
+
 
 _DEFAULT_PRESET_ICON_COLOR = "#5caee8"
 _HEX_COLOR_RGB_RE = re.compile(r"^#(?:[0-9a-fA-F]{6})$")
@@ -121,10 +122,9 @@ _CSS_RGBA_COLOR_RE = re.compile(
 )
 
 
-from ui.presets_menu import (
-    fluent_icon,
-    make_menu_action,
-)
+from ui.presets_menu.common import fluent_icon, make_menu_action
+from ui.presets_menu.delegate import PresetListDelegate
+from ui.presets_menu.model import PresetListModel
 from ui.presets_menu.common import tr_text as _tr_text
 
 

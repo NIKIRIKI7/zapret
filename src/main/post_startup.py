@@ -9,12 +9,13 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 
 from app_notifications import advisory_notification
-from log import is_verbose_logging_enabled, log
+from log.log import is_verbose_logging_enabled, log
+
 from main.runtime_state import is_cpu_diagnostic_enabled
 from ui.window_adapter import get_loaded_page, show_page
 
 if TYPE_CHECKING:
-    from main import LupiDPIApp
+    from main.window import LupiDPIApp
 
 
 def _bind_startup_gate(signal, callback, *, is_ready) -> None:
@@ -364,7 +365,8 @@ def install_post_startup_tasks(window: "LupiDPIApp") -> None:
         if not _window_alive():
             return
         try:
-            from config import get_auto_update_enabled
+            from config.reg import get_auto_update_enabled
+
 
             if not get_auto_update_enabled():
                 log("Автопроверка обновлений при запуске отключена", "🔁 UPDATE")

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import QWidget
 
-from log import log
+from log.log import log
+
 from ui.navigation.layout_plan import (
     build_sidebar_group_plans,
     iter_sidebar_entries_after_page,

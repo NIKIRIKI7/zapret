@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import QWidget, QHBoxLayout
 
 from direct_preset.runtime import DirectBasicUiSnapshotWorker
 from ui.page_dependencies import require_page_app_context
-from filters.ui import TargetsList
+from filters.ui.targets_list import TargetsList
 from filters.runtime.targets_payload_runtime import (
     apply_payload_snapshot,
     clear_dynamic_payload_widgets,
@@ -23,7 +23,8 @@ from ui.compat_widgets import QuickActionsBar, RefreshButton
 from app_state.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
 from ui.theme import get_themed_qta_icon
-from log import log
+from log.log import log
+
 
 from qfluentwidgets import (
     BreadcrumbBar,

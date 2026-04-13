@@ -10,7 +10,8 @@ import time
 from typing import Callable, Optional
 
 from app_notifications import advisory_notification
-from log import log
+from log.log import log
+
 
 try:
     import psutil  # type: ignore[import-not-found]

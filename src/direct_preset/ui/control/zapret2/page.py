@@ -141,7 +141,8 @@ def _log_startup_z2_control_metric(section: str, elapsed_ms: float) -> None:
         rounded = int(round(float(elapsed_ms)))
     except Exception:
         rounded = 0
-    from log import log as _log
+    from log.log import log as _log
+
 
     _log(f"⏱ Startup UI Section: ZAPRET2_DIRECT_CONTROL {section} {rounded}ms", "⏱ STARTUP")
 

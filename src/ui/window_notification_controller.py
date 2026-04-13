@@ -7,7 +7,8 @@ from PyQt6.QtCore import Q_ARG, QMetaObject, QObject, Qt, QTimer, pyqtSlot
 from PyQt6.QtWidgets import QApplication
 
 from app_notifications import advisory_notification, normalize_notification_payload
-from log import global_logger, log
+from log.log import global_logger, log
+
 
 
 class WindowNotificationController(QObject):

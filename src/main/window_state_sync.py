@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 
-from log import log
+from log.log import log
+
 from main.runtime_state import startup_elapsed_ms
 from ui.window_appearance_state import on_animations_changed
 from ui.holiday_effects import HolidayEffectsManager
@@ -14,7 +15,8 @@ class WindowStateSyncMixin:
     def _build_initial_ui_state() -> AppUiState:
         """Честное стартовое состояние UI до реальной проверки и автозапуска."""
         try:
-            from config import get_dpi_autostart
+            from config.reg import get_dpi_autostart
+
             from settings.dpi.strategy_settings import get_strategy_launch_method
 
             autostart_enabled = bool(get_dpi_autostart())

@@ -8,7 +8,8 @@ import time
 from PyQt6.QtCore import QObject, QMetaObject, Qt, pyqtSignal
 
 from winws_runtime.health.process_health_check import diagnose_startup_error
-from log import log
+from log.log import log
+
 from settings.dpi.strategy_settings import get_strategy_launch_method
 
 
@@ -58,7 +59,7 @@ class DirectLaunchStartWorker(QObject):
         if self.launch_method not in ("direct_zapret2",):
             return False
         try:
-            from winws_runtime.runners import get_strategy_runner
+            from winws_runtime.runners.runner_factory import get_strategy_runner
 
             runner = get_strategy_runner(self._get_winws_exe())
             if hasattr(runner, "find_running_preset_pid"):
@@ -77,7 +78,7 @@ class DirectLaunchStartWorker(QObject):
         if not is_preset_file or not preset_path or skip_stop:
             return True
         try:
-            from winws_runtime.runners import get_strategy_runner
+            from winws_runtime.runners.runner_factory import get_strategy_runner
 
             runner = get_strategy_runner(self._get_winws_exe())
             if hasattr(runner, "validate_preset_file"):
@@ -111,7 +112,7 @@ class DirectLaunchStartWorker(QObject):
         self.progress.emit("Останавливаем предыдущий процесс...")
 
         if self.launch_method in ("direct_zapret2", "direct_zapret1"):
-            from winws_runtime.runners import get_strategy_runner
+            from winws_runtime.runners.runner_factory import get_strategy_runner
 
             runner = get_strategy_runner(self._get_winws_exe())
             runner.stop()
@@ -186,7 +187,7 @@ class DirectLaunchStartWorker(QObject):
         return preset_path, strategy_name
 
     def _start_direct_preset_with_runner(self, preset_path: str, strategy_name: str) -> bool:
-        from winws_runtime.runners import get_strategy_runner
+        from winws_runtime.runners.runner_factory import get_strategy_runner
 
         runner = get_strategy_runner(self._get_winws_exe())
         success = runner.start_from_preset_file(preset_path, strategy_name)
@@ -282,7 +283,7 @@ class DirectLaunchStartWorker(QObject):
     def _start_orchestra(self):
         """Запуск через оркестратор автоматического обучения."""
         try:
-            from orchestra import OrchestraRunner
+            from orchestra.orchestra_runner import OrchestraRunner
 
             log("Запуск оркестратора...", "INFO")
 
@@ -417,7 +418,7 @@ class DirectLaunchStopWorker(QObject):
 
     def _stop_direct(self):
         try:
-            from winws_runtime.runners import get_strategy_runner
+            from winws_runtime.runners.runner_factory import get_strategy_runner
             from utils.process_killer import kill_winws_all
 
             runner = get_strategy_runner(self._get_winws_exe())
@@ -486,7 +487,7 @@ class DirectPresetSwitchWorker(QObject):
 
             self.progress.emit("Применяем пресет...")
 
-            from winws_runtime.runners import get_strategy_runner
+            from winws_runtime.runners.runner_factory import get_strategy_runner
 
             profile = self.app_instance.app_context.direct_flow_coordinator.ensure_launch_profile(
                 self.launch_method,
@@ -553,7 +554,7 @@ class StopAndExitWorker(QObject):
 
                 kill_winws_all()
             elif self.launch_method in ("direct_zapret2", "direct_zapret1"):
-                from winws_runtime.runners import get_strategy_runner
+                from winws_runtime.runners.runner_factory import get_strategy_runner
 
                 runner = get_strategy_runner(self._get_winws_exe())
                 runner.stop()

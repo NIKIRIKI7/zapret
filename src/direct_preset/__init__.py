@@ -1,25 +1,7 @@
-"""Direct preset package."""
+"""Direct preset package.
 
-from .facade import DirectPresetFacade
-from .service import BasicUiPayload, DirectPresetService, TargetDetailPayload
-from .runtime import (
-    DirectBasicUiSnapshot,
-    DirectBasicUiSnapshotWorker,
-    DirectDictSnapshot,
-    DirectTargetDetailSnapshot,
-    DirectTargetDetailSnapshotWorker,
-    DirectUiSnapshotService,
-)
-
-__all__ = [
-    "BasicUiPayload",
-    "DirectBasicUiSnapshot",
-    "DirectBasicUiSnapshotWorker",
-    "DirectDictSnapshot",
-    "DirectPresetFacade",
-    "DirectPresetService",
-    "DirectTargetDetailSnapshot",
-    "DirectTargetDetailSnapshotWorker",
-    "DirectUiSnapshotService",
-    "TargetDetailPayload",
-]
+Корневой пакет должен оставаться тонким: без раннего импорта facade,
+runtime, service и других тяжёлых модулей. Иначе любой импорт подмодулей
+вида ``direct_preset.common...`` сначала выполнит этот файл и может
+затянуть верхний слой приложения обратно в низкоуровневые модули.
+"""

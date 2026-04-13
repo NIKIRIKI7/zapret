@@ -6,7 +6,8 @@ import time as _time
 
 from app_notifications import advisory_notification, notification_action
 from PyQt6.QtCore import QObject, pyqtSignal, Qt
-from log import log
+from log.log import log
+
 
 
 class _StrategyCacheBridge(QObject):
@@ -277,8 +278,9 @@ class InitializationManager:
     def _init_launch_runtime_api(self):
         """Инициализация launch runtime API."""
         try:
-            from winws_runtime.runtime import DirectLaunchRuntimeApi
-            from config import get_winws_exe_for_method, is_zapret2_mode
+            from winws_runtime.runtime.runtime_api import DirectLaunchRuntimeApi
+            from config.config import get_winws_exe_for_method, is_zapret2_mode
+
             from settings.dpi.strategy_settings import get_strategy_launch_method
 
             # Выбираем исполняемый файл в зависимости от режима запуска
@@ -364,7 +366,7 @@ class InitializationManager:
     def _init_launch_controller(self):
         """Инициализация launch controller."""
         try:
-            from winws_runtime.runtime import DirectLaunchController
+            from winws_runtime.runtime.controller import DirectLaunchController
             self.app.launch_controller = DirectLaunchController(self.app)
             log("Launch controller инициализирован", "INFO")
             self.init_tasks_completed.add('launch_controller')
@@ -522,7 +524,8 @@ class InitializationManager:
                 runtime_service = getattr(self.app, "launch_runtime_service", None)
                 launch_runtime_api = getattr(self.app, "launch_runtime_api", None)
                 if runtime_service is not None and launch_runtime_api is not None:
-                    from config import get_winws_exe_for_method
+                    from config.config import get_winws_exe_for_method
+
                     from settings.dpi.strategy_settings import get_strategy_launch_method
                     import os
 
@@ -566,7 +569,7 @@ class InitializationManager:
             
             # DNS UI Manager
             if not getattr(self.app, 'dns_ui_manager', None):
-                from dns import DNSUIManager, DNSStartupManager
+                from dns.dns_worker import DNSUIManager, DNSStartupManager
 
                 self.app.dns_ui_manager = DNSUIManager(
                     parent=self.app,
@@ -589,7 +592,8 @@ class InitializationManager:
             t0 = _t.perf_counter()
             
             from ui.theme import ThemeManager
-            from config import THEME_FOLDER
+            from config.config import THEME_FOLDER
+
             from PyQt6.QtWidgets import QApplication
             
             # Создаём ThemeManager БЕЗ применения темы
@@ -653,7 +657,9 @@ class InitializationManager:
                 return
 
             from tray import SystemTrayManager
-            from config import ICON_PATH, ICON_TEST_PATH, APP_VERSION, CHANNEL
+            from config.config import ICON_PATH, ICON_TEST_PATH
+            from config.build_info import APP_VERSION, CHANNEL
+
             from PyQt6.QtGui import QIcon
             from PyQt6.QtWidgets import QApplication
             import os
@@ -883,7 +889,8 @@ class InitializationManager:
     def _get_current_winws_target(self) -> tuple[str, str]:
         try:
             import os
-            from config import get_winws_exe_for_method
+            from config.config import get_winws_exe_for_method
+
             from settings.dpi.strategy_settings import get_strategy_launch_method
 
             launch_method = get_strategy_launch_method()
@@ -892,7 +899,8 @@ class InitializationManager:
             return exe_name, target_file
         except Exception:
             try:
-                from config import WINWS_EXE
+                from config.config import WINWS_EXE
+
                 import os
 
                 return os.path.basename(WINWS_EXE) or "winws.exe", WINWS_EXE
@@ -911,7 +919,8 @@ class InitializationManager:
             log(f"Ошибка при проверке winws файла: {e}", "DEBUG")
             # Fallback на WINWS_EXE
             try:
-                from config import WINWS_EXE
+                from config.config import WINWS_EXE
+
                 import os
                 return os.path.exists(WINWS_EXE)
             except Exception:

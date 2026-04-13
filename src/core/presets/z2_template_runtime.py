@@ -8,7 +8,8 @@ from typing import Optional
 from direct_preset.common.circular_preset_support import resolve_transport_settings
 from direct_preset.common.source_preset_models import SendSettings, SyndataSettings
 from direct_preset.engines import winws2_parser, winws2_rules
-from log import log
+from log.log import log
+
 
 
 _TEMPLATES_CACHE: Optional[dict[str, str]] = None
@@ -71,7 +72,8 @@ def get_builtin_base_from_copy_name(name: str) -> Optional[str]:
 
 def ensure_templates_copied_to_presets() -> bool:
     try:
-        from config import get_zapret_presets_v2_dir
+        from config.config import get_zapret_presets_v2_dir
+
 
         templates = _load_template_contents()
         if not templates:
@@ -129,7 +131,8 @@ def ensure_templates_copied_to_presets() -> bool:
 
 def overwrite_templates_to_presets() -> tuple[int, int, list[str]]:
     try:
-        from config import get_zapret_presets_v2_dir
+        from config.config import get_zapret_presets_v2_dir
+
     except Exception:
         return (0, 0, [])
 

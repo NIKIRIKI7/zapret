@@ -5,7 +5,8 @@ from dataclasses import dataclass
 
 from PyQt6.QtCore import QTimer
 
-from log import log
+from log.log import log
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +57,9 @@ def handle_launch_method_changed_runtime(window, method: str) -> MethodSwitchRun
 
 
 def build_method_switch_runtime_plan(window, method: str) -> MethodSwitchRuntimePlan:
-    from config import get_dpi_autostart, get_winws_exe_for_method
+    from config.reg import get_dpi_autostart
+    from config.config import get_winws_exe_for_method
+
 
     normalized_method = str(method or "").strip().lower()
     expected_exe_path = ""

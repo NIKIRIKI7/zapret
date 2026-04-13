@@ -100,7 +100,8 @@ class AsyncServiceChecker:
                         callback(service_name, result)
                         
                 except Exception as e:
-                    from log import log
+                    from log.log import log
+
                     log(f"Ошибка при асинхронной проверке {service_name}: {e}", "❌ ERROR")
                     
             except:
@@ -170,7 +171,8 @@ def ensure_bfe_running() -> tuple[bool, dict | None]:
             duration=16000,
             dedupe_key="startup.bfe",
         )
-    from log import log
+    from log.log import log
+
     
     # 1. Сначала проверяем кэш службы
     cached_status = service_cache.get("BFE")
@@ -252,7 +254,8 @@ def preload_service_status(service_name: str = "BFE"):
 # Очистка при выходе
 def cleanup():
     """Очистить ресурсы при завершении программы."""
-    from log import log
+    from log.log import log
+
     try:
         # Останавливаем асинхронный чекер
         log("Останавливаем async_checker...", "DEBUG")

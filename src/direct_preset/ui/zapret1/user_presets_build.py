@@ -8,12 +8,10 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QListView, QSizePolicy
 
 from ui.compat_widgets import PrimaryActionButton, SettingsCard, set_tooltip
-from ui.presets_menu import (
-    LinkedWheelListView,
-    PresetListDelegate,
-    PresetListModel,
-    PresetsToolbarLayout,
-)
+from ui.presets_menu.delegate import PresetListDelegate
+from ui.presets_menu.model import PresetListModel
+from ui.presets_menu.toolbar import PresetsToolbarLayout
+from ui.presets_menu.view import LinkedWheelListView
 
 
 @dataclass(slots=True)

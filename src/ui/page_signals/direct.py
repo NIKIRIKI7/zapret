@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import QWidget
 
-from winws_runtime.runtime import handle_launch_method_changed_runtime
+from winws_runtime.runtime.method_switch_flow import handle_launch_method_changed_runtime
 from ui.navigation.sidebar_builder import sync_nav_visibility
 from ui.navigation_targets import (
     resolve_preset_detail_back_page_for_method,
@@ -71,7 +71,8 @@ def _on_launch_method_changed(window, method: str) -> None:
         log_text = f"Метод '{method}' сохранён без немедленного запуска"
 
     try:
-        from log import log
+        from log.log import log
+
 
         log(log_text, "INFO")
     except Exception:

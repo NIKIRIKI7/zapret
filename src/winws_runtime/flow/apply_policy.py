@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from log import log
+from log.log import log
+
 
 if TYPE_CHECKING:
-    from main import LupiDPIApp
+    from main.window import LupiDPIApp
 
 
 def _is_launch_running(app: "LupiDPIApp") -> bool:

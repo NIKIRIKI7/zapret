@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from log import log
+from log.log import log
+
 
 
 def get_direct_strategy_summary(window, max_items: int = 2) -> str:

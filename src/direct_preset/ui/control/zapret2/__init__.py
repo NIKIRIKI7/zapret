@@ -1,4 +1,1 @@
-from .page import Zapret2DirectControlPage
-
-__all__ = ["Zapret2DirectControlPage"]
-
+"""UI-пакет direct control Zapret2. Используйте прямой импорт `...page`."""

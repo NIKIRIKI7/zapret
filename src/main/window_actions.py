@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from log import log
+from log.log import log
+
 from ui.page_method_dispatch import request_blockcheck_diagnostics_focus
 from ui.window_adapter import route_window_search_result, show_page
-from utils import run_hidden
+from utils.subproc import run_hidden
 
 
 class WindowActionsMixin:

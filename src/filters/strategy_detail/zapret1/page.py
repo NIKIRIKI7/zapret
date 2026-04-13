@@ -12,7 +12,7 @@ from direct_preset.runtime import DirectTargetDetailSnapshotWorker
 from ui.pages.base_page import BasePage
 from ui.compat_widgets import ActionButton, RefreshButton, SettingsCard
 from app_state.main_window_state import AppUiState, MainWindowStateStore
-from filters.ui import StrategyTree
+from filters.ui.strategy_tree import StrategyTree
 from ui.text_catalog import tr as tr_catalog
 from filters.strategy_detail.shared import (
     build_detail_subtitle_widgets,
@@ -89,7 +89,8 @@ from filters.strategy_detail.zapret1.runtime_helpers import (
     update_header_labels,
     update_selected_label,
 )
-from log import log
+from log.log import log
+
 from filters.strategy_detail.args_preview_dialog import ArgsPreviewDialog
 
 try:

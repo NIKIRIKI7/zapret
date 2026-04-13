@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from log import log
+from log.log import log
+
 from .builtin_template_sync import (
     is_builtin_preset_file_name as _is_builtin_preset_file_name,
     load_repo_builtin_templates,

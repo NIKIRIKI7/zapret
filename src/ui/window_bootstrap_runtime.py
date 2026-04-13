@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
 from ui.navigation.text_sync import resolve_ui_language
-from ui.page_signals import connect_lazy_page_signals
+from ui.page_signals.registry import connect_lazy_page_signals
 from ui.startup_ui_metrics import log_startup_page_init_summary
 from ui.window_signal_bindings import connect_window_page_signals
 from ui.page_factory import UiPageFactory

@@ -3,7 +3,8 @@
 """
 
 import os
-from log import log
+from log.log import log
+
 
 
 def _is_direct_source_preset_launch() -> bool:

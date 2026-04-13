@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QThread
 
-from log import log
+from log.log import log
+
 
 
 def start_worker_thread(

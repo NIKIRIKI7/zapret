@@ -4,7 +4,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from log import log
+from log.log import log
+
 
 from winws_runtime.runtime.workers import PreparedDpiStartRequest
 

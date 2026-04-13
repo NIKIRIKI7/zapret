@@ -8,7 +8,8 @@ import time
 from PyQt6.QtCore import QTimer
 from app_notifications import advisory_notification, notification_action
 from settings.dpi.strategy_settings import get_strategy_launch_method
-from log import log
+from log.log import log
+
 from winws_runtime.health.process_health_check import (
     check_conflicting_processes,
     try_kill_conflicting_processes,
@@ -115,7 +116,7 @@ class DirectLaunchController:
 
     def _runner_transition_in_progress(self, *, launch_method: str | None = None) -> bool:
         try:
-            from winws_runtime.runners import get_current_runner
+            from winws_runtime.runners.runner_factory import get_current_runner
 
             runner = get_current_runner()
             if runner is None:
@@ -123,7 +124,8 @@ class DirectLaunchController:
 
             if launch_method:
                 try:
-                    from config import get_winws_exe_for_method
+                    from config.config import get_winws_exe_for_method
+
 
                     expected_name = os.path.basename(get_winws_exe_for_method(str(launch_method or "").strip().lower())).strip().lower()
                     runner_name = os.path.basename(str(getattr(runner, "winws_exe", "") or "")).strip().lower()
@@ -296,7 +298,8 @@ class DirectLaunchController:
         if method == "orchestra":
             return ""
         try:
-            from config import get_winws_exe_for_method
+            from config.config import get_winws_exe_for_method
+
 
             return os.path.basename(get_winws_exe_for_method(method)).strip().lower()
         except Exception:

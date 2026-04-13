@@ -3,7 +3,8 @@ from __future__ import annotations
 from PyQt6.QtCore import QEvent, QTimer
 from PyQt6.QtWidgets import QApplication, QWidget
 
-from log import global_logger, log
+from log.log import global_logger, log
+
 from main.runtime_state import (
     log_startup_metric as emit_startup_metric,
     startup_elapsed_ms,

@@ -5,7 +5,8 @@ Factory module for strategy runners.
 """
 
 from typing import Optional
-from log import log
+from log.log import log
+
 
 # Import both runner classes
 from .zapret1_runner import StrategyRunnerV1

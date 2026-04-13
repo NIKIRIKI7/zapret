@@ -5,8 +5,10 @@ import json
 import os
 from pathlib import Path
 
-from config import APPDATA_DIR, get_zapret_userdata_dir
-from log import log
+from config.config import APPDATA_DIR, get_zapret_userdata_dir
+
+from log.log import log
+
 from safe_construct import safe_construct
 
 _LAUNCH_METHOD_FILE = os.path.join(APPDATA_DIR, "strategy_Launch_method.ini")

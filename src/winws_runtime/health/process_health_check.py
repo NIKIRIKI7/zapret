@@ -8,7 +8,8 @@ import time
 import subprocess
 from dataclasses import dataclass, field
 from typing import Tuple, Optional, List, Dict
-from log import log
+from log.log import log
+
 from utils.windows_event_log import get_recent_application_error_messages
 from utils.windows_process_probe import iter_process_records_winapi, iter_process_names_winapi, iter_uninstall_display_names
 
@@ -367,7 +368,8 @@ def check_common_crash_causes(process_name: str = "winws.exe") -> Optional[str]:
     
     # ✅ ПРОВЕРКА 3: Целостность файлов WinDivert
     try:
-        from config import WINDIVERT_FOLDER
+        from config.config import WINDIVERT_FOLDER
+
         import os
         
         required_files = {
@@ -1124,7 +1126,8 @@ def _check_windivert_files() -> List[str]:
     """Return list of missing critical WinDivert files."""
     import os
     try:
-        from config import WINDIVERT_FOLDER
+        from config.config import WINDIVERT_FOLDER
+
     except ImportError:
         return []
 

@@ -1,8 +1,5 @@
-from .subproc import run_hidden, get_system32_path, get_syswow64_path, get_system_exe
+"""Вспомогательный пакет utils.
 
-__all__ = [
-    "run_hidden",
-    "get_system32_path",
-    "get_syswow64_path",
-    "get_system_exe",
-]
+Корневой пакет оставляем тонким. Используйте прямые импорты из конкретных
+модулей `utils.*`, например `utils.subproc`.
+"""

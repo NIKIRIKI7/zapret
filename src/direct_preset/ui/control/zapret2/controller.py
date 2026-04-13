@@ -222,7 +222,8 @@ class Zapret2DirectControlPageController(ControlPageController):
     def build_stop_button_plan(*, language: str) -> ControlStopButtonPlan:
         try:
             from settings.dpi.strategy_settings import get_strategy_launch_method
-            from config import get_winws_exe_for_method
+            from config.config import get_winws_exe_for_method
+
             from ui.text_catalog import tr as tr_catalog
 
             method = get_strategy_launch_method()

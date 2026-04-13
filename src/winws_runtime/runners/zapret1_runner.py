@@ -12,7 +12,8 @@ import subprocess
 import threading
 import time
 from typing import Optional
-from log import log
+from log.log import log
+
 
 from .constants import CREATE_NO_WINDOW
 from .runner_base import StrategyRunnerBase

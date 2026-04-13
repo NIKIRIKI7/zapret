@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import QWidget
 
-from log import log
+from log.log import log
+
 from ui.navigation.text_sync import apply_ui_language_to_page
 from ui.page_dependencies import inject_page_dependencies
 from ui.navigation.schema import (

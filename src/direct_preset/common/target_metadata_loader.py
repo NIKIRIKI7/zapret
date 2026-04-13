@@ -67,7 +67,8 @@ def _package_broad_target_metadata_file_path() -> Path:
 
 def _user_target_metadata_file_path() -> Path:
     try:
-        from config import get_zapret_userdata_dir
+        from config.config import get_zapret_userdata_dir
+
 
         base = (get_zapret_userdata_dir() or "").strip()
         if base:
@@ -83,7 +84,8 @@ def _user_target_metadata_file_path() -> Path:
 
 def _user_broad_target_metadata_file_path() -> Path:
     try:
-        from config import get_zapret_userdata_dir
+        from config.config import get_zapret_userdata_dir
+
 
         base = (get_zapret_userdata_dir() or "").strip()
         if base:

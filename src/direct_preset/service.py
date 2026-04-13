@@ -6,7 +6,8 @@ import time as _time
 from typing import Any
 
 from core.paths import AppPaths
-from log import log
+from log.log import log
+
 
 from .common.preset_editor import replace_profile_action_lines, replace_profile_selector_line, split_profile_for_target
 from .common.projector import build_target_views

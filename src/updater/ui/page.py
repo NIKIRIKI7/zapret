@@ -49,7 +49,8 @@ except ImportError:
     SettingCardGroup = None  # type: ignore[assignment]
     _HAS_FLUENT = False
 
-from config import APP_VERSION, CHANNEL
+from config.build_info import APP_VERSION, CHANNEL
+
 from updater.ui.update_card import UpdateStatusCard
 from updater.ui.changelog_card import ChangelogCard
 

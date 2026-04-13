@@ -61,12 +61,13 @@ from ui.pages.base_page import BasePage
 from app_state.main_window_state import AppUiState, MainWindowStateStore
 from ui.compat_widgets import ActionButton, SettingsRow, set_tooltip, SettingsCard
 from ui.widgets.win11_controls import Win11ToggleRow, Win11ComboRow, Win11NumberRow
-from filters.ui import StrategyTree, StrategyTreeRow
+from filters.ui.strategy_tree import StrategyTree, StrategyTreeRow
 from ui.popup_menu import exec_popup_menu
 from filters.strategy_detail.args_preview_dialog import ArgsPreviewDialog
 from blobs.service import get_blobs_info
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
-from log import log
+from log.log import log
+
 from filters.strategy_detail.zapret2.controller import StrategyDetailPageController
 from filters.strategy_detail.zapret2.apply import (
     apply_args_editor_state,
@@ -2735,7 +2736,8 @@ class StrategyDetailPage(BasePage):
         """Loads the last selected TCP phase tab for a target (persisted in registry)."""
         try:
             from config.reg import reg
-            from config import REGISTRY_PATH_GUI
+            from config.config import REGISTRY_PATH_GUI
+
         except Exception:
             return None
 
@@ -2760,7 +2762,8 @@ class StrategyDetailPage(BasePage):
         """Saves the last selected TCP phase tab for a target (best-effort)."""
         try:
             from config.reg import reg
-            from config import REGISTRY_PATH_GUI
+            from config.config import REGISTRY_PATH_GUI
+
         except Exception:
             return
 

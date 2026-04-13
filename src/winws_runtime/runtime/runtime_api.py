@@ -3,10 +3,11 @@ import time
 from typing import Optional, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from main import LupiDPIApp
+    from main.window import LupiDPIApp
 
-from log import log
-from utils import run_hidden, get_system32_path
+from log.log import log
+
+from utils.subproc import get_system32_path, run_hidden
 from .process_probe import (
     get_canonical_winws_process_pids,
     is_expected_winws_running,

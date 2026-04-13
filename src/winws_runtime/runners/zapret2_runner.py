@@ -16,7 +16,8 @@ import time
 import threading
 from typing import Optional
 
-from log import log
+from log.log import log
+
 from .runner_base import StrategyRunnerBase
 from .preset_runner_support import (
     controller_transition_in_progress,

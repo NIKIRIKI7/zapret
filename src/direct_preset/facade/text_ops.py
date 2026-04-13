@@ -3,7 +3,8 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from log import log
+from log.log import log
+
 
 
 def _normalize_strategy_selection_value(value: object) -> str:

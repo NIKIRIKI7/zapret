@@ -5,7 +5,8 @@ import winreg
 
 # Импортируем константы из конфига
 from app_notifications import advisory_notification, notification_action
-from config import BIN_FOLDER
+from config.config import BIN_FOLDER
+
 from utils.windows_process_probe import iter_process_records_winapi
 
 def check_system_commands() -> tuple[bool, str]:
@@ -13,7 +14,8 @@ def check_system_commands() -> tuple[bool, str]:
     Проверяет доступность основных системных компонентов без сохранения старых результатов.
     """
     try:
-        from log import log
+        from log.log import log
+
         log("Проверка системных команд", "DEBUG")
     except ImportError:
         print("DEBUG: Проверка системных команд")
@@ -25,7 +27,8 @@ def check_system_commands() -> tuple[bool, str]:
     except Exception as e:
         failed_commands.append(f"psutil (ошибка: {e})")
         try:
-            from log import log
+            from log.log import log
+
             log(f"ERROR: psutil не работает: {e}", level="❌ ERROR")
         except ImportError:
             print(f"ERROR: psutil не работает: {e}")
@@ -42,14 +45,16 @@ def check_system_commands() -> tuple[bool, str]:
             if not command_path or not os.path.isfile(command_path):
                 failed_commands.append(f"{cmd_name} (файл не найден)")
                 try:
-                    from log import log
+                    from log.log import log
+
                     log(f"ERROR: Системный файл {cmd_name} не найден: {command_path}", level="❌ ERROR")
                 except ImportError:
                     print(f"ERROR: Системный файл {cmd_name} не найден: {command_path}")
         except Exception as e:
             failed_commands.append(f"{cmd_name} ({e})")
             try:
-                from log import log
+                from log.log import log
+
                 log(f"ERROR: Ошибка при проверке системного файла {cmd_name}: {e}", level="❌ ERROR")
             except ImportError:
                 print(f"ERROR: Ошибка при проверке системного файла {cmd_name}: {e}")
@@ -74,7 +79,8 @@ def check_system_commands() -> tuple[bool, str]:
     else:
         error_message = ""
         try:
-            from log import log
+            from log.log import log
+
             log("Все системные команды доступны", level="☑ INFO")
         except ImportError:
             print("INFO: Все системные команды доступны")
@@ -110,14 +116,16 @@ def check_mitmproxy() -> tuple[bool, str]:
                 "Пожалуйста, завершите все процессы mitmproxy и перезапустите Zapret."
             )
             try:
-                from log import log
+                from log.log import log
+
                 log(f"ERROR: Найден конфликтующий процесс mitmproxy: {process_name} (PID: {pid})", level="❌ ERROR")
             except ImportError:
                 print(f"ERROR: Найден конфликтующий процесс mitmproxy: {process_name}")
             return True, err
     except Exception as e:
         try:
-            from log import log
+            from log.log import log
+
             log(f"Ошибка WinAPI-проверки процессов mitmproxy: {e}", level="⚠ WARNING")
         except ImportError:
             print(f"WARNING: Ошибка WinAPI-проверки процессов mitmproxy: {e}")
@@ -133,7 +141,8 @@ def check_if_in_archive():
 
     try:
         try:
-            from log import log
+            from log.log import log
+
             log(f"Executable path: {exe_path}", level="CHECK_START")
         except ImportError:
             print(f"DEBUG: Executable path: {exe_path}")
@@ -147,7 +156,8 @@ def check_if_in_archive():
         for temp_dir in temp_dirs:
             if temp_dir and exe_path.lower().startswith(os.path.abspath(temp_dir).lower()):
                 try:
-                    from log import log
+                    from log.log import log
+
                     log(f"EXE запущен из временной директории: {temp_dir}", level="⚠ WARNING")
                 except ImportError:
                     print(f"WARNING: EXE запущен из временной директории: {temp_dir}")
@@ -158,7 +168,8 @@ def check_if_in_archive():
         
     except Exception as e:
         try:
-            from log import log
+            from log.log import log
+
             log(f"Ошибка при проверке расположения EXE: {str(e)}", level="DEBUG")
         except ImportError:
             print(f"DEBUG: Ошибка при проверке расположения EXE: {str(e)}")
@@ -198,7 +209,8 @@ def check_path_for_onedrive() -> tuple[bool, str]:
                 "(например, C:\\zapret) и запустите её снова."
             )
             try:
-                from log import log
+                from log.log import log
+
                 log(f"ERROR: Обнаружен OneDrive в пути: {path}", level="❌ ERROR")
             except ImportError:
                 print(f"ERROR: Обнаружен OneDrive в пути: {path}")
@@ -216,7 +228,8 @@ def check_windows_version() -> tuple[bool, str]:
     Windows 7 = 6.1, Windows 8 = 6.2, Windows 8.1 = 6.3
     """
     try:
-        from log import log
+        from log.log import log
+
     except ImportError:
         log = lambda msg, **kw: print(msg)
     
@@ -301,7 +314,8 @@ def check_path_for_special_chars():
                 "(например, C:\\zapret или D:\\zapret) и запустить её снова."
             )
             try:
-                from log import log
+                from log.log import log
+
                 log(f"ERROR: Путь содержит специальные символы: {path}", level="❌ ERROR")
             except ImportError:
                 print(f"ERROR: Путь содержит специальные символы: {path}")
@@ -439,7 +453,8 @@ def _stop_and_delete_service(name: str) -> tuple[bool, str]:
     Возвращает (успех, сообщение).
     """
     try:
-        from log import log
+        from log.log import log
+
     except ImportError:
         log = lambda msg, **kw: print(msg)
 
@@ -538,7 +553,8 @@ def _disable_proxy() -> tuple[bool, str]:
     INTERNET_OPTION_REFRESH = 37
     
     try:
-        from log import log
+        from log.log import log
+
     except ImportError:
         log = lambda msg, **kw: print(msg)
     
@@ -585,7 +601,8 @@ def check_proxy_warning() -> tuple[bool, str]:
     - (is_enabled, message)
     """
     try:
-        from log import log
+        from log.log import log
+
     except ImportError:
         log = lambda msg, **kw: print(msg)
 
@@ -641,7 +658,8 @@ def check_goodbyedpi() -> tuple[bool, str]:
     ]
     
     try:
-        from log import log
+        from log.log import log
+
     except ImportError:
         log = lambda msg, **kw: print(msg)
 

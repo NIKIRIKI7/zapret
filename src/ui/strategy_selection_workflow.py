@@ -30,7 +30,8 @@ def resolve_strategy_selection_display_name(
 
 
 def on_strategy_selected_from_page(window, strategy_id: str, strategy_name: str) -> None:
-    from log import log
+    from log.log import log
+
 
     launch_method = window._get_launch_method()
 

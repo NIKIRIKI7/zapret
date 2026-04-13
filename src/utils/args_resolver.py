@@ -8,7 +8,8 @@
 
 import os
 from typing import List, Optional
-from log import log
+from log.log import log
+
 
 
 # Префиксы для файлов из папки lists/

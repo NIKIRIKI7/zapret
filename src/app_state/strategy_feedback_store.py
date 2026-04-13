@@ -5,7 +5,8 @@ import os
 from pathlib import Path
 from typing import Iterable, Optional, Set, Tuple
 
-from config import get_zapret_userdata_dir
+from config.config import get_zapret_userdata_dir
+
 
 
 FeedbackKey = Tuple[str, str]  # (target_key, strategy_id)

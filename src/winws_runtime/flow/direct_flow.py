@@ -8,7 +8,8 @@ import time
 from typing import Callable
 
 from core.paths import AppPaths
-from log import log
+from log.log import log
+
 from core.presets.cache_signatures import path_cache_signature
 from core.presets.models import PresetManifest
 from core.presets.preset_file_store import PresetFileStore

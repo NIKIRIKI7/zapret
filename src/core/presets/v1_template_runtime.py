@@ -5,7 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from log import log
+from log.log import log
+
 
 
 _DEFAULT_TEMPLATE_CONTENT = """\
@@ -176,7 +177,8 @@ def ensure_default_preset_exists_v1() -> bool:
 
 def _presets_dir_v1() -> Path:
     try:
-        from config import get_zapret_userdata_dir
+        from config.config import get_zapret_userdata_dir
+
 
         base = (get_zapret_userdata_dir() or "").strip()
         if base:

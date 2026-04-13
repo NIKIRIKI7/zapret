@@ -33,7 +33,8 @@ except Exception:
     _HAS_FLUENT_MENU = False
 
 try:
-    from log import log
+    from log.log import log
+
 except Exception:
     def log(*args, **kwargs):  # type: ignore[no-redef]
         return None
@@ -50,7 +51,8 @@ from ui.window_adapter import (
 
 def _toggle_github_api_removal(*, status_callback=None) -> bool:
     """Переключает флаг удаления api.github.com из hosts при запуске."""
-    from config import get_remove_github_api, set_remove_github_api
+    from config.reg import get_remove_github_api, set_remove_github_api
+
 
     try:
         current_state = bool(get_remove_github_api())

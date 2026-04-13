@@ -6,7 +6,8 @@ from pathlib import Path
 import re
 from typing import Callable, Iterable
 
-from config import get_zapret_userdata_dir
+from config.config import get_zapret_userdata_dir
+
 
 
 _SCOPE_KEY_ALIASES = {

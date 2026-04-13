@@ -92,7 +92,8 @@ def dispatch_detail_page_result(
     log_message: str | None = None,
 ) -> bool:
     if log_message:
-        from log import log
+        from log.log import log
+
 
         log(log_message, "INFO")
 

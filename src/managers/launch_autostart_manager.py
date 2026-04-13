@@ -1,5 +1,6 @@
 from PyQt6.QtCore import QObject
-from log import log
+from log.log import log
+
 from ui.window_adapter import update_window_current_strategy_display
 
 class LaunchAutostartManager(QObject):
@@ -20,7 +21,8 @@ class LaunchAutostartManager(QObject):
 
         self._autostart_initiated = True
 
-        from config import get_dpi_autostart
+        from config.reg import get_dpi_autostart
+
         if not get_dpi_autostart():
             log("Автозапуск DPI отключён", "INFO")
             self._mark_runtime_stopped()
