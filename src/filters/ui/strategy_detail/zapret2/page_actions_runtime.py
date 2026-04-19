@@ -3,11 +3,13 @@ from __future__ import annotations
 from log.log import log
 
 from filters.strategy_detail.zapret2.controller import StrategyDetailPageController
-from filters.ui.strategy_detail.zapret2.apply import (
-    apply_args_editor_state,
-    apply_filter_mode_selector_state,
-    apply_tree_selected_strategy_state,
+from filters.strategy_detail.zapret2.settings_logic import (
+    build_args_apply_plan,
+    build_args_apply_result_plan,
+    build_args_editor_open_plan as build_args_editor_open_plan_logic,
+    build_args_editor_state_plan,
 )
+from filters.ui.strategy_detail.filter_mode_ui import apply_filter_mode_selector_state
 from filters.ui.strategy_detail.zapret2.args_editor import (
     hide_args_editor_state,
     open_args_editor_dialog,
@@ -25,8 +27,7 @@ def refresh_args_editor_state_runtime(page) -> None:
         edit_args_btn=getattr(page, "_edit_args_btn", None),
         target_key=page._target_key,
         selected_strategy_id=page._selected_strategy_id,
-        build_state_plan_fn=StrategyDetailPageController.build_args_editor_state_plan,
-        apply_args_editor_state_fn=apply_args_editor_state,
+        build_state_plan_fn=build_args_editor_state_plan,
         hide_editor_fn=page._hide_args_editor,
     )
 
@@ -54,7 +55,7 @@ def on_args_changed_runtime(page, strategy_id: str, args: list) -> None:
 
 
 def build_args_editor_open_plan(page):
-    return StrategyDetailPageController.build_args_editor_open_plan(
+    return build_args_editor_open_plan_logic(
         page._direct_facade,
         payload=getattr(page, "_target_payload", None),
         target_key=page._target_key,
@@ -63,7 +64,7 @@ def build_args_editor_open_plan(page):
 
 
 def apply_args_editor_runtime(page, raw: str = "") -> None:
-    apply_plan = StrategyDetailPageController.build_args_apply_plan(
+    apply_plan = build_args_apply_plan(
         target_key=page._target_key,
         selected_strategy_id=page._selected_strategy_id,
         raw_text=raw,
@@ -80,7 +81,7 @@ def apply_args_editor_runtime(page, raw: str = "") -> None:
             return
         page._preset_refresh_runtime.mark_suppressed()
         payload = page._reload_current_target_payload()
-        result_plan = StrategyDetailPageController.build_args_apply_result_plan(payload=payload)
+        result_plan = build_args_apply_result_plan(payload=payload)
         page._selected_strategy_id = result_plan.selected_strategy_id
         page._current_strategy_id = result_plan.current_strategy_id
         page._args_editor_dirty = False
@@ -241,10 +242,7 @@ def on_reset_settings_confirmed(page) -> None:
             page._select_default_tcp_phase_tab()
             page._apply_filters()
         else:
-            apply_tree_selected_strategy_state(
-                page._strategies_tree,
-                strategy_id=page._selected_strategy_id,
-            )
+            page._set_tree_selected_strategy(page._selected_strategy_id)
 
     if plan.should_show_loading:
         page.show_loading()

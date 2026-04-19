@@ -7,6 +7,12 @@ from PyQt6.QtCore import QTimer
 from log.log import log
 
 from filters.strategy_detail.zapret2.controller import StrategyDetailPageController
+from filters.strategy_detail.zapret2.strategies_logic import (
+    build_batch_update_plan,
+    build_strategies_load_plan,
+    build_tree_completion_plan,
+    extract_pending_item_args,
+)
 from filters.ui.strategy_detail.zapret2.common import log_z2_detail_metric as _log_z2_detail_metric
 
 
@@ -18,7 +24,7 @@ def clear_strategies(page) -> None:
         page._strategies_tree.clear_strategies()
     page._strategies_data_by_id = {}
     page._loaded_strategy_type = None
-    page._loaded_strategy_set = None
+    page._loaded_direct_mode = None
     page._loaded_tcp_phase_mode = False
     page._default_strategy_order = []
     page._strategies_loaded_fully = False
@@ -55,7 +61,7 @@ def load_strategies(page, policy=None, *, info_bar_cls=None) -> None:
             return
 
         retry_count = int(getattr(page, "_retry_count", 0) or 0)
-        plan = StrategyDetailPageController.build_strategies_load_plan(
+        plan = build_strategies_load_plan(
             target_info=target_info,
             payload=payload,
             policy=policy,
@@ -63,6 +69,7 @@ def load_strategies(page, policy=None, *, info_bar_cls=None) -> None:
             launch_running=is_dpi_running_now(page),
             is_visible=page.isVisible(),
             custom_strategy_id=page.CUSTOM_STRATEGY_ID,
+            direct_mode_override=page._current_direct_mode(),
             tr=page._tr,
         )
         page._detail_mode_policy = plan.resolved_policy
@@ -75,7 +82,7 @@ def load_strategies(page, policy=None, *, info_bar_cls=None) -> None:
         page._strategies_data_by_id = dict(plan.strategies_data_by_id or {})
         page._default_strategy_order = list(plan.default_strategy_order)
         page._loaded_strategy_type = plan.loaded_strategy_type
-        page._loaded_strategy_set = plan.loaded_strategy_set
+        page._loaded_direct_mode = plan.loaded_direct_mode
         page._loaded_tcp_phase_mode = plan.loaded_tcp_phase_mode
 
         if plan.is_empty:
@@ -159,7 +166,7 @@ def load_next_strategies_batch(page) -> None:
     runtime = page._strategies_load_runtime
     total = runtime.total_items()
     start = runtime.start_index()
-    initial_plan = StrategyDetailPageController.build_batch_update_plan(
+    initial_plan = build_batch_update_plan(
         total=total,
         start=start,
         end=start,
@@ -186,7 +193,7 @@ def load_next_strategies_batch(page) -> None:
             if not strategy_id:
                 continue
             name = str(getattr(item, "name", "") or strategy_id).strip() or strategy_id
-            args_list = StrategyDetailPageController.extract_pending_item_args(
+            args_list = extract_pending_item_args(
                 strategy_id=strategy_id,
                 strategy_data=page._strategies_data_by_id.get(strategy_id, {}),
                 pending_item=item,
@@ -212,7 +219,7 @@ def load_next_strategies_batch(page) -> None:
         search_active = bool(page._search_input and page._search_input.text().strip())
     except Exception:
         search_active = False
-    plan = StrategyDetailPageController.build_batch_update_plan(
+    plan = build_batch_update_plan(
         total=total,
         start=start,
         end=end,
@@ -234,7 +241,7 @@ def load_next_strategies_batch(page) -> None:
     if plan.should_mark_loaded_fully:
         page._strategies_loaded_fully = True
 
-    completion_plan = StrategyDetailPageController.build_tree_completion_plan(
+    completion_plan = build_tree_completion_plan(
         tcp_phase_mode=bool(page._tcp_phase_mode),
         current_strategy_id=page._current_strategy_id,
         has_current_strategy=bool(page._strategies_tree.has_strategy(page._current_strategy_id)),

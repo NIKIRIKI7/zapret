@@ -24,7 +24,7 @@ class WindowStateSyncMixin:
         нейтральным, а DPI-autostart используем только для стартовой launch-phase.
         """
         try:
-            from config.reg import get_dpi_autostart
+            from settings.store import get_dpi_autostart
 
             from settings.dpi.strategy_settings import get_strategy_launch_method
 
@@ -143,7 +143,7 @@ class WindowStateSyncMixin:
             if store is not None:
                 store.set_window_opacity_value(value)
 
-            from config.reg import get_background_preset
+            from settings.store import get_background_preset
 
             if get_background_preset() != "standard":
                 log("Transparent effect проигнорирован (не standard пресет)", "DEBUG")
@@ -159,7 +159,7 @@ class WindowStateSyncMixin:
     def _init_garland_from_registry(self) -> None:
         """Загружает состояние гирлянды и снежинок из реестра при старте."""
         try:
-            from config.reg import get_animations_enabled, get_garland_enabled, get_snowflakes_enabled, get_window_opacity
+            from settings.store import get_animations_enabled, get_garland_enabled, get_snowflakes_enabled, get_window_opacity
 
             garland_saved = get_garland_enabled()
             snowflakes_saved = get_snowflakes_enabled()

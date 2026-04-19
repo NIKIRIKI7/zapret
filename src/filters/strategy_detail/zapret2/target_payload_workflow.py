@@ -15,6 +15,7 @@ def start_target_payload_request(
     prepare_request_fn,
     now_fn,
     worker_cls,
+    worker_kwargs=None,
     parent,
     on_loaded_callback,
 ):
@@ -33,6 +34,7 @@ def start_target_payload_request(
         launch_method="direct_zapret2",
         target_key=plan.normalized_target_key,
         refresh=refresh,
+        **dict(worker_kwargs or {}),
         parent=parent,
     )
     worker.loaded.connect(

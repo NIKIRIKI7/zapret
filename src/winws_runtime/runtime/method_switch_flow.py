@@ -57,7 +57,7 @@ def handle_launch_method_changed_runtime(window, method: str) -> MethodSwitchRun
 
 
 def build_method_switch_runtime_plan(window, method: str) -> MethodSwitchRuntimePlan:
-    from config.reg import get_dpi_autostart
+    from settings.store import get_dpi_autostart
     from config.config import get_winws_exe_for_method
 
 

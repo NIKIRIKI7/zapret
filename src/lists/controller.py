@@ -9,9 +9,12 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
 
-from config.config import LISTS_FOLDER, NETROGAT_PATH, OTHER_USER_PATH
-
 from log.log import log
+from lists.core.paths import get_list_final_path, get_list_user_path, get_lists_dir
+
+LISTS_FOLDER = get_lists_dir()
+NETROGAT_PATH = get_list_final_path("netrogat")
+OTHER_USER_PATH = get_list_user_path("other")
 
 
 
@@ -452,13 +455,13 @@ class HostlistPageController:
 
     @staticmethod
     def rebuild_hostlists() -> None:
-        from utils.hostlists_manager import startup_hostlists_check
+        from lists.hostlists_manager import startup_hostlists_check
 
         startup_hostlists_check()
 
     @staticmethod
     def load_domains_entries() -> HostlistEntriesState:
-        from utils.hostlists_manager import ensure_hostlists_exist
+        from lists.hostlists_manager import ensure_hostlists_exist
 
         ensure_hostlists_exist()
         entries: list[str] = []
@@ -469,7 +472,7 @@ class HostlistPageController:
 
     @staticmethod
     def load_custom_domains_text() -> CustomDomainsLoadState:
-        from utils.hostlists_manager import ensure_hostlists_exist
+        from lists.hostlists_manager import ensure_hostlists_exist
 
         ensure_hostlists_exist()
         lines: list[str] = []
@@ -480,7 +483,7 @@ class HostlistPageController:
 
     @staticmethod
     def save_domains_entries(entries: list[str]) -> bool:
-        from utils.hostlists_manager import rebuild_other_files
+        from lists.hostlists_manager import rebuild_other_files
 
         os.makedirs(os.path.dirname(OTHER_USER_PATH), exist_ok=True)
         with open(OTHER_USER_PATH, "w", encoding="utf-8") as fh:
@@ -493,7 +496,7 @@ class HostlistPageController:
 
     @staticmethod
     def save_custom_domains_text(text: str) -> CustomDomainsSaveState:
-        from utils.hostlists_manager import rebuild_other_files
+        from lists.hostlists_manager import rebuild_other_files
 
         os.makedirs(os.path.dirname(OTHER_USER_PATH), exist_ok=True)
 
@@ -536,7 +539,7 @@ class HostlistPageController:
     @staticmethod
     def get_custom_domains_base_set() -> set[str]:
         try:
-            from utils.hostlists_manager import get_base_domains_set
+            from lists.hostlists_manager import get_base_domains_set
 
             return get_base_domains_set()
         except Exception:
@@ -659,7 +662,7 @@ class HostlistPageController:
     @staticmethod
     def get_custom_ipset_base_set() -> set[str]:
         try:
-            from utils.ipsets_manager import get_ipset_all_base_set
+            from lists.ipsets_manager import get_ipset_all_base_set
 
             return get_ipset_all_base_set()
         except Exception:
@@ -667,7 +670,7 @@ class HostlistPageController:
 
     @staticmethod
     def load_custom_ipset_text() -> CustomIpSetLoadState:
-        from utils.ipsets_manager import ensure_ipset_all_user_file
+        from lists.ipsets_manager import ensure_ipset_all_user_file
 
         ensure_ipset_all_user_file()
         state = HostlistPageController.load_ipset_all_entries()
@@ -797,7 +800,7 @@ class HostlistPageController:
     @staticmethod
     def get_custom_ipru_base_set() -> set[str]:
         try:
-            from utils.ipsets_manager import get_ipset_ru_base_set
+            from lists.ipsets_manager import get_ipset_ru_base_set
 
             return get_ipset_ru_base_set()
         except Exception:
@@ -964,7 +967,7 @@ class HostlistPageController:
 
     @staticmethod
     def save_custom_netrogat_text(text: str) -> CustomNetrogatSaveState:
-        from utils.netrogat_manager import _normalize_domain
+        from lists.netrogat_manager import _normalize_domain
 
         domains: list[str] = []
         normalized_lines: list[str] = []
@@ -997,7 +1000,7 @@ class HostlistPageController:
 
     @staticmethod
     def build_custom_netrogat_status_plan(text: str) -> CustomNetrogatStatusPlan:
-        from utils.netrogat_manager import _normalize_domain
+        from lists.netrogat_manager import _normalize_domain
 
         lines = [
             line.strip()
@@ -1022,7 +1025,7 @@ class HostlistPageController:
     @staticmethod
     def get_netrogat_base_set() -> set[str]:
         try:
-            from utils.netrogat_manager import get_netrogat_base_set
+            from lists.netrogat_manager import get_netrogat_base_set
 
             return get_netrogat_base_set()
         except Exception:
@@ -1030,7 +1033,7 @@ class HostlistPageController:
 
     @staticmethod
     def build_add_custom_netrogat_plan(*, raw_text: str, current_text: str) -> CustomNetrogatAddPlan:
-        from utils.netrogat_manager import _normalize_domain
+        from lists.netrogat_manager import _normalize_domain
 
         raw = str(raw_text or "").strip()
         if not raw:
@@ -1124,7 +1127,7 @@ class HostlistPageController:
 
     @staticmethod
     def open_domains_user_file() -> None:
-        from utils.hostlists_manager import ensure_hostlists_exist
+        from lists.hostlists_manager import ensure_hostlists_exist
 
         ensure_hostlists_exist()
         if os.path.exists(OTHER_USER_PATH):
@@ -1135,13 +1138,13 @@ class HostlistPageController:
 
     @staticmethod
     def reset_domains_file() -> bool:
-        from utils.hostlists_manager import reset_other_file_from_template
+        from lists.hostlists_manager import reset_other_file_from_template
 
         return bool(reset_other_file_from_template())
 
     @staticmethod
     def load_ipset_all_entries() -> HostlistEntriesState:
-        from utils.ipsets_manager import (
+        from lists.ipsets_manager import (
             IPSET_ALL_USER_PATH,
             ensure_ipset_all_user_file,
             get_ipset_all_base_set,
@@ -1156,7 +1159,7 @@ class HostlistPageController:
 
     @staticmethod
     def save_ipset_all_entries(entries: list[str]) -> bool:
-        from utils.ipsets_manager import IPSET_ALL_USER_PATH, sync_ipset_all_after_user_change
+        from lists.ipsets_manager import IPSET_ALL_USER_PATH, sync_ipset_all_after_user_change
 
         os.makedirs(os.path.dirname(IPSET_ALL_USER_PATH), exist_ok=True)
         with open(IPSET_ALL_USER_PATH, "w", encoding="utf-8") as fh:
@@ -1165,7 +1168,7 @@ class HostlistPageController:
 
     @staticmethod
     def open_ipset_all_user_file() -> None:
-        from utils.ipsets_manager import IPSET_ALL_USER_PATH, ensure_ipset_all_user_file
+        from lists.ipsets_manager import IPSET_ALL_USER_PATH, ensure_ipset_all_user_file
 
         ensure_ipset_all_user_file()
         if os.path.exists(IPSET_ALL_USER_PATH):
@@ -1176,20 +1179,20 @@ class HostlistPageController:
 
     @staticmethod
     def load_netrogat_entries() -> HostlistEntriesState:
-        from utils.netrogat_manager import ensure_netrogat_user_file, get_netrogat_base_set, load_netrogat
+        from lists.netrogat_manager import ensure_netrogat_user_file, get_netrogat_base_set, load_netrogat
 
         ensure_netrogat_user_file()
         return HostlistEntriesState(entries=load_netrogat(), base_set=get_netrogat_base_set())
 
     @staticmethod
     def save_netrogat_entries(domains: list[str]) -> bool:
-        from utils.netrogat_manager import save_netrogat
+        from lists.netrogat_manager import save_netrogat
 
         return bool(save_netrogat(domains))
 
     @staticmethod
     def open_netrogat_user_file() -> None:
-        from utils.netrogat_manager import NETROGAT_USER_PATH, ensure_netrogat_user_file
+        from lists.netrogat_manager import NETROGAT_USER_PATH, ensure_netrogat_user_file
 
         ensure_netrogat_user_file()
         if NETROGAT_USER_PATH and os.path.exists(NETROGAT_USER_PATH):
@@ -1199,7 +1202,7 @@ class HostlistPageController:
 
     @staticmethod
     def open_netrogat_final_file() -> None:
-        from utils.netrogat_manager import ensure_netrogat_exists
+        from lists.netrogat_manager import ensure_netrogat_exists
 
         ensure_netrogat_exists()
         if NETROGAT_PATH and os.path.exists(NETROGAT_PATH):
@@ -1209,7 +1212,7 @@ class HostlistPageController:
 
     @staticmethod
     def add_missing_netrogat_defaults() -> int:
-        from utils.netrogat_manager import ensure_netrogat_base_defaults
+        from lists.netrogat_manager import ensure_netrogat_base_defaults
 
         return int(ensure_netrogat_base_defaults())
 
@@ -1448,7 +1451,7 @@ class HostlistPageController:
 
     @staticmethod
     def load_ipset_ru_entries() -> HostlistEntriesState:
-        from utils.ipsets_manager import (
+        from lists.ipsets_manager import (
             IPSET_RU_USER_PATH,
             ensure_ipset_ru_user_file,
             get_ipset_ru_base_set,
@@ -1463,7 +1466,7 @@ class HostlistPageController:
 
     @staticmethod
     def save_ipset_ru_entries(entries: list[str]) -> bool:
-        from utils.ipsets_manager import IPSET_RU_USER_PATH, sync_ipset_ru_after_user_change
+        from lists.ipsets_manager import IPSET_RU_USER_PATH, sync_ipset_ru_after_user_change
 
         os.makedirs(os.path.dirname(IPSET_RU_USER_PATH), exist_ok=True)
         with open(IPSET_RU_USER_PATH, "w", encoding="utf-8") as fh:
@@ -1472,7 +1475,7 @@ class HostlistPageController:
 
     @staticmethod
     def open_ipset_ru_user_file() -> None:
-        from utils.ipsets_manager import IPSET_RU_USER_PATH, ensure_ipset_ru_user_file
+        from lists.ipsets_manager import IPSET_RU_USER_PATH, ensure_ipset_ru_user_file
 
         ensure_ipset_ru_user_file()
         if IPSET_RU_USER_PATH and os.path.exists(IPSET_RU_USER_PATH):
@@ -1482,7 +1485,7 @@ class HostlistPageController:
 
     @staticmethod
     def open_ipset_ru_final_file() -> None:
-        from utils.ipsets_manager import IPSET_RU_PATH, rebuild_ipset_ru_files
+        from lists.ipsets_manager import IPSET_RU_PATH, rebuild_ipset_ru_files
 
         rebuild_ipset_ru_files()
         if IPSET_RU_PATH and os.path.exists(IPSET_RU_PATH):

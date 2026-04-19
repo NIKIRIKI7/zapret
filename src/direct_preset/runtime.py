@@ -11,7 +11,11 @@ from log.log import log
 from direct_preset.service import BasicUiPayload, TargetDetailPayload
 from core.presets.cache_signatures import path_cache_signature
 from direct_preset.facade import DirectPresetFacade
-from direct_preset.modes import DIRECT_UI_MODE_DEFAULT, load_current_direct_ui_mode
+from direct_preset.modes import (
+    DIRECT_UI_MODE_DEFAULT,
+    load_current_direct_ui_mode,
+    normalize_direct_ui_mode_for_engine,
+)
 
 
 SnapshotT = TypeVar("SnapshotT")
@@ -62,6 +66,7 @@ class DirectBasicUiSnapshotWorker(QThread):
         *,
         snapshot_service: "DirectUiSnapshotService",
         launch_method: str,
+        direct_mode_override: str | None = None,
         refresh: bool = False,
         startup_scope: str | None = None,
         parent=None,
@@ -70,12 +75,14 @@ class DirectBasicUiSnapshotWorker(QThread):
         self._request_id = int(request_id)
         self._snapshot_service = snapshot_service
         self._launch_method = str(launch_method or "").strip().lower()
+        self._direct_mode_override = str(direct_mode_override or "").strip().lower() or None
         self._refresh = bool(refresh)
         self._startup_scope = startup_scope
 
     def run(self) -> None:
         snapshot = self._snapshot_service.get_basic_ui_snapshot(
             self._launch_method,
+            direct_mode_override=self._direct_mode_override,
             refresh=self._refresh,
             startup_scope=self._startup_scope,
         )
@@ -92,6 +99,7 @@ class DirectTargetDetailSnapshotWorker(QThread):
         snapshot_service: "DirectUiSnapshotService",
         launch_method: str,
         target_key: str,
+        direct_mode_override: str | None = None,
         refresh: bool = False,
         parent=None,
     ) -> None:
@@ -100,12 +108,14 @@ class DirectTargetDetailSnapshotWorker(QThread):
         self._snapshot_service = snapshot_service
         self._launch_method = str(launch_method or "").strip().lower()
         self._target_key = str(target_key or "").strip().lower()
+        self._direct_mode_override = str(direct_mode_override or "").strip().lower() or None
         self._refresh = bool(refresh)
 
     def run(self) -> None:
         snapshot = self._snapshot_service.get_target_detail_snapshot(
             self._launch_method,
             self._target_key,
+            direct_mode_override=self._direct_mode_override,
             refresh=self._refresh,
         )
         self.loaded.emit(self._request_id, snapshot)
@@ -119,11 +129,11 @@ class DirectUiSnapshotService:
     source preset и текущему режиму direct UI.
     """
 
-    def __init__(self, facade_factory: Callable[[str], DirectPresetFacade]) -> None:
+    def __init__(self, facade_factory: Callable[[str, str | None], DirectPresetFacade]) -> None:
         self._facade_factory = facade_factory
         self._lock = RLock()
-        self._basic_payload_cache: dict[str, _SnapshotCache[BasicUiPayload]] = {}
-        self._target_detail_cache: dict[tuple[str, str], _SnapshotCache[TargetDetailPayload | None]] = {}
+        self._basic_payload_cache: dict[tuple[str, str], _SnapshotCache[BasicUiPayload]] = {}
+        self._target_detail_cache: dict[tuple[str, str, str], _SnapshotCache[TargetDetailPayload | None]] = {}
         self._advanced_settings_cache: dict[str, _SnapshotCache[dict]] = {}
 
     @staticmethod
@@ -142,8 +152,11 @@ class DirectUiSnapshotService:
     def _normalize_launch_method(launch_method: str) -> str:
         return str(launch_method or "").strip().lower()
 
-    def _facade(self, launch_method: str) -> DirectPresetFacade:
-        return self._facade_factory(self._normalize_launch_method(launch_method))
+    def _facade(self, launch_method: str, *, direct_mode_override: str | None = None) -> DirectPresetFacade:
+        return self._facade_factory(
+            self._normalize_launch_method(launch_method),
+            str(direct_mode_override or "").strip().lower() or None,
+        )
 
     def _resolve_selected_source_revision(self, launch_method: str) -> tuple[object, ...]:
         method = self._normalize_launch_method(launch_method)
@@ -168,41 +181,72 @@ class DirectUiSnapshotService:
         return (method, file_name, display_name, "signature-unavailable")
 
     @staticmethod
-    def _resolve_z2_strategy_set() -> str:
+    def _resolve_z2_direct_mode(direct_mode_override: str | None = None) -> str:
+        if direct_mode_override is not None:
+            return normalize_direct_ui_mode_for_engine("winws2", direct_mode_override)
         resolved = load_current_direct_ui_mode("winws2")
         return resolved or DIRECT_UI_MODE_DEFAULT
 
-    def _resolve_basic_ui_revision(self, launch_method: str) -> tuple[object, ...]:
+    def _resolve_basic_ui_revision(
+        self,
+        launch_method: str,
+        *,
+        direct_mode_override: str | None = None,
+    ) -> tuple[object, ...]:
         method = self._normalize_launch_method(launch_method)
         if method == "direct_zapret2":
-            return (*self._resolve_selected_source_revision(method), self._resolve_z2_strategy_set())
+            return (
+                *self._resolve_selected_source_revision(method),
+                self._resolve_z2_direct_mode(direct_mode_override),
+            )
         return self._resolve_selected_source_revision(method)
 
-    def _resolve_target_detail_revision(self, launch_method: str, target_key: str) -> tuple[object, ...]:
-        return (*self._resolve_basic_ui_revision(launch_method), str(target_key or "").strip().lower())
+    def _resolve_target_detail_revision(
+        self,
+        launch_method: str,
+        target_key: str,
+        *,
+        direct_mode_override: str | None = None,
+    ) -> tuple[object, ...]:
+        return (
+            *self._resolve_basic_ui_revision(
+                launch_method,
+                direct_mode_override=direct_mode_override,
+            ),
+            str(target_key or "").strip().lower(),
+        )
 
     def get_basic_ui_snapshot(
         self,
         launch_method: str,
         *,
+        direct_mode_override: str | None = None,
         refresh: bool = False,
         startup_scope: str | None = None,
     ) -> DirectBasicUiSnapshot:
         method = self._normalize_launch_method(launch_method)
-        revision = self._resolve_basic_ui_revision(method)
+        normalized_mode = str(direct_mode_override or "").strip().lower() or None
+        revision = self._resolve_basic_ui_revision(
+            method,
+            direct_mode_override=normalized_mode,
+        )
+        cache_key = (method, normalized_mode or "")
 
         with self._lock:
-            cache = self._basic_payload_cache.setdefault(method, _SnapshotCache())
+            cache = self._basic_payload_cache.setdefault(cache_key, _SnapshotCache())
             if not refresh and cache.matches(revision):
                 return DirectBasicUiSnapshot(revision=revision, payload=cache.get() or self._empty_basic_payload())
 
         try:
-            payload = self._facade(method).get_basic_ui_payload(startup_scope=startup_scope)
+            payload = self._facade(
+                method,
+                direct_mode_override=normalized_mode,
+            ).get_basic_ui_payload(startup_scope=startup_scope)
         except Exception:
             payload = self._empty_basic_payload()
 
         with self._lock:
-            cache.store(revision, payload)
+            self._basic_payload_cache.setdefault(cache_key, _SnapshotCache()).store(revision, payload)
         return DirectBasicUiSnapshot(revision=revision, payload=payload)
 
     def get_target_detail_snapshot(
@@ -210,12 +254,18 @@ class DirectUiSnapshotService:
         launch_method: str,
         target_key: str,
         *,
+        direct_mode_override: str | None = None,
         refresh: bool = False,
     ) -> DirectTargetDetailSnapshot:
         method = self._normalize_launch_method(launch_method)
         normalized_key = str(target_key or "").strip().lower()
-        revision = self._resolve_target_detail_revision(method, normalized_key)
-        cache_key = (method, normalized_key)
+        normalized_mode = str(direct_mode_override or "").strip().lower() or None
+        revision = self._resolve_target_detail_revision(
+            method,
+            normalized_key,
+            direct_mode_override=normalized_mode,
+        )
+        cache_key = (method, normalized_key, normalized_mode or "")
 
         with self._lock:
             cache = self._target_detail_cache.setdefault(cache_key, _SnapshotCache())
@@ -223,7 +273,10 @@ class DirectUiSnapshotService:
                 return DirectTargetDetailSnapshot(revision=revision, target_key=normalized_key, payload=cache.get())
 
         try:
-            payload = self._facade(method).get_target_detail_payload(normalized_key)
+            payload = self._facade(
+                method,
+                direct_mode_override=normalized_mode,
+            ).get_target_detail_payload(normalized_key)
         except Exception as exc:
             log(
                 f"DirectUiSnapshotService[{method}]: failed to build target detail payload "
@@ -259,11 +312,13 @@ class DirectUiSnapshotService:
         self,
         launch_method: str,
         *,
+        direct_mode_override: str | None = None,
         refresh: bool = False,
         startup_scope: str | None = None,
     ) -> BasicUiPayload:
         return self.get_basic_ui_snapshot(
             launch_method,
+            direct_mode_override=direct_mode_override,
             refresh=refresh,
             startup_scope=startup_scope,
         ).payload
@@ -273,11 +328,13 @@ class DirectUiSnapshotService:
         launch_method: str,
         target_key: str,
         *,
+        direct_mode_override: str | None = None,
         refresh: bool = False,
     ) -> TargetDetailPayload | None:
         return self.get_target_detail_snapshot(
             launch_method,
             target_key,
+            direct_mode_override=direct_mode_override,
             refresh=refresh,
         ).payload
 

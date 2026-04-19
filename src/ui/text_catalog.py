@@ -3216,8 +3216,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "🔄 Creating code...",
     },
     "page.premium.activation.success.code_created": {
-        "ru": "✅ Код создан и скопирован. Отправьте его боту в Telegram.",
-        "en": "✅ Code created and copied. Send it to the bot in Telegram.",
+        "ru": "✅ Код создан примерно на 10 минут и скопирован. Сразу отправьте его боту в Telegram.",
+        "en": "✅ Code was created for about 10 minutes and copied. Send it to the bot right away.",
     },
     "page.premium.connection.progress.testing": {
         "ru": "🔄 Проверка соединения...",
@@ -3395,13 +3395,13 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "S: {version}",
         "en": "S: {version}",
     },
-    "page.servers.table.versions.test_template": {
-        "ru": "T: {version}",
-        "en": "T: {version}",
+    "page.servers.table.versions.dev_template": {
+        "ru": "D: {version}",
+        "en": "D: {version}",
     },
     "page.servers.table.versions.both_template": {
-        "ru": "S: {stable}, T: {test}",
-        "en": "S: {stable}, T: {test}",
+        "ru": "S: {stable}, D: {dev}",
+        "en": "S: {stable}, D: {dev}",
     },
     "page.servers.table.versions.rate_limit_template": {
         "ru": "Лимит: {remaining}/{limit}",
@@ -4543,10 +4543,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Target",
         "en": "Target",
     },
-    "page.z2_strategy_detail.header.select_category": {
-        "ru": "Выберите target",
-        "en": "Select a target",
-    },
     "page.z2_strategy_detail.back.strategies": {
         "ru": "Прямой запуск Zapret 2",
         "en": "Direct launch Zapret 2",
@@ -4575,21 +4571,61 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "IPset",
         "en": "IPset",
     },
+    "page.z2_strategy_detail.out_range.kind": {
+        "ru": "Тип:",
+        "en": "Type:",
+    },
+    "page.z2_strategy_detail.out_range.kind.simple": {
+        "ru": "Простой",
+        "en": "Simple",
+    },
+    "page.z2_strategy_detail.out_range.kind.expression": {
+        "ru": "Выражение",
+        "en": "Expression",
+    },
+    "page.z2_strategy_detail.out_range.kind.tooltip": {
+        "ru": "Простой режим для a, x, n и d. Выражение нужно для форм вроде s1<d1, b1000- или <s34228.",
+        "en": "Simple mode is for a, x, n, and d. Expression mode is for forms like s1<d1, b1000-, or <s34228.",
+    },
     "page.z2_strategy_detail.out_range.mode": {
         "ru": "Режим:",
         "en": "Mode:",
     },
     "page.z2_strategy_detail.out_range.mode.tooltip": {
-        "ru": "n = количество пакетов с самого первого, d = отсчитывать ТОЛЬКО количество пакетов с данными",
-        "en": "n = count packets from the first one, d = count only packets with payload",
+        "ru": "a = всегда, x = никогда, n = номер пакета, d = номер пакета с данными",
+        "en": "a = always, x = never, n = packet number, d = packet number with payload",
     },
     "page.z2_strategy_detail.out_range.value": {
         "ru": "Значение:",
         "en": "Value:",
     },
     "page.z2_strategy_detail.out_range.value.tooltip": {
-        "ru": "--out-range: ограничение количества исходящих пакетов (n) или задержки (d)",
-        "en": "--out-range: outgoing packet limit (n) or delay count (d)",
+        "ru": "Для режимов n и d укажите число. Для a и x значение не используется.",
+        "en": "Enter a number for n and d. The value is ignored for a and x.",
+    },
+    "page.z2_strategy_detail.out_range.expression": {
+        "ru": "Выражение:",
+        "en": "Expression:",
+    },
+    "page.z2_strategy_detail.out_range.expression.placeholder": {
+        "ru": "Например: s1<d1, b1000-, <s34228",
+        "en": "For example: s1<d1, b1000-, <s34228",
+    },
+    "page.z2_strategy_detail.out_range.expression.tooltip": {
+        "ru": "Введите только значение после --out-range=. Например: x, -d10, s1<d1, b1000- или <s34228.",
+        "en": "Enter only the value after --out-range=. For example: x, -d10, s1<d1, b1000-, or <s34228.",
+    },
+    "page.z2_strategy_detail.out_range.expression.notice": {
+        "ru": "Можно использовать a, x, -n10, -d10 и диапазоны вроде s1<d1, b1000- или <s34228.",
+        "en": "You can use a, x, -n10, -d10, and ranges like s1<d1, b1000-, or <s34228.",
+    },
+    "page.z2_strategy_detail.out_range.expression.invalid": {
+        "ru": "Выражение out-range не распознано. Ожидается значение вроде x, -d10, s1<d1, b1000- или <s34228.",
+        "en": "The out-range expression was not recognized. Expected a value like x, -d10, s1<d1, b1000-, or <s34228.",
+    },
+    "page.z2_strategy_detail.out_range.complex.notice": {
+        "ru": "Сейчас используется сложное выражение out-range: {expr}\nПереключение режима заменит его простым значением.",
+        "en": "A complex out-range expression is currently used: {expr}\nChanging the mode will replace it with a simple value.",
     },
     "page.z2_strategy_detail.search.placeholder": {
         "ru": "Поиск по имени или args...",
@@ -5236,8 +5272,8 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "Want to add a new site or service to Zapret 2? Open the GitHub form and describe what should be added to the hostlist or ipset.",
     },
     "page.z2_direct.empty.no_presets": {
-        "ru": "Пресеты Zapret 2 не найдены. Обычно здесь должны быть txt-файлы в %APPDATA%\\zapret\\presets_v2. Если папка пустая, встроенные пресеты не были скопированы или были удалены.",
-        "en": "Zapret 2 presets were not found. Normally txt files should exist in %APPDATA%\\zapret\\presets_v2. If the folder is empty, built-in presets were not copied or were removed.",
+        "ru": "Пресеты Zapret 2 не найдены. Обычно здесь должны быть txt-файлы в папке presets_v2 рядом с программой. Если папка пустая, встроенные пресеты не были скопированы или были удалены.",
+        "en": "Zapret 2 presets were not found. Normally txt files should exist in the presets_v2 folder near the program. If the folder is empty, built-in presets were not copied or were removed.",
     },
     "page.z2_direct.empty.no_selected_preset": {
         "ru": "Не удалось определить выбранный source preset. Откройте список пресетов, выберите любой пресет заново и нажмите «Обновить».",

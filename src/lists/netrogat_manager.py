@@ -2,14 +2,22 @@ import os
 import re
 from typing import List, Tuple
 
-from config.config import LISTS_FOLDER, NETROGAT_PATH
+from lists.core.builders import write_combined_file
+from lists.core.files import (
+    normalize_newlines,
+    prepare_user_file,
+    read_text_file_safe,
+    sync_user_backup,
+    write_text_file,
+)
+from lists.core.paths import get_list_backup_path, get_list_base_path, get_list_final_path, get_list_user_path
 
 from log.log import log
 
 
-
-NETROGAT_BASE_PATH = os.path.join(LISTS_FOLDER, "netrogat.base.txt")
-NETROGAT_USER_PATH = os.path.join(LISTS_FOLDER, "netrogat.user.txt")
+NETROGAT_PATH = get_list_final_path("netrogat")
+NETROGAT_BASE_PATH = get_list_base_path("netrogat")
+NETROGAT_USER_PATH = get_list_user_path("netrogat")
 
 
 # Базовые домены исключений.
@@ -147,27 +155,6 @@ _NETROGAT_BASE_HEADER = """\
 """
 
 
-def _normalize_newlines(text: str) -> str:
-    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    if normalized and not normalized.endswith("\n"):
-        normalized += "\n"
-    return normalized
-
-
-def _write_text_file(path: str, content: str) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write(_normalize_newlines(content))
-
-
-def _read_text_file_safe(path: str) -> str | None:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception:
-        return None
-
-
 def _normalize_domain(text: str) -> str | None:
     """Приводит строку к домену, убирает схемы/путь/порт, нижний регистр."""
     s = text.strip()
@@ -197,17 +184,6 @@ def _normalize_domain(text: str) -> str | None:
         return s
 
     return None
-
-
-def _dedup_preserve_order(items: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        out.append(item)
-    return out
 
 
 def _read_effective_domain_entries(path: str) -> list[str]:
@@ -287,10 +263,10 @@ def _ensure_netrogat_base_updated() -> tuple[bool, int]:
         added_missing = sum(1 for d in defaults if d not in existing_set)
 
         expected_content = _build_base_content()
-        current_content = _read_text_file_safe(NETROGAT_BASE_PATH)
+        current_content = read_text_file_safe(NETROGAT_BASE_PATH)
 
-        if _normalize_newlines(current_content or "") != _normalize_newlines(expected_content):
-            _write_text_file(NETROGAT_BASE_PATH, expected_content)
+        if normalize_newlines(current_content or "") != normalize_newlines(expected_content):
+            write_text_file(NETROGAT_BASE_PATH, expected_content)
             if current_content is None:
                 log(
                     f"Создан netrogat.base.txt с {len(defaults)} доменами",
@@ -306,41 +282,6 @@ def _ensure_netrogat_base_updated() -> tuple[bool, int]:
     except Exception as e:
         log(f"Ошибка подготовки netrogat.base.txt: {e}", "ERROR")
         return False, 0
-
-
-def _ensure_netrogat_user_file_exists() -> bool:
-    try:
-        os.makedirs(os.path.dirname(NETROGAT_USER_PATH), exist_ok=True)
-
-        if os.path.exists(NETROGAT_USER_PATH):
-            return True
-
-        _write_text_file(NETROGAT_USER_PATH, "")
-        return True
-    except Exception as e:
-        log(f"Ошибка подготовки netrogat.user.txt: {e}", "ERROR")
-        return False
-
-
-def _write_combined_netrogat_file() -> bool:
-    """Генерирует итоговый netrogat.txt = base + user (dedup, base-first)."""
-    try:
-        base_entries = _read_effective_domain_entries(NETROGAT_BASE_PATH)
-        user_entries = _read_effective_domain_entries(NETROGAT_USER_PATH)
-
-        base_set = set(base_entries)
-        combined = list(base_entries)
-        for domain in user_entries:
-            if domain not in base_set:
-                combined.append(domain)
-
-        combined = _dedup_preserve_order(combined)
-        content = "\n".join(combined) + ("\n" if combined else "")
-        _write_text_file(NETROGAT_PATH, content)
-        return True
-    except Exception as e:
-        log(f"Ошибка генерации netrogat.txt: {e}", "ERROR")
-        return False
 
 
 def get_netrogat_base_entries() -> list[str]:
@@ -360,7 +301,13 @@ def ensure_netrogat_user_file() -> bool:
     ok, _ = _ensure_netrogat_base_updated()
     if not ok:
         return False
-    return _ensure_netrogat_user_file_exists()
+    return prepare_user_file(
+        NETROGAT_USER_PATH,
+        get_list_backup_path("netrogat.user.txt"),
+        restored_message="netrogat.user.txt восстановлен из backup",
+        error_message="Ошибка подготовки netrogat.user.txt",
+        log_func=log,
+    )
 
 
 def sync_netrogat_after_user_change() -> bool:
@@ -370,10 +317,21 @@ def sync_netrogat_after_user_change() -> bool:
         if not ok:
             return False
 
-        if not _ensure_netrogat_user_file_exists():
+        if not ensure_netrogat_user_file():
             return False
 
-        return _write_combined_netrogat_file()
+        try:
+            write_combined_file(
+                NETROGAT_PATH,
+                _read_effective_domain_entries(NETROGAT_BASE_PATH),
+                _read_effective_domain_entries(NETROGAT_USER_PATH),
+            )
+        except Exception as e:
+            log(f"Ошибка генерации netrogat.txt: {e}", "ERROR")
+            return False
+
+        sync_user_backup(NETROGAT_USER_PATH, get_list_backup_path("netrogat.user.txt"))
+        return True
     except Exception as e:
         log(f"Ошибка sync_netrogat_after_user_change: {e}", "ERROR")
         return False
@@ -386,12 +344,20 @@ def ensure_netrogat_exists() -> bool:
         if not ok:
             return False
 
-        if not _ensure_netrogat_user_file_exists():
+        if not ensure_netrogat_user_file():
             return False
 
-        if not _write_combined_netrogat_file():
+        try:
+            write_combined_file(
+                NETROGAT_PATH,
+                _read_effective_domain_entries(NETROGAT_BASE_PATH),
+                _read_effective_domain_entries(NETROGAT_USER_PATH),
+            )
+        except Exception as e:
+            log(f"Ошибка генерации netrogat.txt: {e}", "ERROR")
             return False
 
+        sync_user_backup(NETROGAT_USER_PATH, get_list_backup_path("netrogat.user.txt"))
         return _count_effective_entries(NETROGAT_PATH) > 0
     except Exception as e:
         log(f"Ошибка создания netrogat файлов: {e}", "ERROR")
@@ -431,7 +397,7 @@ def save_netrogat(domains: List[str]) -> bool:
 
         lines = _sanitize_user_lines(domains)
         content = "\n".join(lines) + ("\n" if lines else "")
-        _write_text_file(NETROGAT_USER_PATH, content)
+        write_text_file(NETROGAT_USER_PATH, content)
 
         if not sync_netrogat_after_user_change():
             return False

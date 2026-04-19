@@ -1,4 +1,4 @@
-"""Build-helper'ы для страницы деталей стратегии Zapret 1."""
+"""UI/build helper'ы для страницы деталей стратегии Zapret 1."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
+
 from filters.ui.strategy_detail.filter_mode_ui import apply_filter_mode_selector_texts
 
 
@@ -239,7 +240,7 @@ def build_strategy_detail_v1_main_sections(
     empty_label = caption_label_cls(
         tr_fn(
             "page.z1_strategy_detail.empty.no_strategies",
-            "Нет доступных стратегий. Проверьте %APPDATA%\\zapret\\direct_zapret1\\",
+            "Нет доступных стратегий. Проверьте папку presets_v1 рядом с программой.",
         )
     )
     empty_label.setWordWrap(True)

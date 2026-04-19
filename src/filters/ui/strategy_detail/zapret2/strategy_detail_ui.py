@@ -2,12 +2,53 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
 from blobs.service import get_blobs_info
 from filters.ui.strategy_detail.filter_mode_ui import apply_filter_mode_selector_texts
-from filters.ui.strategy_detail.zapret2.common import prepare_compact_setting_group as _prepare_compact_setting_group
+from filters.ui.strategy_detail.shared import build_detail_subtitle_widgets, build_strategies_tree_widget
+from filters.ui.strategy_detail.zapret2.common import (
+    STRATEGY_TECHNIQUE_FILTERS,
+    TCP_PHASE_TAB_ORDER,
+    ElidedLabel,
+    build_strategy_block_shell,
+    build_strategy_header_widgets,
+    build_strategy_toolbar_widgets,
+    build_tcp_phase_bar_widgets,
+    prepare_compact_setting_group as _prepare_compact_setting_group,
+)
+
+
+@dataclass(slots=True)
+class StrategyDetailHeaderSection:
+    header_widget: QWidget
+    breadcrumb: object | None
+    parent_link: object | None
+    title_label: object
+    spinner: object
+    success_icon: object
+    subtitle_label: object
+    subtitle_strategy_label: object
+
+
+@dataclass(slots=True)
+class StrategyDetailStrategiesSection:
+    block_widget: QWidget
+    card_widget: object
+    header_widget: object
+    title_label: object
+    summary_label: object
+    toolbar_widget: object
+    search_input: object
+    filter_combo: object
+    sort_combo: object
+    edit_args_btn: object
+    phases_bar_widget: object
+    phase_tabbar: object
+    phase_tab_index_by_key: dict[str, int]
+    phase_tab_key_by_index: dict[int, str]
+    strategies_tree: object
 
 
 @dataclass(slots=True)
@@ -18,11 +59,16 @@ class StrategyDetailSettingsSection:
     filter_mode_frame: object
     filter_mode_selector: object
     out_range_frame: object
+    out_range_kind_label: object
+    out_range_kind_seg: object
     out_range_mode_label: object
     out_range_seg: object
     out_range_mode: str
     out_range_value_label: object
     out_range_spin: object
+    out_range_expression_label: object
+    out_range_expression_input: object
+    out_range_complex_label: object
     send_frame: object
     send_toggle_row: object
     send_toggle: object
@@ -59,6 +105,160 @@ class StrategyDetailSettingsSection:
     reset_settings_btn: object
 
 
+def build_detail_header_section(
+    *,
+    page,
+    tokens,
+    detail_text_color: str,
+    title_label_cls,
+    body_label_cls,
+    spinner_cls,
+    pixmap_label_cls,
+    transparent_push_button_cls,
+    on_breadcrumb_changed,
+    on_back_clicked,
+    get_themed_qta_icon_fn,
+) -> StrategyDetailHeaderSection:
+    header = QFrame()
+    header.setFrameShape(QFrame.Shape.NoFrame)
+    header.setStyleSheet("background: transparent; border: none;")
+    header_layout = QVBoxLayout(header)
+    header_layout.setContentsMargins(0, 0, 0, 16)
+    header_layout.setSpacing(4)
+
+    breadcrumb = None
+    parent_link = None
+    try:
+        from qfluentwidgets import BreadcrumbBar as _BreadcrumbBar
+
+        breadcrumb = _BreadcrumbBar(page)
+        breadcrumb.blockSignals(True)
+        breadcrumb.addItem("control", page._tr("page.z2_strategy_detail.breadcrumb.control", "Управление"))
+        breadcrumb.addItem("strategies", page._tr("page.z2_strategy_detail.breadcrumb.strategies", "Стратегии DPI"))
+        breadcrumb.addItem("detail", page._tr("page.z2_strategy_detail.header.category_fallback", "Target"))
+        breadcrumb.blockSignals(False)
+        breadcrumb.currentItemChanged.connect(on_breadcrumb_changed)
+        header_layout.addWidget(breadcrumb)
+    except Exception:
+        back_row = QHBoxLayout()
+        back_row.setContentsMargins(0, 0, 0, 0)
+        back_row.setSpacing(4)
+        parent_link = transparent_push_button_cls(parent=page)
+        parent_link.setText(page._tr("page.z2_strategy_detail.back.strategies", "Стратегии DPI"))
+        parent_link.setIcon(get_themed_qta_icon_fn("fa5s.chevron-left", color=tokens.fg_muted))
+        parent_link.setIconSize(QSize(12, 12))
+        parent_link.clicked.connect(on_back_clicked)
+        back_row.addWidget(parent_link)
+        back_row.addStretch()
+        header_layout.addLayout(back_row)
+
+    title_label = title_label_cls("")
+    header_layout.addWidget(title_label)
+
+    subtitle_widgets = build_detail_subtitle_widgets(
+        parent=page,
+        body_label_cls=body_label_cls,
+        spinner_cls=spinner_cls,
+        pixmap_label_cls=pixmap_label_cls,
+        subtitle_strategy_label_cls=ElidedLabel,
+        detail_text_color=detail_text_color,
+    )
+    header_layout.addWidget(subtitle_widgets.container_widget)
+
+    return StrategyDetailHeaderSection(
+        header_widget=header,
+        breadcrumb=breadcrumb,
+        parent_link=parent_link,
+        title_label=title_label,
+        spinner=subtitle_widgets.spinner,
+        success_icon=subtitle_widgets.success_icon,
+        subtitle_label=subtitle_widgets.subtitle_label,
+        subtitle_strategy_label=subtitle_widgets.subtitle_strategy_label,
+    )
+
+
+def build_strategies_section(
+    *,
+    page,
+    tokens,
+    settings_card_cls,
+    strong_label_cls,
+    caption_label_cls,
+    search_line_edit_cls,
+    combo_cls,
+    transparent_tool_button_cls,
+    segmented_widget_cls,
+    tree_cls,
+    set_tooltip_fn,
+) -> StrategyDetailStrategiesSection:
+    strategy_block_widgets = build_strategy_block_shell(settings_card_cls=settings_card_cls)
+    strategies_block = strategy_block_widgets.block_widget
+    strategies_card = strategy_block_widgets.card_widget
+
+    header_widgets = build_strategy_header_widgets(
+        title_text=page._tr("page.z2_strategy_detail.tree.title", "Все стратегии"),
+        strong_label_cls=strong_label_cls,
+        caption_label_cls=caption_label_cls,
+    )
+    strategies_card.add_widget(header_widgets.header_widget)
+
+    toolbar_widgets = build_strategy_toolbar_widgets(
+        parent=page,
+        tr=page._tr,
+        tokens=tokens,
+        search_line_edit_cls=search_line_edit_cls,
+        combo_cls=combo_cls,
+        transparent_tool_button_cls=transparent_tool_button_cls,
+        set_tooltip=set_tooltip_fn,
+        build_filter_combo_fn=page._build_strategy_filter_combo_for_page,
+        technique_filters=STRATEGY_TECHNIQUE_FILTERS,
+        on_search_changed=page._on_search_changed,
+        on_filter_changed=page._on_technique_filter_changed,
+        on_sort_changed=page._on_sort_combo_changed,
+        on_edit_args_clicked=page._toggle_args_editor,
+    )
+    strategies_card.add_widget(toolbar_widgets.toolbar_widget)
+
+    phase_widgets = build_tcp_phase_bar_widgets(
+        parent=page,
+        segmented_widget_cls=segmented_widget_cls,
+        on_click=page._on_phase_pivot_item_clicked,
+        on_changed=page._on_phase_tab_changed,
+        phase_tabs=TCP_PHASE_TAB_ORDER,
+    )
+    strategies_card.add_widget(phase_widgets.container_widget)
+
+    strategies_tree = build_strategies_tree_widget(
+        parent=page,
+        tree_cls=tree_cls,
+        on_row_clicked=page._on_row_clicked,
+        on_favorite_toggled=page._on_favorite_toggled,
+        on_working_mark_requested=page._on_tree_working_mark_requested,
+        on_preview_requested=page._on_tree_preview_requested,
+        on_preview_pinned_requested=page._on_tree_preview_pinned_requested,
+        on_preview_hide_requested=page._on_tree_preview_hide_requested,
+    )
+    strategies_card.add_widget(strategies_tree)
+
+    return StrategyDetailStrategiesSection(
+        block_widget=strategies_block,
+        card_widget=strategies_card,
+        header_widget=header_widgets.header_widget,
+        title_label=header_widgets.title_label,
+        summary_label=header_widgets.summary_label,
+        toolbar_widget=toolbar_widgets.toolbar_widget,
+        search_input=toolbar_widgets.search_input,
+        filter_combo=toolbar_widgets.filter_combo,
+        sort_combo=toolbar_widgets.sort_combo,
+        edit_args_btn=toolbar_widgets.edit_args_btn,
+        phases_bar_widget=phase_widgets.container_widget,
+        phase_tabbar=phase_widgets.tabbar,
+        phase_tab_index_by_key=phase_widgets.index_by_key,
+        phase_tab_key_by_index=phase_widgets.key_by_index,
+        strategies_tree=strategies_tree,
+    )
+
+
 def _connect_boolean_changed(widget, callback) -> None:
     signal = getattr(widget, "checkedChanged", None)
     if signal is None:
@@ -80,6 +280,7 @@ def build_settings_section(
     switch_button_cls,
     segmented_widget_cls,
     spin_box_cls,
+    line_edit_cls,
     win11_toggle_row_cls,
     win11_number_row_cls,
     win11_combo_row_cls,
@@ -87,8 +288,13 @@ def build_settings_section(
     action_button_cls,
     set_tooltip_fn,
     on_filter_mode_changed,
+    on_select_out_range_kind_simple,
+    on_select_out_range_kind_expression,
+    on_select_out_range_mode_a,
+    on_select_out_range_mode_x,
     on_select_out_range_mode_n,
     on_select_out_range_mode_d,
+    on_out_range_expression_changed,
     on_schedule_syndata_settings_save,
     on_send_toggled,
     on_syndata_toggled,
@@ -134,25 +340,72 @@ def build_settings_section(
         tr("page.z2_strategy_detail.out_range.title", "Out Range"),
         tr("page.z2_strategy_detail.out_range.description", "Ограничение исходящих пакетов"),
     )
+    out_range_controls = QWidget()
+    out_range_controls_layout = QVBoxLayout(out_range_controls)
+    out_range_controls_layout.setContentsMargins(0, 0, 0, 0)
+    out_range_controls_layout.setSpacing(6)
+
+    out_range_kind_row = QWidget()
+    out_range_kind_row_layout = QHBoxLayout(out_range_kind_row)
+    out_range_kind_row_layout.setContentsMargins(0, 0, 0, 0)
+    out_range_kind_row_layout.setSpacing(8)
+    out_range_kind_label = body_label_cls(tr("page.z2_strategy_detail.out_range.kind", "Тип:"))
+    out_range_kind_row_layout.addWidget(out_range_kind_label)
+
+    out_range_kind_seg = segmented_widget_cls()
+    out_range_kind_seg.addItem(
+        "simple",
+        tr("page.z2_strategy_detail.out_range.kind.simple", "Простой"),
+        on_select_out_range_kind_simple,
+    )
+    out_range_kind_seg.addItem(
+        "expression",
+        tr("page.z2_strategy_detail.out_range.kind.expression", "Выражение"),
+        on_select_out_range_kind_expression,
+    )
+    set_tooltip_fn(
+        out_range_kind_seg,
+        tr(
+            "page.z2_strategy_detail.out_range.kind.tooltip",
+            "Простой режим для a, x, n и d. Выражение нужно для форм вроде s1<d1, b1000- или <s34228.",
+        ),
+    )
+    out_range_kind_seg.setCurrentItem("simple")
+    out_range_kind_row_layout.addWidget(out_range_kind_seg)
+    out_range_kind_row_layout.addStretch()
+    out_range_controls_layout.addWidget(out_range_kind_row)
+
+    out_range_mode_row = QWidget()
+    out_range_mode_row_layout = QHBoxLayout(out_range_mode_row)
+    out_range_mode_row_layout.setContentsMargins(0, 0, 0, 0)
+    out_range_mode_row_layout.setSpacing(8)
     out_range_mode_label = body_label_cls(tr("page.z2_strategy_detail.out_range.mode", "Режим:"))
-    out_range_frame.control_container.addWidget(out_range_mode_label)
+    out_range_mode_row_layout.addWidget(out_range_mode_label)
 
     out_range_seg = segmented_widget_cls()
+    out_range_seg.addItem("a", "a", on_select_out_range_mode_a)
+    out_range_seg.addItem("x", "x", on_select_out_range_mode_x)
     out_range_seg.addItem("n", "n", on_select_out_range_mode_n)
     out_range_seg.addItem("d", "d", on_select_out_range_mode_d)
     set_tooltip_fn(
         out_range_seg,
         tr(
             "page.z2_strategy_detail.out_range.mode.tooltip",
-            "n = количество пакетов с самого первого, d = отсчитывать ТОЛЬКО количество пакетов с данными",
+            "a = всегда, x = никогда, n = номер пакета, d = номер пакета с данными",
         ),
     )
     out_range_mode = "d"
     out_range_seg.setCurrentItem("d")
-    out_range_frame.control_container.addWidget(out_range_seg)
+    out_range_mode_row_layout.addWidget(out_range_seg)
+    out_range_mode_row_layout.addStretch()
+    out_range_controls_layout.addWidget(out_range_mode_row)
 
+    out_range_value_row = QWidget()
+    out_range_value_row_layout = QHBoxLayout(out_range_value_row)
+    out_range_value_row_layout.setContentsMargins(0, 0, 0, 0)
+    out_range_value_row_layout.setSpacing(8)
     out_range_value_label = body_label_cls(tr("page.z2_strategy_detail.out_range.value", "Значение:"))
-    out_range_frame.control_container.addWidget(out_range_value_label)
+    out_range_value_row_layout.addWidget(out_range_value_label)
 
     out_range_spin = spin_box_cls()
     out_range_spin.setRange(1, 999)
@@ -162,11 +415,54 @@ def build_settings_section(
         out_range_spin,
         tr(
             "page.z2_strategy_detail.out_range.value.tooltip",
-            "--out-range: ограничение количества исходящих пакетов (n) или задержки (d)",
+            "Для режимов n и d укажите число. Для a и x значение не используется.",
         ),
     )
     out_range_spin.valueChanged.connect(on_schedule_syndata_settings_save)
-    out_range_frame.control_container.addWidget(out_range_spin)
+    out_range_value_row_layout.addWidget(out_range_spin)
+    out_range_value_row_layout.addStretch()
+    out_range_controls_layout.addWidget(out_range_value_row)
+
+    out_range_expression_row = QWidget()
+    out_range_expression_row_layout = QHBoxLayout(out_range_expression_row)
+    out_range_expression_row_layout.setContentsMargins(0, 0, 0, 0)
+    out_range_expression_row_layout.setSpacing(8)
+    out_range_expression_label = body_label_cls(tr("page.z2_strategy_detail.out_range.expression", "Выражение:"))
+    out_range_expression_label.setVisible(False)
+    out_range_expression_row_layout.addWidget(out_range_expression_label)
+
+    out_range_expression_input = line_edit_cls()
+    try:
+        out_range_expression_input.setClearButtonEnabled(True)
+    except Exception:
+        pass
+    out_range_expression_input.setPlaceholderText(
+        tr(
+            "page.z2_strategy_detail.out_range.expression.placeholder",
+            "Например: s1<d1, b1000-, <s34228",
+        )
+    )
+    set_tooltip_fn(
+        out_range_expression_input,
+        tr(
+            "page.z2_strategy_detail.out_range.expression.tooltip",
+            "Введите только значение после --out-range=. Например: x, -d10, s1<d1, b1000- или <s34228.",
+        ),
+    )
+    out_range_expression_input.setVisible(False)
+    out_range_expression_input.textChanged.connect(on_out_range_expression_changed)
+    out_range_expression_row_layout.addWidget(out_range_expression_input, 1)
+    out_range_controls_layout.addWidget(out_range_expression_row)
+
+    out_range_complex_label = body_label_cls("")
+    try:
+        out_range_complex_label.setWordWrap(True)
+    except Exception:
+        pass
+    out_range_complex_label.setVisible(False)
+    out_range_controls_layout.addWidget(out_range_complex_label)
+
+    out_range_frame.set_control(out_range_controls)
 
     general_card.add_widget(out_range_frame)
     toolbar_layout.addWidget(general_card)
@@ -436,11 +732,16 @@ def build_settings_section(
         filter_mode_frame=filter_mode_frame,
         filter_mode_selector=filter_mode_selector,
         out_range_frame=out_range_frame,
+        out_range_kind_label=out_range_kind_label,
+        out_range_kind_seg=out_range_kind_seg,
         out_range_mode_label=out_range_mode_label,
         out_range_seg=out_range_seg,
         out_range_mode=out_range_mode,
         out_range_value_label=out_range_value_label,
         out_range_spin=out_range_spin,
+        out_range_expression_label=out_range_expression_label,
+        out_range_expression_input=out_range_expression_input,
+        out_range_complex_label=out_range_complex_label,
         send_frame=send_frame,
         send_toggle_row=send_toggle_row,
         send_toggle=send_toggle,

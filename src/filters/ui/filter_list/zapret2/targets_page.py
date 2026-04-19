@@ -9,6 +9,7 @@ import time as _time
 from PyQt6.QtCore import pyqtSignal, QTimer, QEvent
 
 from direct_preset.runtime import DirectBasicUiSnapshotWorker
+from filters.mode_runtime import resolve_direct_mode_override
 from ui.page_dependencies import require_page_app_context
 from ui.pages.base_page import BasePage
 from direct_preset.ui.control.zapret2.strategies_build import build_z2_direct_shell
@@ -40,12 +41,12 @@ _CATEGORY_REQUEST_FORM_URL = (
 )
 
 
-def _log_startup_z2_direct_metric(section: str, elapsed_ms: float) -> None:
+def _log_startup_z2_direct_metric(scope: str, section: str, elapsed_ms: float) -> None:
     try:
         rounded = int(round(float(elapsed_ms)))
     except Exception:
         rounded = 0
-    log(f"⏱ Startup UI Section: ZAPRET2_DIRECT {section} {rounded}ms", "⏱ STARTUP")
+    log(f"⏱ Startup UI Section: {scope} {section} {rounded}ms", "⏱ STARTUP")
 
 class Zapret2StrategiesPageNew(BasePage):
     """
@@ -60,6 +61,10 @@ class Zapret2StrategiesPageNew(BasePage):
     launch_method_changed = pyqtSignal(str)  # для совместимости
     open_target_detail = pyqtSignal(str, str)  # target_key, current_strategy_id
     back_clicked = pyqtSignal()
+    direct_mode_override: str | None = None
+
+    def _startup_scope(self) -> str:
+        return "ZAPRET2_ADVANCED" if self._current_direct_mode() == "advanced" else "ZAPRET2_BASIC"
 
     def _require_app_context(self):
         return require_page_app_context(
@@ -139,7 +144,7 @@ class Zapret2StrategiesPageNew(BasePage):
         self._runtime_initialized = True
         self._request_payload_refresh(
             refresh=False,
-            startup_scope="ZAPRET2_DIRECT",
+            startup_scope=self._startup_scope(),
             reason="init.initial",
         )
 
@@ -192,11 +197,13 @@ class Zapret2StrategiesPageNew(BasePage):
                 build_started_at = self._render_probe_build_started_at
                 if finished_at is not None:
                     _log_startup_z2_direct_metric(
+                        self._startup_scope(),
                         "_build_content.render.first_paint_after_build",
                         (_time.perf_counter() - finished_at) * 1000,
                     )
                 if build_started_at is not None:
                     _log_startup_z2_direct_metric(
+                        self._startup_scope(),
                         "_build_content.render.total_to_first_paint",
                         (_time.perf_counter() - build_started_at) * 1000,
                     )
@@ -237,7 +244,7 @@ class Zapret2StrategiesPageNew(BasePage):
             self._expand_btn = shell.expand_btn
             self._collapse_btn = shell.collapse_btn
             self._info_btn = shell.info_btn
-            _log_startup_z2_direct_metric("_build_content.toolbar", (_time.perf_counter() - _t_toolbar) * 1000)
+            _log_startup_z2_direct_metric(self._startup_scope(), "_build_content.toolbar", (_time.perf_counter() - _t_toolbar) * 1000)
 
             self._content_host = shell.content_host
             self._content_host_layout = shell.content_host_layout
@@ -245,7 +252,7 @@ class Zapret2StrategiesPageNew(BasePage):
 
             self._built = True
             log("Zapret2StrategiesPageNew: shell построен", "INFO")
-            _log_startup_z2_direct_metric("_build_content.total", (_time.perf_counter() - _t_total) * 1000)
+            _log_startup_z2_direct_metric(self._startup_scope(), "_build_content.total", (_time.perf_counter() - _t_total) * 1000)
             self._render_probe_build_finished_at = _time.perf_counter()
             QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self._log_render_probe_idle())
 
@@ -271,13 +278,17 @@ class Zapret2StrategiesPageNew(BasePage):
             targets_list=self._targets_list,
             list_structure_signature=self._list_structure_signature,
             content_host_layout=self._content_host_layout,
-            startup_scope="ZAPRET2_DIRECT",
+            startup_scope=self._startup_scope(),
             empty_state_text=self._build_empty_state_text(),
             empty_label_cls=BodyLabel,
             update_current_strategies_display=self._update_current_strategies_display,
             on_target_clicked=self._on_target_clicked,
             on_selections_changed=self._on_selections_changed,
-            startup_metric_logger=_log_startup_z2_direct_metric,
+            startup_metric_logger=lambda section, elapsed_ms: _log_startup_z2_direct_metric(
+                self._startup_scope(),
+                section,
+                elapsed_ms,
+            ),
             log_debug=lambda text: log(text, "DEBUG"),
             empty_state_log_message="Zapret2StrategiesPageNew: target'ы не найдены, показано empty state",
         )
@@ -307,6 +318,7 @@ class Zapret2StrategiesPageNew(BasePage):
             request_id,
             snapshot_service=self._require_app_context().direct_ui_snapshot_service,
             launch_method="direct_zapret2",
+            direct_mode_override=self._current_direct_mode(),
             refresh=refresh,
             startup_scope=startup_scope,
             parent=self,
@@ -339,7 +351,7 @@ class Zapret2StrategiesPageNew(BasePage):
 
         started_at = self._payload_load_started_at
         if started_at is not None:
-            _log_startup_z2_direct_metric("_build_content.payload", (_time.perf_counter() - started_at) * 1000)
+            _log_startup_z2_direct_metric(self._startup_scope(), "_build_content.payload", (_time.perf_counter() - started_at) * 1000)
 
         self._apply_payload_snapshot(payload, reason=reason)
         self._render_probe_build_finished_at = _time.perf_counter()
@@ -355,6 +367,7 @@ class Zapret2StrategiesPageNew(BasePage):
             return
         self._render_probe_idle_logged = True
         _log_startup_z2_direct_metric(
+            self._startup_scope(),
             "_build_content.render.next_event_loop",
             (_time.perf_counter() - finished_at) * 1000,
         )
@@ -376,6 +389,7 @@ class Zapret2StrategiesPageNew(BasePage):
         self.target_selections, should_suppress = apply_strategy_selection(
             target_key=target_key,
             strategy_id=strategy_id,
+            direct_mode_override=self._current_direct_mode(),
             target_selections=self.target_selections,
             targets_list=self._targets_list,
             require_app_context=self._require_app_context,
@@ -420,6 +434,9 @@ class Zapret2StrategiesPageNew(BasePage):
         except Exception as e:
             log(f"Ошибка перезагрузки: {e}", "ERROR")
 
+    def _current_direct_mode(self) -> str | None:
+        return resolve_direct_mode_override(getattr(self, "direct_mode_override", None))
+
     def refresh_from_preset_switch(self):
         """
         Перечитывает активный пресет и обновляет UI списка (без перестроения).
@@ -451,7 +468,7 @@ class Zapret2StrategiesPageNew(BasePage):
                 language=self._ui_language,
                 default=(
                     "Пресеты Zapret 2 не найдены. Обычно здесь должны быть txt-файлы в "
-                    "%APPDATA%\\zapret\\presets_v2. Если папка пустая, встроенные пресеты не были "
+                    "папке presets_v2 рядом с программой. Если папка пустая, встроенные пресеты не были "
                     "скопированы или были удалены."
                 ),
             )

@@ -3,6 +3,62 @@
 from __future__ import annotations
 
 
+def _apply_sort_combo_state(combo, *, target_mode: str) -> None:
+    combo.blockSignals(True)
+    match_index = 0
+    try:
+        for i in range(combo.count()):
+            if str(combo.itemData(i) or "").strip().lower() == target_mode:
+                match_index = i
+                break
+    except Exception:
+        pass
+    try:
+        combo.setCurrentIndex(match_index)
+    except Exception:
+        pass
+    combo.blockSignals(False)
+
+
+def _apply_sort_button_state(
+    btn,
+    *,
+    icon_color: str,
+    tooltip_text: str,
+    previous_icon_color,
+    icon_builder,
+    set_tooltip_fn,
+):
+    try:
+        if icon_color != previous_icon_color:
+            btn.setIcon(icon_builder(icon_color))
+            previous_icon_color = icon_color
+    except Exception:
+        pass
+    try:
+        set_tooltip_fn(btn, tooltip_text)
+    except Exception:
+        pass
+    return previous_icon_color
+
+
+def _apply_technique_filter_combo_state(combo, *, target_index: int) -> None:
+    combo.blockSignals(True)
+    try:
+        combo.setCurrentIndex(target_index)
+    except Exception:
+        pass
+    combo.blockSignals(False)
+
+
+def _apply_strategies_summary_label(label, text: str, *, previous_text: str | None = None) -> tuple[bool, str]:
+    normalized = str(text or "")
+    if normalized == str(previous_text or ""):
+        return False, str(previous_text or "")
+    label.setText(normalized)
+    return True, normalized
+
+
 def populate_sort_combo(combo, entries) -> None:
     if combo is None:
         return
@@ -31,15 +87,13 @@ def update_sort_button_ui(
     previous_icon_color,
     get_theme_tokens_fn,
     build_tooltip_fn,
-    apply_sort_combo_state_fn,
-    apply_sort_button_state_fn,
     set_tooltip_fn,
     icon_builder,
 ):
     target_mode = str(sort_mode or "default").strip().lower() or "default"
 
     if combo is not None:
-        apply_sort_combo_state_fn(
+        _apply_sort_combo_state(
             combo,
             target_mode=target_mode,
         )
@@ -52,9 +106,8 @@ def update_sort_button_ui(
         tokens = get_theme_tokens_fn()
         color = tokens.accent_hex if is_active else tokens.fg_faint
         tooltip_text = build_tooltip_fn(mode=sort_mode, tr=tr)
-        return apply_sort_button_state_fn(
+        return _apply_sort_button_state(
             button,
-            is_active=is_active,
             icon_color=color,
             tooltip_text=tooltip_text,
             previous_icon_color=previous_icon_color,
@@ -71,7 +124,6 @@ def update_technique_filter_ui(
     active_filters: set[str],
     technique_filters,
     build_technique_filter_plan_fn,
-    apply_technique_filter_combo_state_fn,
 ) -> None:
     if combo is None:
         return
@@ -80,7 +132,7 @@ def update_technique_filter_ui(
         active_filters=active_filters,
         technique_filters=technique_filters,
     )
-    apply_technique_filter_combo_state_fn(
+    _apply_technique_filter_combo_state(
         combo,
         target_index=plan.target_index,
     )
@@ -98,7 +150,6 @@ def update_strategies_summary(
     tr,
     previous_text: str | None,
     build_summary_fn,
-    apply_summary_label_fn,
 ):
     if label is None:
         return False, str(previous_text or "")
@@ -118,7 +169,7 @@ def update_strategies_summary(
         tr=tr,
     )
 
-    return apply_summary_label_fn(
+    return _apply_strategies_summary_label(
         label,
         plan.text,
         previous_text=previous_text,

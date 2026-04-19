@@ -2,9 +2,10 @@
 
 import os
 
-from config.config import LISTS_FOLDER
-
 from log.log import log
+from lists.core.paths import get_lists_dir
+
+LISTS_FOLDER = get_lists_dir()
 
 
 
@@ -13,9 +14,9 @@ def ensure_required_files():
     try:
         os.makedirs(LISTS_FOLDER, exist_ok=True)
 
-        from utils.hostlists_manager import ensure_hostlists_exist
-        from utils.ipsets_manager import ensure_ipsets_exist
-        from utils.netrogat_manager import ensure_netrogat_exists
+        from lists.hostlists_manager import ensure_hostlists_exist
+        from lists.ipsets_manager import ensure_ipsets_exist
+        from lists.netrogat_manager import ensure_netrogat_exists
 
         hostlists_ok = ensure_hostlists_exist()
         ipsets_ok = ensure_ipsets_exist()

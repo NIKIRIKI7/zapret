@@ -1,19 +1,8 @@
 from __future__ import annotations
 
-import configparser
-import json
-import os
-from pathlib import Path
-
-from config.config import APPDATA_DIR, get_zapret_userdata_dir
-
 from log.log import log
+from settings import store as settings_store
 
-from safe_construct import safe_construct
-
-_LAUNCH_METHOD_FILE = os.path.join(APPDATA_DIR, "strategy_Launch_method.ini")
-_LAUNCH_METHOD_SECTION = "Settings"
-_LAUNCH_METHOD_KEY = "StrategyLaunchMethod"
 _LAUNCH_METHOD_DEFAULT = "direct_zapret2"
 _SUPPORTED_LAUNCH_METHODS = {
     "direct_zapret2",
@@ -25,49 +14,6 @@ DIRECT_UI_MODE_DEFAULT = "basic"
 _VALID_DIRECT_ZAPRET2_UI_MODES = frozenset({"basic", "advanced"})
 
 
-def _ui_prefs_path() -> Path:
-    base = ""
-    try:
-        base = (get_zapret_userdata_dir() or "").strip()
-    except Exception:
-        base = ""
-
-    if not base:
-        appdata = (os.environ.get("APPDATA") or "").strip()
-        if appdata:
-            base = os.path.join(appdata, "zapret")
-
-    if not base:
-        raise RuntimeError("APPDATA is required for DPI UI preferences")
-
-    # Старый пользовательский путь сохранён специально: так не теряем уже записанные
-    # настройки интерфейса после переноса исходников из strategy_menu.
-    return Path(base) / "strategy_menu" / "ui_prefs.json"
-
-
-def _load_ui_prefs_state() -> dict:
-    path = _ui_prefs_path()
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception as e:
-        log(f"Ошибка чтения DPI UI prefs из {path}: {e}", "DEBUG")
-        return {}
-
-
-def _save_ui_prefs_state(state: dict) -> bool:
-    path = _ui_prefs_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        return True
-    except Exception as e:
-        log(f"Ошибка сохранения DPI UI prefs в {path}: {e}", "ERROR")
-        return False
-
-
 def normalize_direct_ui_mode(value: object) -> str:
     mode = str(value or "").strip().lower()
     if mode in _VALID_DIRECT_ZAPRET2_UI_MODES:
@@ -77,22 +23,11 @@ def normalize_direct_ui_mode(value: object) -> str:
 
 def get_strategy_launch_method() -> str:
     try:
-        if os.path.isfile(_LAUNCH_METHOD_FILE):
-            cfg = safe_construct(configparser.ConfigParser)
-            cfg.read(_LAUNCH_METHOD_FILE, encoding="utf-8")
-            value = cfg.get(_LAUNCH_METHOD_SECTION, _LAUNCH_METHOD_KEY, fallback="")
-            if value:
-                normalized = str(value or "").strip().lower()
-                if normalized in _SUPPORTED_LAUNCH_METHODS:
-                    return normalized
-                log(
-                    f"Обнаружен неподдерживаемый сохранённый метод запуска: {normalized}. "
-                    f"Возвращаем значение по умолчанию: {_LAUNCH_METHOD_DEFAULT}",
-                    "WARNING",
-                )
+        normalized = str(settings_store.get_strategy_launch_method() or "").strip().lower()
+        if normalized in _SUPPORTED_LAUNCH_METHODS:
+            return normalized
     except Exception as e:
-        log(f"Ошибка чтения метода запуска из {_LAUNCH_METHOD_FILE}: {e}", "ERROR")
-
+        log(f"Ошибка чтения метода запуска из settings.json: {e}", "ERROR")
     return _LAUNCH_METHOD_DEFAULT
 
 
@@ -106,12 +41,7 @@ def set_strategy_launch_method(method: str) -> bool:
                 "WARNING",
             )
             normalized = _LAUNCH_METHOD_DEFAULT
-
-        os.makedirs(APPDATA_DIR, exist_ok=True)
-        cfg = safe_construct(configparser.ConfigParser)
-        cfg[_LAUNCH_METHOD_SECTION] = {_LAUNCH_METHOD_KEY: normalized}
-        with open(_LAUNCH_METHOD_FILE, "w", encoding="utf-8") as f:
-            cfg.write(f)
+        settings_store.set_strategy_launch_method(normalized)
         log(f"Метод запуска стратегий изменен на: {normalized}", "INFO")
         return True
     except Exception as e:
@@ -120,18 +50,22 @@ def set_strategy_launch_method(method: str) -> bool:
 
 
 def get_direct_ui_mode() -> str:
-    state = _load_ui_prefs_state()
-    return normalize_direct_ui_mode(state.get("direct_zapret2_ui_mode"))
+    try:
+        return normalize_direct_ui_mode(settings_store.get_direct_ui_mode())
+    except Exception as e:
+        log(f"Ошибка чтения режима direct UI из settings.json: {e}", "DEBUG")
+        return DIRECT_UI_MODE_DEFAULT
 
 
 def set_direct_ui_mode(mode: str) -> bool:
     value = normalize_direct_ui_mode(mode)
-    state = _load_ui_prefs_state()
-    state["direct_zapret2_ui_mode"] = value
-    ok = _save_ui_prefs_state(state)
-    if ok:
+    try:
+        settings_store.set_direct_ui_mode(value)
         log(f"Direct UI mode set to: {value}", "DEBUG")
-    return ok
+        return True
+    except Exception as e:
+        log(f"Ошибка сохранения режима direct UI: {e}", "ERROR")
+        return False
 
 
 def _build_direct_runtime_reload_callback(*, launch_method: str, app_context, reason: str):

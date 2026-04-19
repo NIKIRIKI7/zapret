@@ -19,7 +19,6 @@ from filters.ui.strategy_detail.shared import (
     build_strategies_tree_widget,
     run_args_editor_dialog,
 )
-from filters.strategy_detail.zapret1.controller import StrategyDetailPageV1Controller
 from filters.ui.strategy_detail.zapret1.page_interactions_runtime import (
     close_preview_dialog_runtime_v1,
     close_transient_overlays_runtime_v1,
@@ -39,6 +38,7 @@ from filters.ui.strategy_detail.zapret1.page_interactions_runtime import (
 )
 from filters.ui.strategy_detail.zapret1.page_runtime import (
     apply_search_filter_runtime_v1,
+    apply_strategy_detail_v1_language,
     apply_sort_mode_runtime_v1,
     default_strategy_id_runtime_v1,
     get_current_args_runtime_v1,
@@ -50,44 +50,45 @@ from filters.ui.strategy_detail.zapret1.page_runtime import (
     on_sort_combo_changed_runtime_v1,
     on_strategy_selected_runtime_v1,
     refresh_args_preview_runtime_v1,
+    normalize_target_info_v1,
     show_loading_runtime_v1,
     show_success_runtime_v1,
+    sorted_strategy_items_v1,
     strategy_display_name_runtime_v1,
     sync_target_controls_runtime_v1,
     target_supports_filter_switch_runtime_v1,
     update_header_labels_runtime_v1,
     update_selected_label_runtime_v1,
 )
-from filters.ui.strategy_detail.zapret1.page_payload_runtime import (
+from filters.ui.strategy_detail.zapret1.strategy_detail_runtime import (
     activate_page_runtime_v1,
     apply_loaded_header_state_runtime_v1,
     apply_loaded_target_payload_runtime_v1,
+    bind_ui_state_store_v1,
     clear_strategies_and_rebuild_runtime_v1,
+    cleanup_page_v1,
     get_target_details_runtime_v1,
+    handle_breadcrumb_changed_v1,
     handle_missing_target_payload_runtime_v1,
+    handle_ui_state_changed_v1,
     load_current_strategy_id_runtime_v1,
     load_target_payload_sync_runtime_v1,
     on_target_payload_loaded_runtime_v1,
     refresh_from_preset_switch_runtime_v1,
+    rebuild_breadcrumb_v1,
     reload_target_error_fallback_runtime_v1,
     reload_target_runtime_v1,
     request_target_payload_runtime_v1,
     show_target_runtime_v1,
     stop_spinner_runtime_v1,
 )
-from filters.ui.strategy_detail.zapret1.build import build_strategy_detail_v1_main_sections
-from filters.ui.strategy_detail.zapret1.build import build_strategy_detail_v1_header
+from filters.ui.strategy_detail.zapret1.strategy_detail_ui import (
+    build_strategy_detail_v1_header,
+    build_strategy_detail_v1_main_sections,
+)
 from filters.ui.strategy_detail.zapret1.args import ArgsEditorDialogV1
 from ui.page_dependencies import require_page_app_context
 from filters.ui.strategy_detail.zapret1.filtering_ui import rebuild_tree_rows_v1
-from filters.ui.strategy_detail.zapret1.page_workflow import (
-    bind_ui_state_store_v1,
-    cleanup_page_v1,
-    handle_breadcrumb_changed_v1,
-    handle_ui_state_changed_v1,
-    rebuild_breadcrumb_v1,
-)
-from filters.ui.strategy_detail.zapret1.runtime_helpers import apply_strategy_detail_v1_language
 from log.log import log
 
 from filters.ui.strategy_detail.args_preview_dialog import ArgsPreviewDialog
@@ -372,7 +373,7 @@ class Zapret1StrategyDetailPage(BasePage):
 
     @staticmethod
     def _normalize_target_info(target_key: str, target_info: Any) -> dict[str, Any]:
-        return StrategyDetailPageV1Controller.normalize_target_info(target_key, target_info)
+        return normalize_target_info_v1(target_key, target_info)
 
     def _load_current_strategy_id(self) -> str:
         return load_current_strategy_id_runtime_v1(self)
@@ -390,7 +391,7 @@ class Zapret1StrategyDetailPage(BasePage):
         refresh_from_preset_switch_runtime_v1(self)
 
     def _sorted_strategy_items(self) -> list[dict]:
-        return StrategyDetailPageV1Controller.sorted_strategy_items(self._strategies, self._sort_mode)
+        return sorted_strategy_items_v1(self._strategies, self._sort_mode)
 
     def _rebuild_tree_rows(self) -> None:
         rebuild_tree_rows_v1(

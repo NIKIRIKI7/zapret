@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from filters.ui.strategy_detail.zapret2.apply import apply_loading_indicator_state
+from filters.ui.strategy_detail.shared_detail_feedback import apply_detail_loading_indicator
 
 
 def show_loading_feedback_v1(
@@ -13,7 +13,7 @@ def show_loading_feedback_v1(
 ) -> None:
     if cleanup_in_progress:
         return
-    apply_loading_indicator_state(
+    apply_detail_loading_indicator(
         spinner,
         success_icon,
         loading=True,
@@ -30,7 +30,7 @@ def show_success_feedback_v1(
 ) -> None:
     if cleanup_in_progress:
         return
-    apply_loading_indicator_state(
+    apply_detail_loading_indicator(
         spinner,
         success_icon,
         success=True,
@@ -47,7 +47,7 @@ def hide_success_feedback_v1(
 ) -> None:
     if cleanup_in_progress:
         return
-    apply_loading_indicator_state(
+    apply_detail_loading_indicator(
         spinner,
         success_icon,
         loading=False,

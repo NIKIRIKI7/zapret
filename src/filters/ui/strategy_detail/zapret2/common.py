@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from log.log import log
 
+from filters.advanced import TCP_EMBEDDED_FAKE_TECHNIQUES, TCP_PHASE_COMMAND_ORDER, TCP_PHASE_TAB_ORDER
 from ui.text_catalog import tr as tr_catalog
 from ui.theme import get_themed_qta_icon
 
@@ -28,7 +29,7 @@ def log_z2_detail_metric(section: str, elapsed_ms: float, *, extra: str | None =
     except Exception:
         rounded = 0
     suffix = f" ({extra})" if extra else ""
-    log(f"⏱ Startup UI Section: ZAPRET2_STRATEGY_DETAIL {section} {rounded}ms{suffix}", "⏱ STARTUP")
+    log(f"⏱ Startup UI Section: ZAPRET2_DETAIL_FLOW {section} {rounded}ms{suffix}", "⏱ STARTUP")
 
 
 def prepare_compact_setting_group(group) -> None:
@@ -106,33 +107,6 @@ def show_strategy_preview_dialog(
         dialog.show_animated(coerce_global_pos_to_qpoint(global_pos))
     except Exception as exc:
         log_fn(f"Preview dialog failed: {exc}", "DEBUG")
-
-
-TCP_PHASE_TAB_ORDER: list[tuple[str, str]] = [
-    ("fake", "FAKE"),
-    ("multisplit", "MULTISPLIT"),
-    ("multidisorder", "MULTIDISORDER"),
-    ("multidisorder_legacy", "LEGACY"),
-    ("tcpseg", "TCPSEG"),
-    ("oob", "OOB"),
-    ("other", "OTHER"),
-]
-
-TCP_PHASE_COMMAND_ORDER: list[str] = [
-    "fake",
-    "multisplit",
-    "multidisorder",
-    "multidisorder_legacy",
-    "tcpseg",
-    "oob",
-    "other",
-]
-
-TCP_EMBEDDED_FAKE_TECHNIQUES: set[str] = {
-    "fakedsplit",
-    "fakeddisorder",
-    "hostfakesplit",
-}
 
 STRATEGY_TECHNIQUE_FILTERS: list[tuple[str, str]] = [
     ("FAKE", "fake"),
@@ -497,4 +471,3 @@ def build_selected_strategy_header_state(
         text=name,
         tooltip=f"{name}\nID: {sid}",
     )
-

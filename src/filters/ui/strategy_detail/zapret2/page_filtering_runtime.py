@@ -2,7 +2,18 @@ from __future__ import annotations
 
 import time as _time
 
-from filters.strategy_detail.zapret2.controller import StrategyDetailPageController
+from filters.strategy_detail.zapret2.filtering_logic import (
+    build_filter_apply_plan,
+    build_phase_selection_plan,
+    build_phase_tab_change_plan,
+    build_phase_tab_reclick_plan,
+    build_sort_apply_plan,
+    build_sort_change_plan,
+    build_sort_options,
+    build_sort_tooltip,
+    build_strategies_summary,
+    build_technique_filter_plan,
+)
 from filters.ui.strategy_detail.zapret2.common import STRATEGY_TECHNIQUE_FILTERS, log_z2_detail_metric as _log_z2_detail_metric
 from filters.ui.strategy_detail.zapret2.filtering_ui import (
     apply_filter_plan_to_tree,
@@ -30,7 +41,7 @@ def on_filter_toggled(page, technique: str, active: bool) -> None:
 
 
 def populate_sort_combo_runtime(page) -> None:
-    entries = StrategyDetailPageController.build_sort_options(tr=page._tr)
+    entries = build_sort_options(tr=page._tr)
     populate_sort_combo(getattr(page, "_sort_combo", None), entries)
     page._update_sort_button_ui()
 
@@ -43,9 +54,7 @@ def update_sort_button_ui_runtime(page) -> None:
         tr=page._tr,
         previous_icon_color=page._last_sort_icon_color,
         get_theme_tokens_fn=page._get_theme_tokens_fn,
-        build_tooltip_fn=StrategyDetailPageController.build_sort_tooltip,
-        apply_sort_combo_state_fn=page._apply_sort_combo_state_fn,
-        apply_sort_button_state_fn=page._apply_sort_button_state_fn,
+        build_tooltip_fn=build_sort_tooltip,
         set_tooltip_fn=page._set_tooltip_fn,
         icon_builder=lambda icon_color: page._build_sort_icon(icon_color),
     )
@@ -62,7 +71,7 @@ def on_sort_combo_changed(page, index: int) -> None:
     except Exception:
         pass
 
-    plan = StrategyDetailPageController.build_sort_change_plan(
+    plan = build_sort_change_plan(
         requested_mode=requested_mode,
         current_mode=page._sort_mode,
         target_key=page._target_key,
@@ -89,8 +98,7 @@ def update_technique_filter_ui_runtime(page) -> None:
         combo=getattr(page, "_filter_combo", None),
         active_filters=page._active_filters,
         technique_filters=STRATEGY_TECHNIQUE_FILTERS,
-        build_technique_filter_plan_fn=StrategyDetailPageController.build_technique_filter_plan,
-        apply_technique_filter_combo_state_fn=page._apply_technique_filter_combo_state_fn,
+        build_technique_filter_plan_fn=build_technique_filter_plan,
     )
 
 
@@ -112,15 +120,14 @@ def update_strategies_summary_runtime(page) -> None:
         technique_filters=STRATEGY_TECHNIQUE_FILTERS,
         tr=page._tr,
         previous_text=page._last_strategies_summary_text,
-        build_summary_fn=StrategyDetailPageController.build_strategies_summary,
-        apply_summary_label_fn=page._apply_summary_label_fn,
+        build_summary_fn=build_strategies_summary,
     )
     if not changed:
         return
 
 
 def on_phase_tab_changed(page, route_key: str) -> None:
-    plan = StrategyDetailPageController.build_phase_tab_change_plan(
+    plan = build_phase_tab_change_plan(
         tcp_phase_mode=bool(page._tcp_phase_mode),
         phase_key=route_key,
         target_key=page._target_key,
@@ -142,7 +149,7 @@ def on_phase_tab_changed(page, route_key: str) -> None:
 
 
 def on_phase_pivot_item_clicked(page, key: str) -> None:
-    plan = StrategyDetailPageController.build_phase_tab_reclick_plan(
+    plan = build_phase_tab_reclick_plan(
         tcp_phase_mode=bool(page._tcp_phase_mode),
         clicked_key=key,
         active_phase_key=page._active_phase_key,
@@ -159,7 +166,7 @@ def apply_filters_runtime(page) -> None:
     started_at = _time.perf_counter()
     search_text = page._search_input.text() if page._search_input else ""
     selected_sid = page._selected_strategy_id or page._current_strategy_id or "none"
-    filter_plan = StrategyDetailPageController.build_filter_apply_plan(
+    filter_plan = build_filter_apply_plan(
         tcp_phase_mode=bool(page._tcp_phase_mode),
         active_phase_key=page._active_phase_key,
         search_text=search_text,
@@ -191,13 +198,13 @@ def sync_tree_selection_to_active_phase_runtime(page) -> None:
         active_phase_key=page._active_phase_key,
         tcp_phase_selected_ids=page._tcp_phase_selected_ids,
         custom_strategy_id=page.CUSTOM_STRATEGY_ID,
-        build_phase_selection_plan_fn=StrategyDetailPageController.build_phase_selection_plan,
+        build_phase_selection_plan_fn=build_phase_selection_plan,
     )
 
 
 def show_sort_menu_runtime(page) -> None:
     def _set_sort(mode: str):
-        plan = StrategyDetailPageController.build_sort_change_plan(
+        plan = build_sort_change_plan(
             requested_mode=mode,
             current_mode=page._sort_mode,
             target_key=page._target_key,
@@ -219,7 +226,7 @@ def show_sort_menu_runtime(page) -> None:
         round_menu_cls=page._round_menu_cls,
         action_cls=page._action_cls,
         fluent_icon=page._fluent_icon_cls,
-        build_sort_options_fn=StrategyDetailPageController.build_sort_options,
+        build_sort_options_fn=build_sort_options,
         tr=page._tr,
         on_select=_set_sort,
         exec_popup_menu_fn=page._exec_popup_menu_fn,
@@ -231,7 +238,7 @@ def apply_sort_runtime(page) -> None:
         return
     started_at = _time.perf_counter()
     selected_sid = page._selected_strategy_id or page._current_strategy_id or "none"
-    plan = StrategyDetailPageController.build_sort_apply_plan(
+    plan = build_sort_apply_plan(
         sort_mode=page._sort_mode,
         selected_strategy_id=page._selected_strategy_id,
         current_strategy_id=page._current_strategy_id,

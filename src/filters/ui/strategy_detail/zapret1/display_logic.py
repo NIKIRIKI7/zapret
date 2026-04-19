@@ -1,11 +1,99 @@
-"""Runtime/helper слой для страницы деталей стратегии Zapret 1."""
-
 from __future__ import annotations
+
+from typing import Any
 
 from filters.ui.strategy_detail.filter_mode_ui import (
     apply_filter_mode_selector_texts,
     sync_basic_target_controls,
 )
+from filters.ui.strategy_detail.shared_detail_header import build_detail_header_text_state
+
+
+_LABEL_ORDER = {
+    "recommended": 0,
+    "stable": 1,
+    None: 2,
+    "none": 2,
+    "experimental": 3,
+    "game": 4,
+    "caution": 5,
+}
+
+
+def normalize_target_info_v1(target_key: str, target_info: Any) -> dict[str, Any]:
+    if isinstance(target_info, dict):
+        info = dict(target_info)
+        info.setdefault("key", target_key)
+        info.setdefault("full_name", target_key)
+        info.setdefault("description", "")
+        info.setdefault("base_filter", "")
+        info.setdefault("base_filter_hostlist", "")
+        info.setdefault("base_filter_ipset", "")
+        return info
+
+    return {
+        "key": getattr(target_info, "key", target_key),
+        "full_name": getattr(target_info, "full_name", target_key),
+        "description": getattr(target_info, "description", ""),
+        "protocol": getattr(target_info, "protocol", ""),
+        "ports": getattr(target_info, "ports", ""),
+        "icon_name": getattr(target_info, "icon_name", ""),
+        "icon_color": getattr(target_info, "icon_color", "#909090"),
+        "base_filter": getattr(target_info, "base_filter", ""),
+        "base_filter_hostlist": getattr(target_info, "base_filter_hostlist", ""),
+        "base_filter_ipset": getattr(target_info, "base_filter_ipset", ""),
+    }
+
+
+def sorted_strategy_items_v1(strategies: dict[str, dict], sort_mode: str) -> list[dict]:
+    items = [s for s in (strategies or {}).values() if s.get("id")]
+
+    if sort_mode == "alpha_asc":
+        return sorted(items, key=lambda s: (s.get("name", "")).lower())
+    if sort_mode == "alpha_desc":
+        return sorted(items, key=lambda s: (s.get("name", "")).lower(), reverse=True)
+
+    return sorted(
+        items,
+        key=lambda s: (
+            _LABEL_ORDER.get(s.get("label"), 2),
+            (s.get("name", "")).lower(),
+        ),
+    )
+
+
+def default_strategy_id_v1(strategies: dict[str, dict], sort_mode: str) -> str:
+    for item in sorted_strategy_items_v1(strategies, sort_mode):
+        sid = str(item.get("id") or "").strip()
+        if sid and sid != "none":
+            return sid
+    return "none"
+
+
+def strategy_display_name_v1(strategy_id: str, strategies: dict[str, dict], tr) -> str:
+    sid = (strategy_id or "").strip()
+    if not sid or sid == "none":
+        return tr("page.z1_strategy_detail.tree.disabled.name", "Выключено")
+    if sid == "custom":
+        return tr("page.z1_strategy_detail.tree.custom.name", "Свой набор")
+    info = (strategies or {}).get(sid)
+    if info:
+        return info.get("name", sid)
+    return sid
+
+
+def normalize_search_text(text: str) -> str:
+    return (text or "").strip().lower()
+
+
+def resolve_sort_mode_change(*, sort_combo, current_sort_mode: str) -> str | None:
+    if not sort_combo:
+        return None
+    mode = sort_combo.currentData()
+    mode = str(mode or "recommended")
+    if mode == current_sort_mode:
+        return None
+    return mode
 
 
 def update_selected_label(
@@ -36,25 +124,24 @@ def update_header_labels(
     target_key: str,
     update_selected_label_fn,
 ) -> None:
-    full_name = target_info.get("full_name", target_key) or target_key
-    description = target_info.get("description", "")
-    protocol = target_info.get("protocol", "")
-    ports = target_info.get("ports", "")
+    header_state = build_detail_header_text_state(
+        target_info=target_info,
+        target_key=target_key,
+        tr=tr_fn,
+        ports_text_key="page.z1_strategy_detail.subtitle.ports",
+        ports_text_default="порты: {ports}",
+        empty_title=target_key,
+        empty_detail="Target",
+    )
 
     if title_label is not None:
-        title_label.setText(full_name)
+        title_label.setText(header_state.title_text)
     if desc_label is not None:
-        desc_label.setText(description)
-        desc_label.setVisible(bool(description))
-
-    subtitle_parts = []
-    if protocol:
-        subtitle_parts.append(str(protocol))
-    if ports:
-        subtitle_parts.append(tr_fn("page.z1_strategy_detail.subtitle.ports", "порты: {ports}", ports=ports))
+        desc_label.setText(header_state.description_text)
+        desc_label.setVisible(bool(header_state.description_text))
 
     if subtitle_label is not None:
-        subtitle_label.setText(" | ".join(subtitle_parts))
+        subtitle_label.setText(header_state.subtitle_text)
 
     update_selected_label_fn()
 
@@ -190,7 +277,7 @@ def apply_strategy_detail_v1_language(
         empty_label.setText(
             tr_fn(
                 "page.z1_strategy_detail.empty.no_strategies",
-                "Нет доступных стратегий. Проверьте %APPDATA%\\zapret\\direct_zapret1\\",
+                "Нет доступных стратегий. Проверьте папку presets_v1 рядом с программой.",
             )
         )
 

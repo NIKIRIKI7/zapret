@@ -72,14 +72,14 @@ def get_builtin_base_from_copy_name(name: str) -> Optional[str]:
 
 def ensure_templates_copied_to_presets() -> bool:
     try:
-        from config.config import get_zapret_presets_v2_dir
+        from config.config import get_presets_v2_dir
 
 
         templates = _load_template_contents()
         if not templates:
             return True
 
-        presets_dir = Path(get_zapret_presets_v2_dir())
+        presets_dir = Path(get_presets_v2_dir())
         presets_dir.mkdir(parents=True, exist_ok=True)
         backups_dir = presets_dir / "_builtin_version_backups"
 
@@ -131,12 +131,12 @@ def ensure_templates_copied_to_presets() -> bool:
 
 def overwrite_templates_to_presets() -> tuple[int, int, list[str]]:
     try:
-        from config.config import get_zapret_presets_v2_dir
+        from config.config import get_presets_v2_dir
 
     except Exception:
         return (0, 0, [])
 
-    presets_dir = Path(get_zapret_presets_v2_dir())
+    presets_dir = Path(get_presets_v2_dir())
     try:
         presets_dir.mkdir(parents=True, exist_ok=True)
     except Exception:

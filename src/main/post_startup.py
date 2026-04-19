@@ -262,7 +262,7 @@ def install_post_startup_tasks(window: "LupiDPIApp") -> None:
         if not _window_alive():
             return
         try:
-            from config.reg import get_auto_update_enabled
+            from settings.store import get_auto_update_enabled
 
 
             if not get_auto_update_enabled():

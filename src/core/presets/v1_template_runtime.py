@@ -177,17 +177,13 @@ def ensure_default_preset_exists_v1() -> bool:
 
 def _presets_dir_v1() -> Path:
     try:
-        from config.config import get_zapret_userdata_dir
+        from config.config import get_presets_v1_dir
 
-
-        base = (get_zapret_userdata_dir() or "").strip()
-        if base:
-            path = Path(base) / "presets_v1"
-            path.mkdir(parents=True, exist_ok=True)
-            return path
-    except Exception:
-        pass
-    raise RuntimeError("Canonical userdata root is required for presets_v1 directory")
+        path = Path(get_presets_v1_dir())
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    except Exception as exc:
+        raise RuntimeError("Не удалось определить корень программы для presets_v1") from exc
 
 
 def _load_template_contents() -> dict[str, str]:

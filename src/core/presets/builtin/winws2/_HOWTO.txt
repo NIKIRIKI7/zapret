@@ -1,7 +1,7 @@
 Built-in preset templates
 
 Where to put files
-  - runtime (Windows): %APPDATA%\zapret\presets\_builtin\*.txt
+  - runtime (Windows): <install_dir>\presets\_builtin\*.txt
   - for packaging via Inno Setup: <zapret_dist>/presets/_builtin/*.txt (SOURCEPATH)
 
 Rules
@@ -15,5 +15,5 @@ Format
   - Must contain at least one '--lua-init=' line and at least one '--filter-' line, otherwise it may be skipped.
 
 Notes
-  - Built-in presets are virtual and loaded from %APPDATA%\zapret\presets\_builtin.
+  - Built-in presets are virtual and loaded from <install_dir>\presets\_builtin.
   - When a user edits a built-in preset in UI, the app creates a user copy: '<Name> (копия)'.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app_context import build_app_context, install_app_context
 from config.build_info import APP_VERSION
-from config.config import HEIGHT, MIN_WIDTH, WIDTH
+from config.window_metrics import HEIGHT, MIN_WIDTH, WIDTH
 
 from log.log import log
 

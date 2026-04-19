@@ -68,29 +68,26 @@ from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_ico
 from log.log import log
 
 from filters.strategy_detail.zapret2.controller import StrategyDetailPageController
+from filters.strategy_detail.zapret2.payload_logic import (
+    build_apply_feedback_timeout_plan,
+    build_row_click_plan,
+    build_status_icon_plan,
+)
+from filters.strategy_detail.zapret2.runtime_state import (
+    create_preset_refresh_runtime,
+    create_strategies_load_runtime,
+    create_target_payload_runtime,
+)
 from filters.ui.strategy_detail.zapret2.apply import (
-    apply_args_editor_state,
-    apply_current_strategy_tree_state,
-    apply_filter_mode_selector_state,
-    apply_loading_plan_action,
-    apply_loading_indicator_state,
-    apply_tree_working_state,
-    apply_working_mark_updates,
     apply_selected_strategy_header_state,
-    apply_sort_button_state,
-    apply_sort_combo_state,
-    apply_strategies_summary_label,
-    apply_technique_filter_combo_state,
-    apply_target_payload_filter_reset,
     apply_target_payload_header_state,
-    apply_target_payload_shell_state,
-    apply_tree_selected_strategy_state,
 )
 from filters.ui.strategy_detail.shared import (
     build_detail_subtitle_widgets,
     build_strategies_tree_widget,
     run_args_editor_dialog,
 )
+from filters.ui.strategy_detail.shared_detail_header import build_detail_header_text_state
 from filters.ui.strategy_detail.filter_mode_ui import apply_filter_mode_selector_texts
 from filters.ui.strategy_detail.zapret2.common import (
     STRATEGY_TECHNIQUE_FILTERS,
@@ -109,8 +106,9 @@ from filters.ui.strategy_detail.zapret2.common import (
     prepare_compact_setting_group as _prepare_compact_setting_group,
     tr_text as _tr_text,
 )
-from filters.ui.strategy_detail.zapret2.page_build import (
+from filters.ui.strategy_detail.zapret2.strategy_detail_ui import (
     build_detail_header_section,
+    build_settings_section,
     build_strategies_section,
 )
 from filters.ui.strategy_detail.zapret2.page_actions_runtime import (
@@ -160,16 +158,27 @@ from filters.ui.strategy_detail.zapret2.page_interactions_runtime import (
     show_preview_dialog_runtime,
     toggle_preview_rating,
 )
-from filters.ui.strategy_detail.zapret2.page_language import apply_strategy_detail_page_language
-from filters.ui.strategy_detail.zapret2.page_payload import (
+from filters.ui.strategy_detail.zapret2.strategy_detail_runtime import (
     apply_preset_refresh_now,
     apply_target_payload,
+    apply_page_theme,
+    apply_pending_target_request_if_ready,
+    after_content_built,
+    close_filter_combo_popup,
+    handle_hide_event,
+    handle_host_window_event_filter,
+    handle_page_activated,
+    install_host_window_event_filter,
     on_target_payload_loaded,
+    refresh_scroll_range,
     refresh_from_preset_switch,
     request_target_payload,
+    restore_scroll_state,
+    save_scroll_state,
     show_target,
 )
 from filters.ui.strategy_detail.zapret2.page_phase_runtime import (
+    apply_out_range_ui_state,
     apply_tcp_phase_tabs_visibility_runtime,
     extract_desync_techniques_from_args,
     flush_syndata_settings_save,
@@ -187,7 +196,9 @@ from filters.ui.strategy_detail.zapret2.page_phase_runtime import (
     save_tcp_phase_state_to_preset,
     schedule_syndata_settings_save,
     select_default_tcp_phase_tab_runtime,
+    select_out_range_kind,
     select_out_range_mode,
+    set_out_range_expression,
     set_active_phase_chip_runtime,
     update_tcp_phase_chip_markers_runtime,
 )
@@ -198,22 +209,9 @@ from filters.ui.strategy_detail.zapret2.page_strategies_runtime import (
     load_next_strategies_batch,
     load_strategies,
 )
-from filters.ui.strategy_detail.zapret2.page_settings_build import build_settings_section
-from filters.ui.strategy_detail.zapret2.page_lifecycle import (
-    after_content_built,
-    apply_page_theme,
-    apply_pending_target_request_if_ready,
-    close_filter_combo_popup,
-    handle_hide_event,
-    handle_host_window_event_filter,
-    handle_page_activated,
-    install_host_window_event_filter,
-    refresh_scroll_range,
-    restore_scroll_state,
-    save_scroll_state,
-)
 from filters.strategy_detail.zapret2.mode_policy import StrategyDetailModePolicy
 from direct_preset.ui.zapret2.preset_dialogs import PresetNameDialog
+from filters.mode_runtime import resolve_direct_mode_override
 from filters.ui.strategy_detail.zapret2.args_editor import (
     hide_args_editor_state,
     open_args_editor_dialog,
@@ -285,6 +283,7 @@ class StrategyDetailPage(BasePage):
     CUSTOM_STRATEGY_ID = CUSTOM_STRATEGY_ID
     TCP_FAKE_DISABLED_STRATEGY_ID = TCP_FAKE_DISABLED_STRATEGY_ID
     StrategyTreeRow = StrategyTreeRow
+    direct_mode_override: str | None = None
 
     def __init__(self, parent=None):
         super().__init__(
@@ -314,7 +313,7 @@ class StrategyDetailPage(BasePage):
         self._target_key = None
         self._target_info = None
         self._target_payload = None
-        self._target_payload_runtime = StrategyDetailPageController.create_target_payload_runtime()
+        self._target_payload_runtime = create_target_payload_runtime()
         self._current_strategy_id = "none"
         self._selected_strategy_id = "none"
         self._strategies_tree = None
@@ -333,9 +332,9 @@ class StrategyDetailPage(BasePage):
         self._tcp_last_enabled_args_by_target: dict[str, str] = {}
         self._waiting_for_process_start = False  # Флаг ожидания запуска DPI
         self._apply_feedback_timer = None  # Быстрый таймер: убрать спиннер после apply
-        self._strategies_load_runtime = StrategyDetailPageController.create_strategies_load_runtime()
+        self._strategies_load_runtime = create_strategies_load_runtime()
         self._loaded_strategy_type = None
-        self._loaded_strategy_set = None
+        self._loaded_direct_mode = None
         self._loaded_tcp_phase_mode = False
         self._detail_mode_policy: StrategyDetailModePolicy | None = None
         self._default_strategy_order = []
@@ -358,6 +357,7 @@ class StrategyDetailPage(BasePage):
         self._direct_facade = DirectPresetFacade.from_launch_method(
             "direct_zapret2",
             app_context=app_context,
+            direct_mode_override=self._current_direct_mode(),
             on_dpi_reload_needed=self._on_dpi_reload_needed,
         )
         self._feedback_store = app_context.strategy_feedback_store
@@ -369,10 +369,6 @@ class StrategyDetailPage(BasePage):
         self._run_args_editor_dialog_fn = run_args_editor_dialog
         self._get_theme_tokens_fn = get_theme_tokens
         self._set_tooltip_fn = set_tooltip
-        self._apply_sort_combo_state_fn = apply_sort_combo_state
-        self._apply_sort_button_state_fn = apply_sort_button_state
-        self._apply_summary_label_fn = apply_strategies_summary_label
-        self._apply_technique_filter_combo_state_fn = apply_technique_filter_combo_state
         self._exec_popup_menu_fn = exec_popup_menu
         self._show_sort_menu_impl = show_sort_menu
         self._round_menu_cls = RoundMenu
@@ -383,7 +379,7 @@ class StrategyDetailPage(BasePage):
         self._last_theme_overrides_key = None
         self._last_parent_link_icon_color = None
         self._last_edit_args_icon_color = None
-        self._preset_refresh_runtime = StrategyDetailPageController.create_preset_refresh_runtime()
+        self._preset_refresh_runtime = create_preset_refresh_runtime()
         self._last_sort_icon_color = None
         self._last_strategies_summary_text = None
         self._pending_syndata_target_key: str | None = None
@@ -538,6 +534,7 @@ class StrategyDetailPage(BasePage):
             switch_button_cls=SwitchButton,
             segmented_widget_cls=SegmentedWidget,
             spin_box_cls=SpinBox,
+            line_edit_cls=LineEdit,
             win11_toggle_row_cls=Win11ToggleRow,
             win11_number_row_cls=Win11NumberRow,
             win11_combo_row_cls=Win11ComboRow,
@@ -545,8 +542,13 @@ class StrategyDetailPage(BasePage):
             action_button_cls=ActionButton,
             set_tooltip_fn=set_tooltip,
             on_filter_mode_changed=self._on_filter_mode_changed,
+            on_select_out_range_kind_simple=lambda: self._select_out_range_kind("simple"),
+            on_select_out_range_kind_expression=lambda: self._select_out_range_kind("expression"),
+            on_select_out_range_mode_a=lambda: self._select_out_range_mode("a"),
+            on_select_out_range_mode_x=lambda: self._select_out_range_mode("x"),
             on_select_out_range_mode_n=lambda: self._select_out_range_mode("n"),
             on_select_out_range_mode_d=lambda: self._select_out_range_mode("d"),
+            on_out_range_expression_changed=self._on_out_range_expression_changed,
             on_schedule_syndata_settings_save=self._schedule_syndata_settings_save,
             on_send_toggled=self._on_send_toggled,
             on_syndata_toggled=self._on_syndata_toggled,
@@ -560,11 +562,16 @@ class StrategyDetailPage(BasePage):
         self._filter_mode_frame = settings_section.filter_mode_frame
         self._filter_mode_selector = settings_section.filter_mode_selector
         self._out_range_frame = settings_section.out_range_frame
+        self._out_range_kind_label = settings_section.out_range_kind_label
+        self._out_range_kind_seg = settings_section.out_range_kind_seg
         self._out_range_mode_label = settings_section.out_range_mode_label
         self._out_range_seg = settings_section.out_range_seg
         self._out_range_mode = settings_section.out_range_mode
         self._out_range_value_label = settings_section.out_range_value_label
         self._out_range_spin = settings_section.out_range_spin
+        self._out_range_expression_label = settings_section.out_range_expression_label
+        self._out_range_expression_input = settings_section.out_range_expression_input
+        self._out_range_complex_label = settings_section.out_range_complex_label
         self._send_frame = settings_section.send_frame
         self._send_toggle_row = settings_section.send_toggle_row
         self._send_toggle = settings_section.send_toggle
@@ -665,6 +672,41 @@ class StrategyDetailPage(BasePage):
             set_tooltip_fn=set_tooltip,
         )
 
+    def _set_tree_selected_strategy(self, strategy_id: str) -> None:
+        tree = self._strategies_tree
+        if tree is None:
+            return
+        normalized_strategy_id = str(strategy_id or "none").strip() or "none"
+        if normalized_strategy_id != "none":
+            try:
+                tree.set_selected_strategy(normalized_strategy_id)
+                return
+            except Exception:
+                pass
+        try:
+            if tree.has_strategy("none"):
+                tree.set_selected_strategy("none")
+            else:
+                tree.clearSelection()
+        except Exception:
+            pass
+
+    def _set_tree_current_strategy(self, strategy_id: str) -> None:
+        tree = self._strategies_tree
+        if tree is None:
+            return
+        normalized_strategy_id = str(strategy_id or "none").strip() or "none"
+        try:
+            if normalized_strategy_id != "none" and tree.has_strategy(normalized_strategy_id):
+                tree.set_selected_strategy(normalized_strategy_id)
+                return
+            if tree.has_strategy("none"):
+                tree.set_selected_strategy("none")
+            else:
+                tree.clearSelection()
+        except Exception:
+            pass
+
     def _apply_phase_mode_policy(self, policy: StrategyDetailModePolicy) -> None:
         self._tcp_phase_mode = bool(policy.tcp_phase_mode)
         self._detail_mode_policy = policy
@@ -727,36 +769,6 @@ class StrategyDetailPage(BasePage):
         if policy.force_disable_syndata:
             self._force_toggle_off(getattr(self, "_syndata_toggle", None), getattr(self, "_syndata_settings", None))
 
-    def _prepare_target_payload_request(self, target_key: str) -> None:
-        normalized_key = str(target_key or "").strip().lower()
-        self._target_key = normalized_key
-        self._stop_loading()
-        self.show_loading()
-        self._success_icon.hide()
-        self._target_payload = None
-        self._target_info = None
-        try:
-            self._settings_host.setVisible(False)
-        except Exception:
-            pass
-        try:
-            self._toolbar_frame.setVisible(False)
-        except Exception:
-            pass
-        try:
-            self._strategies_block.setVisible(False)
-        except Exception:
-            pass
-        try:
-            self._title.setText(self._tr("page.z2_strategy_detail.header.select_category", "Выберите target"))
-            self._subtitle.setText("")
-        except Exception:
-            pass
-        try:
-            self._update_selected_strategy_header("none")
-        except Exception:
-            pass
-
     def _load_target_payload_sync(self, target_key: str | None = None, *, refresh: bool = False):
         key = str(target_key or self._target_key or "").strip().lower()
         if not key:
@@ -765,6 +777,7 @@ class StrategyDetailPage(BasePage):
             payload = self._require_app_context().direct_ui_snapshot_service.load_target_detail_payload(
                 "direct_zapret2",
                 key,
+                direct_mode_override=self._current_direct_mode(),
                 refresh=refresh,
             )
         except Exception:
@@ -782,6 +795,9 @@ class StrategyDetailPage(BasePage):
 
     def _get_direct_ui_snapshot_service(self):
         return self._require_app_context().direct_ui_snapshot_service
+
+    def _current_direct_mode(self) -> str | None:
+        return resolve_direct_mode_override(getattr(self, "direct_mode_override", None))
 
     def _get_direct_flow_coordinator(self):
         return self._require_app_context().direct_flow_coordinator
@@ -1005,6 +1021,7 @@ class StrategyDetailPage(BasePage):
             self._blob_combo.blockSignals(True)
             self._tls_mod_combo.blockSignals(True)
             self._out_range_spin.blockSignals(True)
+            self._out_range_expression_input.blockSignals(True)
             self._tcp_flags_combo.blockSignals(True)
             self._send_toggle.blockSignals(True)
             self._send_repeats_spin.blockSignals(True)
@@ -1027,13 +1044,13 @@ class StrategyDetailPage(BasePage):
             self._autottl_delta_selector.setValue(int(data.get("autottl_delta", -2)), block_signals=True)
             self._autottl_min_selector.setValue(int(data.get("autottl_min", 3)), block_signals=True)
             self._autottl_max_selector.setValue(int(data.get("autottl_max", 20)), block_signals=True)
+            self._out_range_is_simple = bool(data.get("out_range_is_simple", True))
+            self._out_range_expression = str(data.get("out_range_expression", "") or "").strip()
             self._out_range_spin.setValue(max(1, int(data.get("out_range", 8) or 8)))
+            self._out_range_expression_input.setText(self._out_range_expression)
 
-            self._out_range_mode = str(data.get("out_range_mode", "d") or "d")
-            try:
-                self._out_range_seg.setCurrentItem(self._out_range_mode)
-            except Exception:
-                pass
+            self._out_range_mode = str(data.get("out_range_mode", "d") or "d").strip().lower() or "d"
+            apply_out_range_ui_state(self)
 
             tcp_flags_value = str(data.get("tcp_flags_unset", "none") or "none")
             tcp_flags_index = self._tcp_flags_combo.findText(tcp_flags_value)
@@ -1058,6 +1075,7 @@ class StrategyDetailPage(BasePage):
                 self._blob_combo.blockSignals(False)
                 self._tls_mod_combo.blockSignals(False)
                 self._out_range_spin.blockSignals(False)
+                self._out_range_expression_input.blockSignals(False)
                 self._tcp_flags_combo.blockSignals(False)
                 self._send_toggle.blockSignals(False)
                 self._send_repeats_spin.blockSignals(False)
@@ -1107,7 +1125,7 @@ class StrategyDetailPage(BasePage):
             self._on_tcp_phase_row_clicked(strategy_id)
             return
 
-        plan = StrategyDetailPageController.build_row_click_plan(
+        plan = build_row_click_plan(
             strategy_id=strategy_id,
             prev_strategy_id=self._selected_strategy_id,
             has_target_key=bool(self._target_key),
@@ -1117,22 +1135,13 @@ class StrategyDetailPage(BasePage):
             self._last_enabled_strategy_id = plan.remembered_last_enabled_strategy_id
 
         self._selected_strategy_id = plan.selected_strategy_id
-        apply_tree_selected_strategy_state(
-            self._strategies_tree,
-            strategy_id=plan.selected_strategy_id,
-        )
+        self._set_tree_selected_strategy(plan.selected_strategy_id)
         self._update_selected_strategy_header(self._selected_strategy_id)
 
         if plan.should_hide_args_editor:
             self._hide_args_editor(clear_text=False)
 
-        apply_loading_plan_action(
-            plan.loading_state,
-            show_loading_fn=self.show_loading,
-            stop_loading_fn=self._stop_loading,
-            show_success_fn=self.show_success,
-            success_icon=self._success_icon,
-        )
+        self._apply_loading_plan_action(plan.loading_state)
 
         self._refresh_args_editor_state()
         self._set_target_enabled_ui(plan.target_enabled)
@@ -1143,34 +1152,76 @@ class StrategyDetailPage(BasePage):
 
     def _update_status_icon(self, active: bool):
         """Обновляет галочку статуса в заголовке"""
-        plan = StrategyDetailPageController.build_status_icon_plan(active=active)
-        apply_loading_plan_action(
-            plan.action,
-            show_loading_fn=self.show_loading,
-            stop_loading_fn=self._stop_loading,
-            show_success_fn=self.show_success,
-            success_icon=self._success_icon,
-        )
+        plan = build_status_icon_plan(active=active)
+        self._apply_loading_plan_action(plan.action)
+
+    def _set_loading_indicator(self, *, loading: bool = False, success: bool = False, success_pixmap=None) -> None:
+        if loading:
+            try:
+                self._success_icon.hide()
+            except Exception:
+                pass
+            try:
+                self._spinner.show()
+            except Exception:
+                pass
+            try:
+                self._spinner.start()
+            except Exception:
+                pass
+            return
+
+        try:
+            self._spinner.stop()
+        except Exception:
+            pass
+        try:
+            self._spinner.hide()
+        except Exception:
+            pass
+
+        if success:
+            try:
+                if success_pixmap is not None:
+                    self._success_icon.setPixmap(success_pixmap)
+            except Exception:
+                pass
+            try:
+                self._success_icon.show()
+            except Exception:
+                pass
+            return
+
+        try:
+            self._success_icon.hide()
+        except Exception:
+            pass
+
+    def _apply_loading_plan_action(self, action: str) -> None:
+        normalized_action = str(action or "").strip().lower()
+        if normalized_action == "show":
+            self.show_loading()
+            return
+        if normalized_action == "success":
+            self.show_success()
+            return
+        if normalized_action in {"stop", "hide"}:
+            self._stop_loading()
+            try:
+                self._success_icon.hide()
+            except Exception:
+                pass
 
     def show_loading(self):
         """Показывает анимированный спиннер загрузки"""
-        apply_loading_indicator_state(
-            self._spinner,
-            self._success_icon,
-            loading=True,
-        )
+        self._set_loading_indicator(loading=True)
         self._waiting_for_process_start = True  # Ждём запуска DPI
         # В direct_zapret2 режимах "apply" часто не меняет состояние процесса (hot-reload),
         # поэтому даём быстрый таймаут, чтобы UI не зависал на спиннере.
         self._start_apply_feedback_timer()
     def _stop_loading(self):
         """Останавливает анимацию загрузки"""
-        apply_loading_indicator_state(
-            self._spinner,
-            self._success_icon,
-            loading=False,
-            success=False,
-        )
+        self._set_loading_indicator(loading=False, success=False)
         self._waiting_for_process_start = False  # Больше не ждём
         self._stop_apply_feedback_timer()
 
@@ -1196,24 +1247,16 @@ class StrategyDetailPage(BasePage):
         """
         if self._cleanup_in_progress:
             return
-        plan = StrategyDetailPageController.build_apply_feedback_timeout_plan(
+        plan = build_apply_feedback_timeout_plan(
             waiting_for_process_start=self._waiting_for_process_start,
             selected_strategy_id=self._selected_strategy_id,
         )
-        apply_loading_plan_action(
-            plan.action,
-            show_loading_fn=self.show_loading,
-            stop_loading_fn=self._stop_loading,
-            show_success_fn=self.show_success,
-            success_icon=self._success_icon,
-        )
+        self._apply_loading_plan_action(plan.action)
 
     def show_success(self):
         """Показывает зелёную галочку успеха"""
         self._stop_loading()
-        apply_loading_indicator_state(
-            self._spinner,
-            self._success_icon,
+        self._set_loading_indicator(
             success=True,
             success_pixmap=get_cached_qta_pixmap('fa5s.check-circle', color='#4ade80', size=16),
         )
@@ -1401,6 +1444,12 @@ class StrategyDetailPage(BasePage):
     def _select_out_range_mode(self, mode: str):
         select_out_range_mode(self, mode)
 
+    def _select_out_range_kind(self, kind: str):
+        select_out_range_kind(self, kind)
+
+    def _on_out_range_expression_changed(self, text: str):
+        set_out_range_expression(self, text)
+
     # тХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХР
     # SYNDATA SETTINGS METHODS
     # тХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХРтХР
@@ -1486,7 +1535,269 @@ class StrategyDetailPage(BasePage):
     def _apply_sort(self):
         apply_sort_runtime(self)
 
+    def _apply_language_to_page_widgets(self) -> None:
+        if not getattr(self, "_content_built", False):
+            return
+
+        if getattr(self, "_parent_link", None) is not None:
+            self._parent_link.setText(self._tr("page.z2_strategy_detail.back.strategies", "Стратегии DPI"))
+
+        if getattr(self, "_title", None) is not None:
+            current_title = ""
+            try:
+                current_title = self._title.text()
+            except Exception:
+                current_title = ""
+            header_state = build_detail_header_text_state(
+                target_info=getattr(self, "_target_info", None),
+                target_key=str(getattr(self, "_target_key", "") or ""),
+                tr=self._tr,
+                ports_text_key="page.z2_strategy_detail.subtitle.ports",
+                ports_text_default="порты: {ports}",
+                empty_title=current_title,
+                empty_detail=self._tr("page.z2_strategy_detail.header.category_fallback", "Target"),
+            )
+            apply_target_payload_header_state(
+                self._title,
+                getattr(self, "_subtitle", None),
+                getattr(self, "_breadcrumb", None),
+                title_text=header_state.title_text,
+                subtitle_text=header_state.subtitle_text,
+                detail_text=header_state.detail_text,
+                control_text=self._tr("page.z2_strategy_detail.breadcrumb.control", "Управление"),
+                strategies_text=self._tr("page.z2_strategy_detail.breadcrumb.strategies", "Стратегии DPI"),
+            )
+
+        if getattr(self, "_filter_mode_frame", None) is not None:
+            self._filter_mode_frame.set_title(
+                self._tr("page.z2_strategy_detail.filter_mode.title", "Режим фильтрации")
+            )
+            self._filter_mode_frame.set_description(
+                self._tr("page.z2_strategy_detail.filter_mode.description", "Hostlist - по доменам, IPset - по IP")
+            )
+        if getattr(self, "_filter_mode_selector", None) is not None:
+            apply_filter_mode_selector_texts(
+                self._filter_mode_selector,
+                ipset_text=self._tr("page.z2_strategy_detail.filter.ipset", "IPset"),
+                hostlist_text=self._tr("page.z2_strategy_detail.filter.hostlist", "Hostlist"),
+            )
+
+        if getattr(self, "_out_range_kind_label", None) is not None:
+            self._out_range_kind_label.setText(self._tr("page.z2_strategy_detail.out_range.kind", "Тип:"))
+        if getattr(self, "_out_range_kind_seg", None) is not None:
+            try:
+                self._out_range_kind_seg.setItemText(
+                    "simple",
+                    self._tr("page.z2_strategy_detail.out_range.kind.simple", "Простой"),
+                )
+                self._out_range_kind_seg.setItemText(
+                    "expression",
+                    self._tr("page.z2_strategy_detail.out_range.kind.expression", "Выражение"),
+                )
+            except Exception:
+                pass
+            set_tooltip(
+                self._out_range_kind_seg,
+                self._tr(
+                    "page.z2_strategy_detail.out_range.kind.tooltip",
+                    "Простой режим для a, x, n и d. Выражение нужно для форм вроде s1<d1, b1000- или <s34228.",
+                ),
+            )
+        if getattr(self, "_out_range_mode_label", None) is not None:
+            self._out_range_mode_label.setText(self._tr("page.z2_strategy_detail.out_range.mode", "Режим:"))
+        if getattr(self, "_out_range_value_label", None) is not None:
+            self._out_range_value_label.setText(self._tr("page.z2_strategy_detail.out_range.value", "Значение:"))
+        if getattr(self, "_out_range_expression_label", None) is not None:
+            self._out_range_expression_label.setText(self._tr("page.z2_strategy_detail.out_range.expression", "Выражение:"))
+        if getattr(self, "_out_range_expression_input", None) is not None:
+            self._out_range_expression_input.setPlaceholderText(
+                self._tr(
+                    "page.z2_strategy_detail.out_range.expression.placeholder",
+                    "Например: s1<d1, b1000-, <s34228",
+                )
+            )
+            set_tooltip(
+                self._out_range_expression_input,
+                self._tr(
+                    "page.z2_strategy_detail.out_range.expression.tooltip",
+                    "Введите только значение после --out-range=. Например: x, -d10, s1<d1, b1000- или <s34228.",
+                ),
+            )
+        if getattr(self, "_out_range_frame", None) is not None:
+            self._out_range_frame.set_title(self._tr("page.z2_strategy_detail.out_range.title", "Out Range"))
+            self._out_range_frame.set_description(
+                self._tr("page.z2_strategy_detail.out_range.description", "Ограничение исходящих пакетов")
+            )
+        if getattr(self, "_out_range_seg", None) is not None:
+            set_tooltip(
+                self._out_range_seg,
+                self._tr(
+                    "page.z2_strategy_detail.out_range.mode.tooltip",
+                    "a = всегда, x = никогда, n = номер пакета, d = номер пакета с данными",
+                ),
+            )
+        if getattr(self, "_out_range_spin", None) is not None:
+            set_tooltip(
+                self._out_range_spin,
+                self._tr(
+                    "page.z2_strategy_detail.out_range.value.tooltip",
+                    "Для режимов n и d укажите число. Для a и x значение не используется.",
+                ),
+            )
+        apply_out_range_ui_state(self)
+
+        if getattr(self, "_search_input", None) is not None:
+            self._search_input.setPlaceholderText(
+                self._tr("page.z2_strategy_detail.search.placeholder", "Поиск по имени или args...")
+            )
+
+        if getattr(self, "_strategies_title_label", None) is not None:
+            self._strategies_title_label.setText(
+                self._tr("page.z2_strategy_detail.tree.title", "Все стратегии")
+            )
+
+        if getattr(self, "_sort_btn", None) is not None:
+            self._update_sort_button_ui()
+
+        if getattr(self, "_sort_combo", None) is not None:
+            self._populate_sort_combo()
+
+        if getattr(self, "_filter_combo", None) is not None:
+            idx = self._filter_combo.currentIndex()
+            refresh_strategy_filter_combo(
+                self._filter_combo,
+                self._tr,
+                current_index=idx,
+                technique_filters=STRATEGY_TECHNIQUE_FILTERS,
+            )
+
+        if getattr(self, "_edit_args_btn", None) is not None:
+            set_tooltip(
+                self._edit_args_btn,
+                self._tr(
+                    "page.z2_strategy_detail.args.tooltip",
+                    "Аргументы стратегии для выбранного target'а",
+                ),
+            )
+        self._update_strategies_summary()
+
+        if getattr(self, "_send_toggle_row", None) is not None:
+            self._send_toggle_row.set_texts(
+                self._tr("page.z2_strategy_detail.send.toggle.title", "Send параметры"),
+                self._tr("page.z2_strategy_detail.send.toggle.description", "Отправка копий пакетов"),
+            )
+        if getattr(self, "_send_repeats_row", None) is not None:
+            self._send_repeats_row.set_texts(
+                self._tr("page.z2_strategy_detail.send.repeats.title", "repeats"),
+                self._tr("page.z2_strategy_detail.send.repeats.description", "Количество повторных отправок"),
+            )
+        if getattr(self, "_send_ip_ttl_frame", None) is not None:
+            self._send_ip_ttl_frame.set_title(self._tr("page.z2_strategy_detail.send.ip_ttl.title", "ip_ttl"))
+            self._send_ip_ttl_frame.set_description(
+                self._tr("page.z2_strategy_detail.send.ip_ttl.description", "TTL для IPv4 отправляемых пакетов")
+            )
+        if getattr(self, "_send_ip6_ttl_frame", None) is not None:
+            self._send_ip6_ttl_frame.set_title(self._tr("page.z2_strategy_detail.send.ip6_ttl.title", "ip6_ttl"))
+            self._send_ip6_ttl_frame.set_description(
+                self._tr("page.z2_strategy_detail.send.ip6_ttl.description", "TTL для IPv6 отправляемых пакетов")
+            )
+        if getattr(self, "_send_ip_id_row", None) is not None:
+            self._send_ip_id_row.set_texts(
+                self._tr("page.z2_strategy_detail.send.ip_id.title", "ip_id"),
+                self._tr("page.z2_strategy_detail.send.ip_id.description", "Режим IP ID для отправляемых пакетов"),
+            )
+        if getattr(self, "_send_badsum_frame", None) is not None:
+            self._send_badsum_frame.set_title(self._tr("page.z2_strategy_detail.send.badsum.title", "badsum"))
+            self._send_badsum_frame.set_description(
+                self._tr(
+                    "page.z2_strategy_detail.send.badsum.description",
+                    "Отправлять пакеты с неправильной контрольной суммой",
+                )
+            )
+
+        if getattr(self, "_syndata_toggle_row", None) is not None:
+            self._syndata_toggle_row.set_texts(
+                self._tr("page.z2_strategy_detail.syndata.toggle.title", "Syndata параметры"),
+                self._tr(
+                    "page.z2_strategy_detail.syndata.toggle.description",
+                    "Дополнительные параметры обхода DPI",
+                ),
+            )
+        if getattr(self, "_blob_row", None) is not None:
+            self._blob_row.set_texts(
+                self._tr("page.z2_strategy_detail.syndata.blob.title", "blob"),
+                self._tr("page.z2_strategy_detail.syndata.blob.description", "Полезная нагрузка пакета"),
+            )
+        if getattr(self, "_tls_mod_row", None) is not None:
+            self._tls_mod_row.set_texts(
+                self._tr("page.z2_strategy_detail.syndata.tls_mod.title", "tls_mod"),
+                self._tr("page.z2_strategy_detail.syndata.tls_mod.description", "Модификация полезной нагрузки TLS"),
+            )
+        if getattr(self, "_autottl_delta_frame", None) is not None:
+            self._autottl_delta_frame.set_title(
+                self._tr("page.z2_strategy_detail.syndata.autottl_delta.title", "AutoTTL Delta")
+            )
+            self._autottl_delta_frame.set_description(
+                self._tr(
+                    "page.z2_strategy_detail.syndata.autottl_delta.description",
+                    "Смещение от измеренного TTL (OFF = убрать ip_autottl)",
+                )
+            )
+        if getattr(self, "_autottl_min_frame", None) is not None:
+            self._autottl_min_frame.set_title(
+                self._tr("page.z2_strategy_detail.syndata.autottl_min.title", "AutoTTL Min")
+            )
+            self._autottl_min_frame.set_description(
+                self._tr("page.z2_strategy_detail.syndata.autottl_min.description", "Минимальный TTL")
+            )
+        if getattr(self, "_autottl_max_frame", None) is not None:
+            self._autottl_max_frame.set_title(
+                self._tr("page.z2_strategy_detail.syndata.autottl_max.title", "AutoTTL Max")
+            )
+            self._autottl_max_frame.set_description(
+                self._tr("page.z2_strategy_detail.syndata.autottl_max.description", "Максимальный TTL")
+            )
+        if getattr(self, "_tcp_flags_row", None) is not None:
+            self._tcp_flags_row.set_texts(
+                self._tr("page.z2_strategy_detail.syndata.tcp_flags.title", "tcp_flags_unset"),
+                self._tr("page.z2_strategy_detail.syndata.tcp_flags.description", "Сбросить TCP флаги"),
+            )
+
+        if getattr(self, "_create_preset_btn", None) is not None:
+            self._create_preset_btn.setText(
+                self._tr("page.z2_strategy_detail.button.create_preset", "Создать пресет")
+            )
+            set_tooltip(
+                self._create_preset_btn,
+                self._tr(
+                    "page.z2_strategy_detail.button.create_preset.tooltip",
+                    "Создать новый пресет на основе текущих настроек",
+                ),
+            )
+        if getattr(self, "_rename_preset_btn", None) is not None:
+            self._rename_preset_btn.setText(
+                self._tr("page.z2_strategy_detail.button.rename_preset", "Переименовать")
+            )
+            set_tooltip(
+                self._rename_preset_btn,
+                self._tr(
+                    "page.z2_strategy_detail.button.rename_preset.tooltip",
+                    "Переименовать текущий активный пресет",
+                ),
+            )
+        if getattr(self, "_reset_settings_btn", None) is not None:
+            self._reset_settings_btn.setText(
+                self._tr("page.z2_strategy_detail.button.reset_settings", "Сбросить настройки")
+            )
+
+        updater = getattr(self, "_update_header_labels", None)
+        if callable(updater):
+            try:
+                updater()
+            except Exception:
+                pass
+
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
-        apply_strategy_detail_page_language(self)
+        self._apply_language_to_page_widgets()
         self._update_selected_strategy_header(self._selected_strategy_id)

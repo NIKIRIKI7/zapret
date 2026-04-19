@@ -3,8 +3,28 @@ from __future__ import annotations
 import json
 
 from log.log import log
+from direct_preset.common.out_range import (
+    build_simple_out_range_expression,
+    is_valuefree_out_range_mode,
+    normalize_simple_out_range_mode,
+    parse_out_range_expression,
+)
 
-from filters.strategy_detail.zapret2.controller import StrategyDetailPageController
+from filters.advanced import (
+    build_active_phase_chip_plan,
+    build_default_tcp_phase_tab_plan,
+    build_tcp_phase_args_text,
+    build_tcp_phase_marker_plan,
+    build_tcp_phase_row_click_plan,
+    build_tcp_phase_save_result_plan,
+    build_tcp_phase_state_plan,
+    build_tcp_phase_tabs_visibility_plan,
+)
+from filters.strategy_detail.zapret2.settings_logic import (
+    build_syndata_persist_plan,
+    build_syndata_timer_plan,
+    build_target_settings_payload,
+)
 from filters.strategy_detail.zapret2.tcp_phase_workflow import (
     apply_tcp_phase_row_click_result,
     apply_tcp_phase_save_result,
@@ -99,7 +119,7 @@ def update_tcp_phase_chip_markers_runtime(page) -> None:
         custom_args=page._tcp_phase_custom_args,
         fake_disabled_strategy_id=page.TCP_FAKE_DISABLED_STRATEGY_ID,
         custom_strategy_id=page.CUSTOM_STRATEGY_ID,
-        build_marker_plan_fn=StrategyDetailPageController.build_tcp_phase_marker_plan,
+        build_marker_plan_fn=build_tcp_phase_marker_plan,
     )
 
 
@@ -121,7 +141,7 @@ def load_tcp_phase_state_from_preset_runtime(page) -> None:
         extract_desync_technique_fn=page._extract_desync_technique_from_arg,
         map_phase_fn=page._map_desync_technique_to_tcp_phase,
         infer_phase_key_fn=lambda args_text: infer_tcp_phase_key_for_strategy_args(page, args_text),
-        build_state_plan_fn=StrategyDetailPageController.build_tcp_phase_state_plan,
+        build_state_plan_fn=build_tcp_phase_state_plan,
     )
     page._tcp_phase_selected_ids = selected_ids
     page._tcp_phase_custom_args = custom_args
@@ -137,7 +157,7 @@ def apply_tcp_phase_tabs_visibility_runtime(page) -> None:
         phase_tabbar=page._phase_tabbar,
         hide_fake_phase=bool(page._tcp_hide_fake_phase),
         active_phase_key=page._active_phase_key,
-        build_tabs_visibility_plan_fn=StrategyDetailPageController.build_tcp_phase_tabs_visibility_plan,
+        build_tabs_visibility_plan_fn=build_tcp_phase_tabs_visibility_plan,
         set_active_phase_chip_fn=page._set_active_phase_chip,
         reapply_filters_fn=page._apply_filters,
     )
@@ -149,7 +169,7 @@ def set_active_phase_chip_runtime(page, phase_key: str) -> None:
         phase_tabbar=page._phase_tabbar,
         phase_tab_index_by_key=page._phase_tab_index_by_key,
         requested_phase_key=phase_key,
-        build_active_phase_chip_plan_fn=StrategyDetailPageController.build_active_phase_chip_plan,
+        build_active_phase_chip_plan_fn=build_active_phase_chip_plan,
     )
     if final_phase_key:
         page._active_phase_key = final_phase_key
@@ -161,7 +181,7 @@ def select_default_tcp_phase_tab_runtime(page) -> None:
         selected_ids=page._tcp_phase_selected_ids,
         hide_fake_phase=bool(page._tcp_hide_fake_phase),
         phase_priority=["multisplit", "multidisorder", "multidisorder_legacy", "tcpseg", "oob", "other"],
-        build_default_tab_plan_fn=StrategyDetailPageController.build_default_tcp_phase_tab_plan,
+        build_default_tab_plan_fn=build_default_tcp_phase_tab_plan,
         set_active_phase_chip_fn=page._set_active_phase_chip,
     )
 
@@ -174,7 +194,7 @@ def save_tcp_phase_state_to_preset(page, *, show_loading: bool = True) -> None:
         strategies_data_by_id=page._strategies_data_by_id,
         load_args_text_fn=lambda strategy_id: get_strategy_args_text_by_id(page, strategy_id),
     )
-    new_args = StrategyDetailPageController.build_tcp_phase_args_text(
+    new_args = build_tcp_phase_args_text(
         selected_ids=page._tcp_phase_selected_ids,
         custom_args=page._tcp_phase_custom_args,
         hide_fake_phase=bool(page._tcp_hide_fake_phase),
@@ -193,7 +213,7 @@ def save_tcp_phase_state_to_preset(page, *, show_loading: bool = True) -> None:
             return
         page._preset_refresh_runtime.mark_suppressed()
         payload = page._reload_current_target_payload()
-        plan = StrategyDetailPageController.build_tcp_phase_save_result_plan(
+        plan = build_tcp_phase_save_result_plan(
             payload=payload,
             show_loading=show_loading,
         )
@@ -230,7 +250,7 @@ def on_tcp_phase_row_clicked(page, strategy_id: str) -> None:
         strategies_data_by_id=page._strategies_data_by_id,
         load_args_text_fn=lambda sid: get_strategy_args_text_by_id(page, sid),
     )
-    plan = StrategyDetailPageController.build_tcp_phase_row_click_plan(
+    plan = build_tcp_phase_row_click_plan(
         tcp_phase_mode=bool(page._tcp_phase_mode),
         target_key=page._target_key,
         active_phase_key=page._active_phase_key,
@@ -259,8 +279,7 @@ def on_tcp_phase_row_clicked(page, strategy_id: str) -> None:
 
 def load_target_last_tcp_phase_tab(page, target_key: str) -> str | None:
     try:
-        from config.reg import reg
-        from config.config import REGISTRY_PATH_GUI
+        from settings.store import get_last_tcp_phase_tab
     except Exception:
         return None
 
@@ -269,11 +288,7 @@ def load_target_last_tcp_phase_tab(page, target_key: str) -> str | None:
         return None
 
     try:
-        raw = reg(REGISTRY_PATH_GUI, page._REG_TCP_PHASE_TABS_BY_TARGET)
-        if not raw:
-            return None
-        data = json.loads(raw) if isinstance(raw, str) else {}
-        phase = str((data or {}).get(key) or "").strip().lower()
+        phase = str(get_last_tcp_phase_tab(key) or "").strip().lower()
         if phase and phase in (page._phase_tab_index_by_key or {}):
             return phase
     except Exception:
@@ -284,8 +299,7 @@ def load_target_last_tcp_phase_tab(page, target_key: str) -> str | None:
 
 def save_target_last_tcp_phase_tab(page, target_key: str, phase_key: str) -> None:
     try:
-        from config.reg import reg
-        from config.config import REGISTRY_PATH_GUI
+        from settings.store import set_last_tcp_phase_tab
     except Exception:
         return
 
@@ -298,29 +312,163 @@ def save_target_last_tcp_phase_tab(page, target_key: str, phase_key: str) -> Non
         return
 
     try:
-        raw = reg(REGISTRY_PATH_GUI, page._REG_TCP_PHASE_TABS_BY_TARGET)
-        data = {}
-        if isinstance(raw, str) and raw.strip():
-            try:
-                data = json.loads(raw) or {}
-            except Exception:
-                data = {}
-        if not isinstance(data, dict):
-            data = {}
-        data[target_key_n] = phase
-        reg(REGISTRY_PATH_GUI, page._REG_TCP_PHASE_TABS_BY_TARGET, json.dumps(data, ensure_ascii=False))
+        set_last_tcp_phase_tab(target_key_n, phase)
     except Exception:
         return
 
 
-def select_out_range_mode(page, mode: str) -> None:
-    if mode != page._out_range_mode:
-        page._out_range_mode = mode
+def _set_widget_visible(widget, visible: bool) -> None:
+    if widget is None:
+        return
+    try:
+        widget.setVisible(bool(visible))
+    except Exception:
+        pass
+
+
+def _set_line_edit_text_safely(widget, text: str) -> None:
+    if widget is None:
+        return
+    try:
+        current_text = widget.text()
+    except Exception:
+        current_text = None
+    if current_text == text:
+        return
+    try:
+        widget.blockSignals(True)
+        widget.setText(text)
+    except Exception:
+        return
+    finally:
         try:
-            page._out_range_seg.setCurrentItem(mode)
+            widget.blockSignals(False)
         except Exception:
             pass
-        page._schedule_syndata_settings_save()
+
+
+def _set_segmented_item_safely(widget, item_key: str) -> None:
+    if widget is None:
+        return
+    try:
+        widget.blockSignals(True)
+        widget.setCurrentItem(item_key)
+    except Exception:
+        return
+    finally:
+        try:
+            widget.blockSignals(False)
+        except Exception:
+            pass
+
+
+def _build_out_range_notice(page) -> tuple[bool, str]:
+    if bool(getattr(page, "_out_range_is_simple", True)):
+        return False, ""
+
+    expr = str(getattr(page, "_out_range_expression", "") or "").strip()
+    if not expr:
+        return True, page._tr(
+            "page.z2_strategy_detail.out_range.expression.notice",
+            "Можно использовать a, x, -n10, -d10 и диапазоны вроде s1<d1, b1000- или <s34228.",
+        )
+
+    if parse_out_range_expression(expr) is None:
+        return True, page._tr(
+            "page.z2_strategy_detail.out_range.expression.invalid",
+            "Выражение out-range не распознано. Ожидается значение вроде x, -d10, s1<d1, b1000- или <s34228.",
+        )
+
+    return True, page._tr(
+        "page.z2_strategy_detail.out_range.expression.notice",
+        "Можно использовать a, x, -n10, -d10 и диапазоны вроде s1<d1, b1000- или <s34228.",
+    )
+
+
+def apply_out_range_ui_state(page) -> None:
+    normalized_mode = normalize_simple_out_range_mode(getattr(page, "_out_range_mode", "d"), default="d")
+    page._out_range_mode = normalized_mode
+    is_simple = bool(getattr(page, "_out_range_is_simple", True))
+
+    try:
+        if getattr(page, "_out_range_kind_seg", None) is not None:
+            _set_segmented_item_safely(page._out_range_kind_seg, "simple" if is_simple else "expression")
+    except Exception:
+        pass
+
+    try:
+        if getattr(page, "_out_range_seg", None) is not None:
+            _set_segmented_item_safely(page._out_range_seg, normalized_mode)
+            page._out_range_seg.setEnabled(is_simple)
+    except Exception:
+        pass
+
+    show_value = is_simple and not is_valuefree_out_range_mode(normalized_mode)
+    _set_widget_visible(getattr(page, "_out_range_mode_label", None), is_simple)
+    _set_widget_visible(getattr(page, "_out_range_seg", None), is_simple)
+    _set_widget_visible(getattr(page, "_out_range_value_label", None), show_value)
+    _set_widget_visible(getattr(page, "_out_range_spin", None), show_value)
+    _set_widget_visible(getattr(page, "_out_range_expression_label", None), not is_simple)
+    _set_widget_visible(getattr(page, "_out_range_expression_input", None), not is_simple)
+
+    try:
+        if getattr(page, "_out_range_spin", None) is not None:
+            page._out_range_spin.setEnabled(show_value)
+    except Exception:
+        pass
+
+    try:
+        if getattr(page, "_out_range_expression_input", None) is not None:
+            page._out_range_expression_input.setEnabled(not is_simple)
+    except Exception:
+        pass
+
+    notice_visible, notice_text = _build_out_range_notice(page)
+    try:
+        if getattr(page, "_out_range_complex_label", None) is not None:
+            page._out_range_complex_label.setText(notice_text)
+            page._out_range_complex_label.setVisible(notice_visible)
+    except Exception:
+        pass
+
+
+def select_out_range_kind(page, kind: str) -> None:
+    normalized_kind = "simple" if str(kind or "").strip().lower() == "simple" else "expression"
+    next_is_simple = normalized_kind == "simple"
+    simple_expression = build_simple_out_range_expression(
+        getattr(page, "_out_range_mode", "d"),
+        page._out_range_spin.value(),
+    )
+    current_expression = str(getattr(page, "_out_range_expression", "") or "").strip()
+    if not current_expression:
+        current_expression = simple_expression
+
+    page._out_range_is_simple = next_is_simple
+    page._out_range_expression = simple_expression if next_is_simple else current_expression
+    if not next_is_simple:
+        _set_line_edit_text_safely(getattr(page, "_out_range_expression_input", None), current_expression)
+
+    apply_out_range_ui_state(page)
+    page._schedule_syndata_settings_save()
+
+
+def select_out_range_mode(page, mode: str) -> None:
+    normalized_mode = normalize_simple_out_range_mode(mode, default="d")
+    page._out_range_mode = normalized_mode
+    page._out_range_is_simple = True
+    page._out_range_expression = build_simple_out_range_expression(
+        normalized_mode,
+        page._out_range_spin.value(),
+    )
+    apply_out_range_ui_state(page)
+    page._schedule_syndata_settings_save()
+
+
+def set_out_range_expression(page, text: str) -> None:
+    page._out_range_is_simple = False
+    page._out_range_expression = str(text or "").strip()
+    apply_out_range_ui_state(page)
+    page._schedule_syndata_settings_save()
 
 
 def on_send_toggled(page, checked: bool) -> None:
@@ -334,7 +482,7 @@ def on_syndata_toggled(page, checked: bool) -> None:
 
 
 def schedule_syndata_settings_save(page, delay_ms: int = 180) -> None:
-    plan = StrategyDetailPageController.build_syndata_timer_plan(
+    plan = build_syndata_timer_plan(
         target_key=page._target_key,
         delay_ms=delay_ms,
     )
@@ -348,6 +496,13 @@ def schedule_syndata_settings_save(page, delay_ms: int = 180) -> None:
 
 
 def flush_syndata_settings_save(page) -> None:
+    if not bool(getattr(page, "_out_range_is_simple", True)):
+        expression = str(getattr(page, "_out_range_expression", "") or "").strip()
+        if parse_out_range_expression(expression) is None:
+            apply_out_range_ui_state(page)
+            log(f"Skip syndata settings save for {page._target_key}: invalid out-range expression {expression!r}", "DEBUG")
+            return
+
     raw_payload = {
         "enabled": page._syndata_toggle.isChecked(),
         "blob": page._blob_combo.currentText(),
@@ -357,6 +512,8 @@ def flush_syndata_settings_save(page) -> None:
         "autottl_max": page._autottl_max_selector.value(),
         "out_range": page._out_range_spin.value(),
         "out_range_mode": page._out_range_mode,
+        "out_range_expression": "" if bool(getattr(page, "_out_range_is_simple", True)) else (getattr(page, "_out_range_expression", "") or ""),
+        "out_range_is_simple": bool(getattr(page, "_out_range_is_simple", True)),
         "tcp_flags_unset": page._tcp_flags_combo.currentText(),
         "send_enabled": page._send_toggle.isChecked(),
         "send_repeats": page._send_repeats_spin.value(),
@@ -365,7 +522,7 @@ def flush_syndata_settings_save(page) -> None:
         "send_ip_id": page._send_ip_id_combo.currentText(),
         "send_badsum": page._send_badsum_check.isChecked(),
     }
-    plan = StrategyDetailPageController.build_syndata_persist_plan(
+    plan = build_syndata_persist_plan(
         target_key=page._target_key,
         pending_target_key=page._pending_syndata_target_key,
         payload=raw_payload,
@@ -386,4 +543,4 @@ def flush_syndata_settings_save(page) -> None:
 def load_syndata_settings(page, target_key: str) -> dict:
     details = page._get_target_details(target_key)
     protocol = str(getattr(page._target_info, "protocol", "") or "")
-    return StrategyDetailPageController.build_target_settings_payload(details=details, protocol=protocol)
+    return build_target_settings_payload(details=details, protocol=protocol)

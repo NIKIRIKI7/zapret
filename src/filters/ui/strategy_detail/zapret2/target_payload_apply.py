@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from filters.ui.strategy_detail.filter_mode_ui import apply_filter_mode_selector_state
+
 
 def prepare_target_payload_apply_ui(
     *,
@@ -17,15 +19,17 @@ def prepare_target_payload_apply_ui(
     detail_text: str,
     control_text: str,
     strategies_text: str,
-    apply_shell_state_fn,
     apply_header_state_fn,
 ):
     close_preview_fn(force=True)
-    apply_shell_state_fn(
-        settings_host,
-        toolbar_frame,
-        visible=True,
-    )
+    try:
+        settings_host.setVisible(True)
+    except Exception:
+        pass
+    try:
+        toolbar_frame.setVisible(True)
+    except Exception:
+        pass
     try:
         favorite_ids = feedback_store.get_favorites(normalized_key)
     except Exception:
@@ -54,7 +58,6 @@ def apply_payload_reuse_plan(
     favorite_ids: set[str],
     refresh_working_marks_fn,
     current_strategy_id: str,
-    apply_current_strategy_tree_state_fn,
     restore_scroll_state_fn,
     normalized_key: str,
 ) -> None:
@@ -68,10 +71,16 @@ def apply_payload_reuse_plan(
         strategies_tree.set_favorite_state(strategy_id, want_favorite)
 
     refresh_working_marks_fn()
-    apply_current_strategy_tree_state_fn(
-        strategies_tree,
-        current_strategy_id=current_strategy_id,
-    )
+    normalized_strategy_id = str(current_strategy_id or "none").strip() or "none"
+    try:
+        if normalized_strategy_id != "none" and strategies_tree.has_strategy(normalized_strategy_id):
+            strategies_tree.set_selected_strategy(normalized_strategy_id)
+        elif strategies_tree.has_strategy("none"):
+            strategies_tree.set_selected_strategy("none")
+        else:
+            strategies_tree.clearSelection()
+    except Exception:
+        pass
     restore_scroll_state_fn(normalized_key, defer=True)
 
 
@@ -81,9 +90,7 @@ def finalize_target_payload_apply_ui(
     normalized_key: str,
     load_target_filter_mode_fn,
     filter_mode_selector,
-    apply_filter_mode_selector_state_fn,
     apply_target_mode_visibility_fn,
-    apply_target_payload_filter_reset_fn,
     search_input,
     active_filters: set[str],
     load_target_sort_fn,
@@ -105,16 +112,17 @@ def finalize_target_payload_apply_ui(
 ) -> None:
     if policy.show_filter_mode_frame:
         saved_filter_mode = load_target_filter_mode_fn(normalized_key)
-        apply_filter_mode_selector_state_fn(
-            filter_mode_selector,
-            mode=saved_filter_mode,
-        )
+        apply_filter_mode_selector_state(filter_mode_selector, mode=saved_filter_mode)
     apply_target_mode_visibility_fn(policy)
 
-    apply_target_payload_filter_reset_fn(
-        search_input,
-        active_filters,
-    )
+    try:
+        search_input.clear()
+    except Exception:
+        pass
+    try:
+        active_filters.clear()
+    except Exception:
+        pass
     set_sort_mode_fn(load_target_sort_fn(normalized_key))
     update_technique_filter_ui_fn()
 

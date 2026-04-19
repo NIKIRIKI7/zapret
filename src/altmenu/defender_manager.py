@@ -18,18 +18,17 @@ import winreg
 from typing import Callable, Optional, List, Tuple
 from log.log import log
 
-from config.config import REGISTRY_PATH
-
 
 def set_defender_disabled(enabled: bool):
-    """Сохраняет настройку отключения Windows Defender"""
+    """Сохраняет пользовательскую память о состоянии Defender в settings.json."""
     try:
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH) as key:
-            winreg.SetValueEx(key, "DefenderDisabled", 0, winreg.REG_DWORD, int(enabled))
+        from settings.store import set_defender_disabled_memory
+
+        set_defender_disabled_memory(bool(enabled))
     except Exception as e:
         from log.log import log
 
-        log(f"Ошибка при сохранении настройки Defender: {e}", "❌ ERROR")
+        log(f"Ошибка при сохранении состояния Defender: {e}", "❌ ERROR")
 
 class WindowsDefenderManager:
     """Менеджер для управления Windows Defender"""

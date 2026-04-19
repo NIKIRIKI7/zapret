@@ -3,6 +3,29 @@ from __future__ import annotations
 from filters.ui.strategy_detail.shared import ensure_preview_dialog, show_strategy_preview_dialog
 
 
+def build_working_mark_updates(
+    *,
+    target_key: str,
+    strategy_ids: list[str],
+    custom_strategy_id: str,
+    mark_getter,
+) -> list[tuple[str, object]]:
+    if not str(target_key or "").strip():
+        return []
+
+    updates: list[tuple[str, object]] = []
+    for strategy_id in strategy_ids:
+        normalized = str(strategy_id or "").strip()
+        if not normalized or normalized in ("none", custom_strategy_id):
+            continue
+        try:
+            state = mark_getter(normalized)
+        except Exception:
+            continue
+        updates.append((normalized, state))
+    return updates
+
+
 def build_preview_strategy_data(*, strategy_id: str, strategy_data: dict | None) -> dict:
     normalized_id = str(strategy_id or "").strip()
     data = dict(strategy_data or {})

@@ -2,40 +2,44 @@ from __future__ import annotations
 
 from log.log import log
 
-from filters.strategy_detail.zapret2.controller import StrategyDetailPageController
-from filters.ui.strategy_detail.zapret2.apply import apply_tree_working_state, apply_working_mark_updates
-from filters.ui.strategy_detail.zapret2.preview import (
+from filters.ui.strategy_detail.shared_interactions import (
+    build_working_mark_updates,
+    build_preview_strategy_data,
     close_preview_dialog,
     ensure_preview_dialog_instance,
+    get_preview_rating as get_preview_rating_plan,
+    save_strategy_mark,
     show_preview_dialog_for_strategy,
+    toggle_favorite,
+    toggle_preview_rating as toggle_preview_rating_plan,
 )
 
 
 def refresh_working_marks_for_target(page) -> None:
     if not (page._target_key and page._strategies_tree):
         return
-    plan = StrategyDetailPageController.build_working_marks_plan(
+    updates = build_working_mark_updates(
         target_key=page._target_key,
         strategy_ids=list(page._strategies_tree.get_strategy_ids() or []),
         custom_strategy_id=page.CUSTOM_STRATEGY_ID,
         mark_getter=lambda strategy_id: page._feedback_store.get_mark(page._target_key, strategy_id),
     )
-    apply_working_mark_updates(
-        page._strategies_tree,
-        plan.updates,
-    )
+    for strategy_id, state in list(updates or []):
+        try:
+            page._strategies_tree.set_working_state(strategy_id, state)
+        except Exception:
+            pass
 
 
 def get_preview_strategy_data(page, strategy_id: str) -> dict:
-    plan = StrategyDetailPageController.build_preview_strategy_data(
+    return build_preview_strategy_data(
         strategy_id=strategy_id,
         strategy_data=page._strategies_data_by_id.get(strategy_id, {}),
     )
-    return dict(plan.data or {})
 
 
 def get_preview_rating(page, strategy_id: str, target_key: str):
-    return StrategyDetailPageController.get_preview_rating(
+    return get_preview_rating_plan(
         page._feedback_store,
         strategy_id=strategy_id,
         target_key=target_key,
@@ -43,19 +47,18 @@ def get_preview_rating(page, strategy_id: str, target_key: str):
 
 
 def toggle_preview_rating(page, strategy_id: str, rating: str, target_key: str):
-    result = StrategyDetailPageController.toggle_preview_rating(
+    ok, resulting_mark_state, resulting_rating = toggle_preview_rating_plan(
         page._feedback_store,
         strategy_id=strategy_id,
         rating=rating,
         target_key=target_key,
     )
-    apply_tree_working_state(
-        page._strategies_tree,
-        strategy_id=strategy_id,
-        state=result.resulting_mark_state,
-        should_update=result.should_update_tree_state,
-    )
-    return result.resulting_rating
+    if ok and page._strategies_tree is not None:
+        try:
+            page._strategies_tree.set_working_state(strategy_id, resulting_mark_state)
+        except Exception:
+            pass
+    return resulting_rating
 
 
 def close_preview_dialog_runtime(page, force: bool = False):
@@ -132,34 +135,33 @@ def on_tree_preview_hide_requested(page) -> None:
 
 
 def on_tree_working_mark_requested(page, strategy_id: str, is_working):
-    result = StrategyDetailPageController.save_strategy_mark(
+    ok, resulting_mark_state, _ = save_strategy_mark(
         page._feedback_store,
         strategy_id=strategy_id,
         is_working=is_working,
         target_key=page._target_key,
     )
-    apply_tree_working_state(
-        page._strategies_tree,
-        strategy_id=strategy_id,
-        state=result.resulting_mark_state,
-        should_update=result.should_update_tree_state,
-    )
-    if result.should_emit_signal and page._target_key:
+    if ok and page._strategies_tree is not None:
+        try:
+            page._strategies_tree.set_working_state(strategy_id, resulting_mark_state)
+        except Exception:
+            pass
+    if ok and page._target_key:
         page.strategy_marked.emit(page._target_key, strategy_id, is_working)
 
 
 def on_favorite_toggled(page, strategy_id: str, is_favorite: bool) -> None:
-    result = StrategyDetailPageController.toggle_favorite(
+    ok, updated_favorite_ids = toggle_favorite(
         page._feedback_store,
         strategy_id=strategy_id,
         is_favorite=is_favorite,
         target_key=page._target_key,
         favorite_ids=page._favorite_strategy_ids,
     )
-    if not result.ok:
+    if not ok:
         return
 
-    page._favorite_strategy_ids = set(result.updated_favorite_ids)
+    page._favorite_strategy_ids = set(updated_favorite_ids)
 
 
 def get_default_strategy(page) -> str:

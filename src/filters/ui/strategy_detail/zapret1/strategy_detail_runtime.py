@@ -12,11 +12,48 @@ from filters.strategy_detail.zapret1.payload_workflow import (
     handle_loaded_payload_v1,
     start_target_payload_request_v1,
 )
-from filters.ui.strategy_detail.zapret1.page_workflow import (
-    activate_page_v1,
-    reload_target_v1,
-    show_target_v1,
+from filters.ui.strategy_detail.shared_detail_header import (
+    apply_detail_breadcrumb,
+    build_detail_header_text_state,
 )
+
+
+def rebuild_breadcrumb_v1(
+    *,
+    breadcrumb,
+    tr_fn,
+    target_info: dict,
+    target_key: str,
+) -> None:
+    header_state = build_detail_header_text_state(
+        target_info=target_info,
+        target_key=target_key,
+        tr=tr_fn,
+        ports_text_key="page.z1_strategy_detail.subtitle.ports",
+        ports_text_default="порты: {ports}",
+        empty_title=target_key,
+        empty_detail="Target",
+    )
+    apply_detail_breadcrumb(
+        breadcrumb,
+        control_text=tr_fn("page.z1_strategy_detail.breadcrumb.control", "Управление"),
+        strategies_text=tr_fn("page.z1_strategy_detail.breadcrumb.strategies", "Прямой запуск Zapret 1"),
+        detail_text=header_state.detail_text,
+    )
+
+
+def handle_breadcrumb_changed_v1(
+    *,
+    key: str,
+    rebuild_breadcrumb_fn,
+    emit_back_fn,
+    emit_navigate_to_control_fn,
+) -> None:
+    rebuild_breadcrumb_fn()
+    if key == "strategies":
+        emit_back_fn()
+    elif key == "control":
+        emit_navigate_to_control_fn()
 
 
 def load_target_payload_sync_runtime_v1(page, target_key: str | None = None, *, refresh: bool = False):
@@ -122,28 +159,100 @@ def apply_loaded_target_payload_runtime_v1(page) -> None:
 
 
 def show_target_runtime_v1(page, target_key: str, direct_facade=None) -> None:
-    show_target_v1(
-        cleanup_in_progress=page._cleanup_in_progress,
-        target_key=target_key,
-        direct_facade=direct_facade,
-        current_direct_facade=page._direct_facade,
-        require_app_context_fn=page._require_app_context,
-        set_direct_facade_fn=lambda value: setattr(page, "_direct_facade", value),
-        request_target_payload_fn=page._request_target_payload,
-    )
+    if page._cleanup_in_progress:
+        return
+
+    normalized_target_key = str(target_key or "").strip().lower()
+    if not normalized_target_key:
+        return
+
+    if direct_facade is not None:
+        page._direct_facade = direct_facade
+    elif page._direct_facade is None:
+        try:
+            from direct_preset.facade import DirectPresetFacade
+
+            page._direct_facade = DirectPresetFacade.from_launch_method(
+                "direct_zapret1",
+                app_context=page._require_app_context(),
+            )
+        except Exception:
+            page._direct_facade = None
+
+    page._request_target_payload(normalized_target_key, refresh=False, reason="show_target")
 
 
 def activate_page_runtime_v1(page) -> None:
-    activate_page_v1(
-        cleanup_in_progress=page._cleanup_in_progress,
-        target_key=page._target_key,
-        preset_refresh_pending=page._preset_refresh_pending,
-        clear_preset_refresh_pending_fn=lambda: setattr(page, "_preset_refresh_pending", False),
-        request_target_payload_fn=page._request_target_payload,
-        rebuild_breadcrumb_fn=page._rebuild_breadcrumb,
-        single_shot_fn=page._single_shot_fn,
-        refresh_from_preset_switch_fn=lambda: (not page._cleanup_in_progress) and page.refresh_from_preset_switch(),
+    if page._cleanup_in_progress:
+        return
+
+    page._rebuild_breadcrumb()
+    if page._target_key and page._preset_refresh_pending:
+        page._preset_refresh_pending = False
+        page._single_shot_fn(0, lambda: (not page._cleanup_in_progress) and page.refresh_from_preset_switch())
+
+
+def bind_ui_state_store_v1(
+    *,
+    current_store,
+    store,
+    current_unsubscribe,
+    set_store_fn,
+    set_unsubscribe_fn,
+    on_ui_state_changed,
+) -> None:
+    if current_store is store:
+        return
+
+    if callable(current_unsubscribe):
+        try:
+            current_unsubscribe()
+        except Exception:
+            pass
+
+    set_store_fn(store)
+    unsubscribe = store.subscribe(
+        on_ui_state_changed,
+        fields={"active_preset_revision", "preset_content_revision"},
+        emit_initial=False,
     )
+    set_unsubscribe_fn(unsubscribe)
+
+
+def handle_ui_state_changed_v1(
+    *,
+    cleanup_in_progress: bool,
+    changed_fields: frozenset[str],
+    refresh_from_preset_switch_fn,
+) -> None:
+    if cleanup_in_progress:
+        return
+    if "active_preset_revision" in changed_fields or "preset_content_revision" in changed_fields:
+        refresh_from_preset_switch_fn()
+
+
+def cleanup_page_v1(
+    *,
+    set_cleanup_in_progress_fn,
+    clear_preset_refresh_pending_fn,
+    increment_request_id_fn,
+    success_timer,
+    current_unsubscribe,
+    set_unsubscribe_fn,
+    set_store_fn,
+) -> None:
+    set_cleanup_in_progress_fn(True)
+    clear_preset_refresh_pending_fn()
+    increment_request_id_fn()
+    success_timer.stop()
+
+    if callable(current_unsubscribe):
+        try:
+            current_unsubscribe()
+        except Exception:
+            pass
+    set_unsubscribe_fn(None)
+    set_store_fn(None)
 
 
 def load_current_strategy_id_runtime_v1(page) -> str:
@@ -165,13 +274,17 @@ def get_target_details_runtime_v1(page, target_key: str | None = None):
 
 
 def reload_target_runtime_v1(page, *_args) -> None:
-    reload_target_v1(
-        target_key=page._target_key,
-        refresh_btn=page._refresh_btn,
-        request_target_payload_fn=page._request_target_payload,
-        on_error_fallback_fn=page._reload_target_error_fallback,
-        log_fn=page._log_fn,
-    )
+    if not page._target_key:
+        return
+
+    if page._refresh_btn:
+        page._refresh_btn.set_loading(True)
+
+    try:
+        page._request_target_payload(page._target_key, refresh=True, reason="reload")
+    except Exception as exc:
+        page._log_fn(f"Zapret1StrategyDetailPage: cannot load strategies: {exc}", "ERROR")
+        page._reload_target_error_fallback()
 
 
 def reload_target_error_fallback_runtime_v1(page) -> None:

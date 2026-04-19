@@ -9,6 +9,7 @@ def apply_strategy_selection(
     *,
     target_key: str,
     strategy_id: str,
+    direct_mode_override: str | None,
     target_selections: dict,
     targets_list,
     require_app_context,
@@ -32,6 +33,7 @@ def apply_strategy_selection(
         direct_facade = DirectPresetFacade.from_launch_method(
             "direct_zapret2",
             app_context=require_app_context(),
+            direct_mode_override=direct_mode_override,
             on_dpi_reload_needed=lambda: request_direct_runtime_content_apply(
                 parent_app,
                 launch_method="direct_zapret2",

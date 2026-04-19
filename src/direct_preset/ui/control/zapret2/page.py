@@ -165,7 +165,7 @@ class Zapret2DirectControlPage(ControlPageActionMixin, BasePage):
     """Страница управления для direct_zapret2 (главная вкладка раздела "Стратегии")."""
 
     navigate_to_presets = pyqtSignal()        # → PageName.ZAPRET2_USER_PRESETS
-    navigate_to_direct_launch = pyqtSignal()  # → PageName.ZAPRET2_DIRECT
+    navigate_to_direct_launch = pyqtSignal()  # → текущий Basic/Advanced page-flow
     navigate_to_blobs = pyqtSignal()          # → PageName.BLOBS
     direct_mode_changed = pyqtSignal(str)     # "basic" | "advanced"
     deferred_show_requested = pyqtSignal()

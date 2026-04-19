@@ -1,27 +1,29 @@
 from __future__ import annotations
 
 from filters.strategy_detail.shared_filter_mode import load_target_filter_mode, target_supports_filter_switch
-from filters.strategy_detail.zapret1.controller import StrategyDetailPageV1Controller
+from filters.ui.strategy_detail.zapret1.display_logic import (
+    apply_strategy_detail_v1_language,
+    default_strategy_id_v1,
+    normalize_search_text,
+    normalize_target_info_v1,
+    refresh_args_preview,
+    resolve_sort_mode_change,
+    sorted_strategy_items_v1,
+    strategy_display_name_v1,
+    sync_target_controls,
+    update_header_labels,
+    update_selected_label,
+)
 from filters.ui.strategy_detail.zapret1.feedback_helpers import (
     hide_success_feedback_v1,
     show_loading_feedback_v1,
     show_success_feedback_v1,
 )
-from filters.strategy_detail.zapret1.filtering_helpers import (
-    normalize_search_text,
-    resolve_sort_mode_change,
-)
 from filters.ui.strategy_detail.zapret1.filtering_ui import (
     apply_search_filter_v1,
     apply_sort_mode_v1,
 )
-from filters.ui.strategy_detail.zapret1.runtime_helpers import (
-    refresh_args_preview,
-    sync_target_controls,
-    update_header_labels,
-    update_selected_label,
-)
-from filters.ui.strategy_detail.zapret1.selection_workflow import (
+from filters.ui.strategy_detail.zapret1.selection_logic import (
     handle_enable_toggle_v1,
     handle_filter_mode_change_v1,
     handle_strategy_selection_v1,
@@ -52,7 +54,7 @@ def on_filter_mode_changed_runtime_v1(page, new_mode: str) -> None:
 
 
 def default_strategy_id_runtime_v1(page) -> str:
-    return StrategyDetailPageV1Controller.default_strategy_id(page._strategies, page._sort_mode)
+    return default_strategy_id_v1(page._strategies, page._sort_mode)
 
 
 def on_enable_toggled_runtime_v1(page, enabled: bool) -> None:
@@ -96,7 +98,7 @@ def on_strategy_selected_runtime_v1(page, strategy_id: str) -> None:
 
 
 def strategy_display_name_runtime_v1(page, strategy_id: str) -> str:
-    return StrategyDetailPageV1Controller.strategy_display_name(strategy_id, page._strategies, page._tr)
+    return strategy_display_name_v1(strategy_id, page._strategies, page._tr)
 
 
 def refresh_args_preview_runtime_v1(page) -> None:

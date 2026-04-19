@@ -9,17 +9,17 @@ def refresh_args_editor_state(
     target_key: str,
     selected_strategy_id: str,
     build_state_plan_fn,
-    apply_args_editor_state_fn,
     hide_editor_fn,
 ) -> None:
     plan = build_state_plan_fn(
         target_key=target_key,
         selected_strategy_id=selected_strategy_id,
     )
-    apply_args_editor_state_fn(
-        edit_args_btn,
-        enabled=plan.enabled,
-    )
+    try:
+        if edit_args_btn is not None:
+            edit_args_btn.setEnabled(plan.enabled)
+    except Exception:
+        pass
 
     if plan.should_hide_editor:
         hide_editor_fn(clear_text=True)
