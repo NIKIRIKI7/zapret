@@ -114,6 +114,14 @@ def normalize_program(data: object) -> dict[str, Any]:
         "dpi_autostart": as_bool(raw.get("dpi_autostart"), defaults["dpi_autostart"]),
         "strategy_launch_method": as_str_in(raw.get("strategy_launch_method"), schema.VALID_LAUNCH_METHODS, defaults["strategy_launch_method"]),
         "direct_ui_mode": as_str_in(raw.get("direct_ui_mode"), schema.VALID_DIRECT_UI_MODES, defaults["direct_ui_mode"]),
+        "selected_source_preset_file_name_winws1": as_clean_str(
+            raw.get("selected_source_preset_file_name_winws1"),
+            defaults["selected_source_preset_file_name_winws1"],
+        ),
+        "selected_source_preset_file_name_winws2": as_clean_str(
+            raw.get("selected_source_preset_file_name_winws2"),
+            defaults["selected_source_preset_file_name_winws2"],
+        ),
         "auto_update_enabled": as_bool(raw.get("auto_update_enabled"), defaults["auto_update_enabled"]),
         "remove_github_api": as_bool(raw.get("remove_github_api"), defaults["remove_github_api"]),
         "discord_auto_restart": as_bool(raw.get("discord_auto_restart"), defaults["discord_auto_restart"]),

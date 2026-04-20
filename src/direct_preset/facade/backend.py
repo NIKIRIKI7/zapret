@@ -93,7 +93,7 @@ class DirectPresetFacadeBackend:
         selected_file_name = str(getattr(selected_manifest, "file_name", "") or "").strip()
         if not selected_file_name:
             raise ValueError("Selected source preset file name is required")
-        return self.app_paths.engine_paths(self.engine).ensure_directories().presets_dir / selected_file_name
+        return self.preset_file_store.get_source_path(self.engine, selected_file_name)
 
     def _load_selected_preset_model(self, selected_manifest: PresetManifest | None = None):
         if selected_manifest is None:
@@ -191,11 +191,7 @@ class DirectPresetFacadeBackend:
     def get_basic_ui_empty_state(self) -> dict[str, str] | None:
         """Explains why the direct categories page is empty, if it is empty."""
         try:
-            presets_dir = self.app_paths.engine_paths(self.engine).ensure_directories().presets_dir
-            has_any_preset = any(
-                path.is_file() and path.suffix.lower() == ".txt" and not path.name.startswith("_")
-                for path in presets_dir.glob("*.txt")
-            )
+            has_any_preset = bool(self.list_manifests())
         except Exception:
             try:
                 has_any_preset = bool(self.list_manifests())
@@ -350,10 +346,7 @@ class DirectPresetFacadeBackend:
             pass
 
     def get_source_path_by_file_name(self, file_name: str) -> Path:
-        manifest = self.get_manifest_by_file_name(file_name)
-        if manifest is None:
-            raise ValueError(f"Preset not found: {file_name}")
-        return self.app_paths.engine_paths(self.engine).ensure_directories().presets_dir / manifest.file_name
+        return self.preset_file_store.get_source_path(self.engine, file_name)
 
     def save_source_text_by_file_name(self, file_name: str, source_text: str) -> PresetManifest:
         manifest = self.get_manifest_by_file_name(file_name)

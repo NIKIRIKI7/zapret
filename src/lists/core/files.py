@@ -34,60 +34,30 @@ def write_text_file(path: str, content: str) -> None:
         f.write(normalize_newlines(content))
 
 
-def ensure_user_file_exists(user_path: str, backup_path: str | None = None) -> tuple[bool, bool]:
-    """Гарантирует наличие user-файла и при возможности восстанавливает его из backup.
-
-    Возвращает:
-    - `ok`: удалось ли подготовить файл;
-    - `restored_from_backup`: был ли файл восстановлен из backup.
-    """
+def ensure_user_file_exists(user_path: str) -> bool:
+    """Гарантирует наличие user-файла внутри `lists`."""
     try:
         os.makedirs(os.path.dirname(user_path), exist_ok=True)
 
         if os.path.exists(user_path):
-            return True, False
-
-        if backup_path and os.path.exists(backup_path):
-            content = read_text_file_safe(backup_path)
-            if content is not None:
-                write_text_file(user_path, content)
-                return True, True
+            return True
 
         write_text_file(user_path, "")
-        return True, False
+        return True
     except Exception:
-        return False, False
+        return False
 
 
 def prepare_user_file(
     user_path: str,
-    backup_path: str | None = None,
     *,
-    restored_message: str | None = None,
     error_message: str | None = None,
     log_func=None,
 ) -> bool:
-    """Готовит user-файл, при необходимости восстанавливает его из backup и пишет лог."""
+    """Готовит user-файл и пишет лог при ошибке."""
     try:
-        ok, restored = ensure_user_file_exists(user_path, backup_path)
-        if restored and restored_message and log_func is not None:
-            log_func(restored_message, "SUCCESS")
-        return ok
+        return ensure_user_file_exists(user_path)
     except Exception as exc:
         if error_message and log_func is not None:
             log_func(f"{error_message}: {exc}", "ERROR")
         return False
-
-
-def sync_user_backup(user_path: str, backup_path: str | None = None) -> None:
-    """Сохраняет сырое содержимое user-файла в backup-файл."""
-    if not backup_path:
-        return
-
-    try:
-        content = read_text_file_safe(user_path)
-        if content is None:
-            return
-        write_text_file(backup_path, content)
-    except Exception:
-        pass

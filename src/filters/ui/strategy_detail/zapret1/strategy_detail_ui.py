@@ -240,7 +240,7 @@ def build_strategy_detail_v1_main_sections(
     empty_label = caption_label_cls(
         tr_fn(
             "page.z1_strategy_detail.empty.no_strategies",
-            "Нет доступных стратегий. Проверьте папку presets_v1 рядом с программой.",
+            "Нет доступных стратегий. Проверьте папку presets рядом с программой.",
         )
     )
     empty_label.setWordWrap(True)

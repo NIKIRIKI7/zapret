@@ -67,7 +67,7 @@ def build_app_context(*, initial_ui_state: AppUiState | None = None) -> AppConte
     app_paths = AppPaths(user_root=root, local_root=root)
     ui_state_store = MainWindowStateStore(initial_ui_state or AppUiState())
     preset_file_store = PresetFileStore(app_paths)
-    preset_selection_service = PresetSelectionService(app_paths, preset_file_store)
+    preset_selection_service = PresetSelectionService(preset_file_store)
     preset_store = DirectRuntimePresetStore("winws2", preset_file_store, preset_selection_service)
     preset_store_v1 = DirectRuntimePresetStore("winws1", preset_file_store, preset_selection_service)
     strategy_feedback_store = StrategyFeedbackStore.default()

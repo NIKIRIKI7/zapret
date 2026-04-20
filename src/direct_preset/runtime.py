@@ -25,6 +25,7 @@ SnapshotT = TypeVar("SnapshotT")
 class DirectBasicUiSnapshot:
     revision: tuple[object, ...]
     payload: BasicUiPayload
+    empty_state: dict[str, str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +133,7 @@ class DirectUiSnapshotService:
     def __init__(self, facade_factory: Callable[[str, str | None], DirectPresetFacade]) -> None:
         self._facade_factory = facade_factory
         self._lock = RLock()
-        self._basic_payload_cache: dict[tuple[str, str], _SnapshotCache[BasicUiPayload]] = {}
+        self._basic_payload_cache: dict[tuple[str, str], _SnapshotCache[DirectBasicUiSnapshot]] = {}
         self._target_detail_cache: dict[tuple[str, str, str], _SnapshotCache[TargetDetailPayload | None]] = {}
         self._advanced_settings_cache: dict[str, _SnapshotCache[dict]] = {}
 
@@ -235,19 +236,60 @@ class DirectUiSnapshotService:
         with self._lock:
             cache = self._basic_payload_cache.setdefault(cache_key, _SnapshotCache())
             if not refresh and cache.matches(revision):
-                return DirectBasicUiSnapshot(revision=revision, payload=cache.get() or self._empty_basic_payload())
+                return cache.get() or DirectBasicUiSnapshot(
+                    revision=revision,
+                    payload=self._empty_basic_payload(),
+                    empty_state=None,
+                )
 
+        payload = self._empty_basic_payload()
+        empty_state: dict[str, str] | None = None
+        facade = None
         try:
-            payload = self._facade(
+            facade = self._facade(
                 method,
                 direct_mode_override=normalized_mode,
-            ).get_basic_ui_payload(startup_scope=startup_scope)
-        except Exception:
-            payload = self._empty_basic_payload()
+            )
+        except Exception as exc:
+            log(
+                f"DirectUiSnapshotService[{method}]: failed to create facade for basic UI snapshot: {exc}",
+                "ERROR",
+            )
+
+        if facade is not None:
+            try:
+                payload = facade.get_basic_ui_payload(startup_scope=startup_scope)
+            except Exception as exc:
+                log(
+                    f"DirectUiSnapshotService[{method}]: failed to build basic UI payload: {exc}",
+                    "ERROR",
+                )
+                payload = self._empty_basic_payload()
+
+            try:
+                empty_state = facade.get_basic_ui_empty_state()
+            except Exception as exc:
+                log(
+                    f"DirectUiSnapshotService[{method}]: failed to resolve basic UI empty-state: {exc}",
+                    "ERROR",
+                )
+
+        if empty_state is None and not (payload.target_items or {}):
+            empty_state = {
+                "reason": "unknown_error",
+                "preset_name": str(getattr(payload, "selected_preset_name", "") or ""),
+                "preset_file_name": str(getattr(payload, "selected_preset_file_name", "") or ""),
+            }
+
+        snapshot = DirectBasicUiSnapshot(
+            revision=revision,
+            payload=payload,
+            empty_state=empty_state,
+        )
 
         with self._lock:
-            self._basic_payload_cache.setdefault(cache_key, _SnapshotCache()).store(revision, payload)
-        return DirectBasicUiSnapshot(revision=revision, payload=payload)
+            self._basic_payload_cache.setdefault(cache_key, _SnapshotCache()).store(revision, snapshot)
+        return snapshot
 
     def get_target_detail_snapshot(
         self,

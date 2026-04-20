@@ -1304,8 +1304,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Manage domains (other.txt). Subdomains are handled automatically. Prefix a domain with ^ to match only the exact domain.",
     },
     "page.custom_domains.description": {
-        "ru": "Здесь редактируется файл other.user.txt (только ваши домены). Системная база берётся из шаблона и отдельно хранится в other.base.txt, а общий other.txt собирается автоматически. URL автоматически преобразуются в домены. Изменения сохраняются автоматически. Поддерживается Ctrl+Z.",
-        "en": "Edit other.user.txt (your domains only). The system base comes from template in other.base.txt, and combined other.txt is rebuilt automatically. URLs are converted to domains automatically. Changes are saved automatically. Ctrl+Z is supported.",
+        "ru": "Здесь редактируется файл other.user.txt (только ваши домены). Системная база отдельно хранится в other.base.txt, а общий other.txt собирается автоматически. URL автоматически преобразуются в домены. Изменения сохраняются автоматически. Поддерживается Ctrl+Z.",
+        "en": "Edit other.user.txt (your domains only). The system base is stored separately in other.base.txt, and combined other.txt is rebuilt automatically. URLs are converted to domains automatically. Changes are saved automatically. Ctrl+Z is supported.",
     },
     "page.custom_domains.card.add": {
         "ru": "Добавить домен",
@@ -1356,8 +1356,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Clears other.user.txt (my domains) and rebuilds other.txt from system base",
     },
     "page.custom_domains.tooltip.clear_all": {
-        "ru": "Удаляет только пользовательские домены. Базовые домены из шаблона останутся",
-        "en": "Removes only custom domains. Base template domains remain",
+        "ru": "Удаляет только пользовательские домены. Системная база из other.base.txt останется",
+        "en": "Removes only custom domains. The system base from other.base.txt remains",
     },
     "page.custom_domains.editor.placeholder": {
         "ru": "Домены по одному на строку:\nexample.com\nsubdomain.site.org\n\nКомментарии начинаются с #",
@@ -4155,6 +4155,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "ОТКРЫТЬ ФОРМУ НА GITHUB",
         "en": "OPEN GITHUB FORM",
     },
+    "page.z2_direct.toolbar.title": {
+        "ru": "Категории и target'ы",
+        "en": "Categories and targets",
+    },
     "page.z2_direct.toolbar.expand": {
         "ru": "Развернуть",
         "en": "Expand",
@@ -5272,8 +5276,8 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "Want to add a new site or service to Zapret 2? Open the GitHub form and describe what should be added to the hostlist or ipset.",
     },
     "page.z2_direct.empty.no_presets": {
-        "ru": "Пресеты Zapret 2 не найдены. Обычно здесь должны быть txt-файлы в папке presets_v2 рядом с программой. Если папка пустая, встроенные пресеты не были скопированы или были удалены.",
-        "en": "Zapret 2 presets were not found. Normally txt files should exist in the presets_v2 folder near the program. If the folder is empty, built-in presets were not copied or were removed.",
+        "ru": "Пресеты Zapret 2 не найдены. Проверьте папку presets рядом с программой. Если системные пресеты отсутствуют, переустановите приложение.",
+        "en": "Zapret 2 presets were not found. Check the presets folder near the program. If built-in presets are missing, reinstall the app.",
     },
     "page.z2_direct.empty.no_selected_preset": {
         "ru": "Не удалось определить выбранный source preset. Откройте список пресетов, выберите любой пресет заново и нажмите «Обновить».",
@@ -5282,6 +5286,10 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
     "page.z2_direct.empty.preset_read_error": {
         "ru": "Не удалось прочитать выбранный source preset «{preset_name}». Такое бывает, если файл пустой, повреждён или недоступен для чтения.",
         "en": "Could not read the selected source preset \"{preset_name}\". This may happen if the file is empty, corrupted, or unavailable for reading.",
+    },
+    "page.z2_direct.empty.unknown_error": {
+        "ru": "Не удалось построить список категорий для выбранного source preset «{preset_name}». Обычно это значит, что во время чтения preset-а или построения snapshot произошла внутренняя ошибка. Нажмите «Обновить» и проверьте лог.",
+        "en": "Could not build the category list for the selected source preset \"{preset_name}\". This usually means an internal error happened while reading the preset or building the snapshot. Click Refresh and check the log.",
     },
     "page.z2_direct.empty.no_categories": {
         "ru": "В выбранном source preset «{preset_name}» не найдено ни одной категории для этой страницы. Это значит, что после разбора файла программа не увидела ни одного target'а с фильтрами вроде hostlist, hostlist-domains или ipset.",

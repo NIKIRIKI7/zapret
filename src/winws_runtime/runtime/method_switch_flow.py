@@ -214,7 +214,7 @@ def _can_autostart_for_method(window, method: str) -> bool:
         if normalized_method == "direct_zapret2":
             log("direct_zapret2: выбранный source-пресет не подготовлен", "ERROR")
             try:
-                window.set_status("Ошибка: отсутствует Default.txt (built-in пресет)")
+                window.set_status("Ошибка: отсутствует Default v1.txt (built-in пресет)")
             except Exception:
                 pass
             return False

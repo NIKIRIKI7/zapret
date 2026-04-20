@@ -37,6 +37,8 @@ def default_program() -> dict[str, Any]:
         "dpi_autostart": True,
         "strategy_launch_method": "direct_zapret2",
         "direct_ui_mode": "basic",
+        "selected_source_preset_file_name_winws1": "",
+        "selected_source_preset_file_name_winws2": "",
         "auto_update_enabled": True,
         "remove_github_api": True,
         "discord_auto_restart": True,

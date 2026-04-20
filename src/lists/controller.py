@@ -1138,9 +1138,9 @@ class HostlistPageController:
 
     @staticmethod
     def reset_domains_file() -> bool:
-        from lists.hostlists_manager import reset_other_file_from_template
+        from lists.hostlists_manager import reset_other_user_file
 
-        return bool(reset_other_file_from_template())
+        return bool(reset_other_user_file())
 
     @staticmethod
     def load_ipset_all_entries() -> HostlistEntriesState:

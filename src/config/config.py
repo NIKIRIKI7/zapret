@@ -41,14 +41,29 @@ def get_default_install_dir() -> str:
     return os.path.join(get_system_drive(), "Zapret", get_install_dir_name())
 
 
+def get_presets_root_dir() -> str:
+    """Возвращает общий корень всех пресетов рядом с программой."""
+    return os.path.join(MAIN_DIRECTORY, "presets")
+
+
 def get_presets_v1_dir() -> str:
-    """Возвращает корень пресетов Zapret 1 рядом с программой."""
-    return os.path.join(MAIN_DIRECTORY, "presets_v1")
+    """Возвращает пользовательскую папку пресетов Zapret 1."""
+    return os.path.join(get_presets_root_dir(), "presets_v1")
 
 
 def get_presets_v2_dir() -> str:
-    """Возвращает корень пресетов Zapret 2 рядом с программой."""
-    return os.path.join(MAIN_DIRECTORY, "presets_v2")
+    """Возвращает пользовательскую папку пресетов Zapret 2."""
+    return os.path.join(get_presets_root_dir(), "presets_v2")
+
+
+def get_builtin_presets_v1_dir() -> str:
+    """Возвращает системную папку встроенных пресетов Zapret 1."""
+    return os.path.join(get_presets_root_dir(), "presets_v1_builtin")
+
+
+def get_builtin_presets_v2_dir() -> str:
+    """Возвращает системную папку встроенных пресетов Zapret 2."""
+    return os.path.join(get_presets_root_dir(), "presets_v2_builtin")
 
 # ═══════════════════════════════════════════════════════════════════
 

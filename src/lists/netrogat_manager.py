@@ -7,10 +7,9 @@ from lists.core.files import (
     normalize_newlines,
     prepare_user_file,
     read_text_file_safe,
-    sync_user_backup,
     write_text_file,
 )
-from lists.core.paths import get_list_backup_path, get_list_base_path, get_list_final_path, get_list_user_path
+from lists.core.paths import get_list_base_path, get_list_final_path, get_list_user_path
 
 from log.log import log
 
@@ -301,13 +300,7 @@ def ensure_netrogat_user_file() -> bool:
     ok, _ = _ensure_netrogat_base_updated()
     if not ok:
         return False
-    return prepare_user_file(
-        NETROGAT_USER_PATH,
-        get_list_backup_path("netrogat.user.txt"),
-        restored_message="netrogat.user.txt восстановлен из backup",
-        error_message="Ошибка подготовки netrogat.user.txt",
-        log_func=log,
-    )
+    return prepare_user_file(NETROGAT_USER_PATH, error_message="Ошибка подготовки netrogat.user.txt", log_func=log)
 
 
 def sync_netrogat_after_user_change() -> bool:
@@ -329,8 +322,6 @@ def sync_netrogat_after_user_change() -> bool:
         except Exception as e:
             log(f"Ошибка генерации netrogat.txt: {e}", "ERROR")
             return False
-
-        sync_user_backup(NETROGAT_USER_PATH, get_list_backup_path("netrogat.user.txt"))
         return True
     except Exception as e:
         log(f"Ошибка sync_netrogat_after_user_change: {e}", "ERROR")
@@ -356,8 +347,6 @@ def ensure_netrogat_exists() -> bool:
         except Exception as e:
             log(f"Ошибка генерации netrogat.txt: {e}", "ERROR")
             return False
-
-        sync_user_backup(NETROGAT_USER_PATH, get_list_backup_path("netrogat.user.txt"))
         return _count_effective_entries(NETROGAT_PATH) > 0
     except Exception as e:
         log(f"Ошибка создания netrogat файлов: {e}", "ERROR")

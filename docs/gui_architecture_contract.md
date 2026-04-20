@@ -9,6 +9,11 @@
 - `direct_zapret1` использует выбранный source preset как единственный источник истины.
 - `direct_zapret2` использует выбранный source preset как единственный источник истины.
 - Канонический путь выбора direct-пресета: `PresetSelectionService` -> `DirectFlowCoordinator` -> source preset файл.
+- Канонический корень пресетов: `presets/` рядом с программой.
+- Пользовательские direct-пресеты лежат только в `presets/presets_v1` и `presets/presets_v2`.
+- Встроенные direct-пресеты лежат только в `presets/presets_v1_builtin` и `presets/presets_v2_builtin`.
+- Установщик обязан заранее раскладывать built-in пресеты по этим папкам.
+- GUI runtime не должен автокопировать built-in пресеты из Python-кода на первом запуске.
 - `runtime/.../launch.txt` не является источником истины для выбора direct-пресета.
 - `runtime/.../launch.txt` может быть только производным runtime-артефактом для запуска уже выбранного пресета.
 - Новые direct-изменения не должны читать или писать `legacy_registry_launch` как основной direct-контракт.
@@ -51,6 +56,7 @@
 
 - GUI runtime должен брать `PREMIUM_API_BASE_URL` только из канонического build-контура.
 - Канонический путь для GUI runtime config: `build_release_gui.py` -> `public_zapretgui/src/config/_build_secrets.py` -> runtime import.
+- Серверный Premium backend хранится отдельно от GUI в репозитории `G:\Privacy\zapret-premium-api`.
+- `ZapretGUI` не содержит внутри себя Premium API backend и работает с ним только по `PREMIUM_API_BASE_URL`.
 - Нельзя восстанавливать старые значения из предыдущего `_build_secrets.py`.
 - Нельзя возвращать repo-based `.env` в build/runtime контур GUI.
-

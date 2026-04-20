@@ -1,5 +1,5 @@
-# Preset: Default
-# TemplateOrigin: Default
+# Preset: Default v1
+# TemplateOrigin: Default v1
 # IconColor: #a8c5ff
 # Description: Default Zapret 1 preset
 

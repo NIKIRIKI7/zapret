@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from direct_preset.modes import resolve_direct_mode_logic
 from filters.mode_runtime import (
     DIRECT_MODE_DEFAULT,
     is_udp_like_protocol,
     load_current_direct_mode,
     normalize_direct_mode,
-    resolve_direct_mode_logic,
 )
 
 

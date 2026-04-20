@@ -231,6 +231,18 @@ def reset_to_template_by_file_name(backend, file_name: str):
     manifest = backend.get_manifest_by_file_name(file_name)
     if manifest is None:
         raise ValueError(f"Preset not found: {file_name}")
+    builtin_path = backend.app_paths.engine_paths(backend.engine).ensure_directories().builtin_presets_dir / manifest.file_name
+    if str(manifest.kind or "").strip().lower() == "builtin":
+        return manifest
+    if builtin_path.exists():
+        backend.preset_file_store.delete_preset(backend.engine, manifest.file_name)
+        updated = backend.get_manifest_by_file_name(manifest.file_name)
+        if updated is None:
+            raise ValueError("Built-in preset not found after reset")
+        backend.notify_preset_saved(updated.file_name)
+        if backend.is_selected_file_name(manifest.file_name):
+            backend._refresh_selected_launch_profile_from_source()
+        return updated
     template_key = str(manifest.template_origin or manifest.name or "").strip()
     template_content = _resolve_reset_template(backend.launch_method, template_key)
     if not template_content:

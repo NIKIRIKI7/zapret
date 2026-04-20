@@ -32,6 +32,10 @@ from settings.schema import (
 from utils.atomic_text import atomic_write_text
 
 _SETTINGS_LOCK = RLock()
+_DIRECT_PRESET_SELECTION_PATHS = {
+    "winws1": ("program", "selected_source_preset_file_name_winws1"),
+    "winws2": ("program", "selected_source_preset_file_name_winws2"),
+}
 
 
 def _settings_root() -> Path:
@@ -164,6 +168,13 @@ def _set_nullable_str(path: tuple[str, ...], value: str | None) -> bool:
     return True
 
 
+def _direct_preset_selection_path(engine: str) -> tuple[str, ...]:
+    normalized = _as_clean_str(engine).lower()
+    if normalized not in _DIRECT_PRESET_SELECTION_PATHS:
+        raise ValueError(f"Unsupported preset selection engine: {engine}")
+    return _DIRECT_PRESET_SELECTION_PATHS[normalized]
+
+
 def get_program_settings() -> dict[str, Any]:
     return copy.deepcopy(read_settings()["program"])
 
@@ -267,6 +278,20 @@ def get_direct_ui_mode() -> str:
 
 def set_direct_ui_mode(value: str) -> bool:
     return _set_str(("program", "direct_ui_mode"), value)
+
+
+def get_selected_source_preset_file_name(engine: str) -> str | None:
+    value = _get_str(_direct_preset_selection_path(engine), "")
+    return value or None
+
+
+def set_selected_source_preset_file_name(engine: str, value: str | None) -> bool:
+    normalized = _as_clean_str(value)
+    return _set_str(_direct_preset_selection_path(engine), normalized)
+
+
+def clear_selected_source_preset_file_name(engine: str) -> bool:
+    return _set_str(_direct_preset_selection_path(engine), "")
 
 
 def get_auto_update_enabled() -> bool:
@@ -990,6 +1015,7 @@ __all__ = [
     "get_remove_github_api",
     "get_rkn_background",
     "get_selected_theme",
+    "get_selected_source_preset_file_name",
     "get_settings_path",
     "get_smooth_scroll_enabled",
     "get_snowflakes_enabled",
@@ -1066,6 +1092,7 @@ __all__ = [
     "set_remove_github_api",
     "set_rkn_background",
     "set_selected_theme",
+    "set_selected_source_preset_file_name",
     "set_smooth_scroll_enabled",
     "set_snowflakes_enabled",
     "set_strategy_launch_method",
@@ -1089,4 +1116,5 @@ __all__ = [
     "set_ui_language",
     "set_window_geometry",
     "set_window_opacity",
+    "clear_selected_source_preset_file_name",
 ]

@@ -5,6 +5,7 @@
 """
 
 import time as _time
+from pathlib import Path
 
 from PyQt6.QtCore import pyqtSignal, QTimer, QEvent
 
@@ -270,7 +271,7 @@ class Zapret2StrategiesPageNew(BasePage):
             empty_state_label=self._empty_state_label,
         )
 
-    def _apply_payload_snapshot(self, payload, *, reason: str) -> None:
+    def _apply_payload_snapshot(self, payload, *, reason: str, empty_state=None) -> None:
         result = apply_payload_snapshot(
             page=self,
             payload=payload,
@@ -279,7 +280,7 @@ class Zapret2StrategiesPageNew(BasePage):
             list_structure_signature=self._list_structure_signature,
             content_host_layout=self._content_host_layout,
             startup_scope=self._startup_scope(),
-            empty_state_text=self._build_empty_state_text(),
+            empty_state_text=self._build_empty_state_text(empty_state=empty_state, payload=payload),
             empty_label_cls=BodyLabel,
             update_current_strategies_display=self._update_current_strategies_display,
             on_target_clicked=self._on_target_clicked,
@@ -353,7 +354,11 @@ class Zapret2StrategiesPageNew(BasePage):
         if started_at is not None:
             _log_startup_z2_direct_metric(self._startup_scope(), "_build_content.payload", (_time.perf_counter() - started_at) * 1000)
 
-        self._apply_payload_snapshot(payload, reason=reason)
+        self._apply_payload_snapshot(
+            payload,
+            reason=reason,
+            empty_state=getattr(snapshot, "empty_state", None),
+        )
         self._render_probe_build_finished_at = _time.perf_counter()
         QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self._log_render_probe_idle())
 
@@ -452,24 +457,29 @@ class Zapret2StrategiesPageNew(BasePage):
         except Exception as e:
             log(f"Ошибка refresh_from_preset_switch: {e}", "DEBUG")
 
-    def _build_empty_state_text(self) -> str:
-        empty_state = None
-        try:
-            empty_state = self._require_app_context().direct_ui_snapshot_service.get_basic_ui_empty_state("direct_zapret2")
-        except Exception as e:
-            log(f"Zapret2StrategiesPageNew: не удалось определить причину пустого списка: {e}", "DEBUG")
+    @staticmethod
+    def _fallback_preset_name_from_payload(payload) -> str:
+        preset_name = str(getattr(payload, "selected_preset_name", "") or "").strip()
+        if preset_name:
+            return preset_name
+        preset_file_name = str(getattr(payload, "selected_preset_file_name", "") or "").strip()
+        if preset_file_name:
+            return Path(preset_file_name).stem.strip()
+        return ""
 
+    def _build_empty_state_text(self, *, empty_state=None, payload=None) -> str:
         reason = str((empty_state or {}).get("reason") or "").strip().lower()
         preset_name = str((empty_state or {}).get("preset_name") or "").strip()
+        if not preset_name and payload is not None:
+            preset_name = self._fallback_preset_name_from_payload(payload)
 
         if reason == "no_presets":
             return tr_catalog(
                 "page.z2_direct.empty.no_presets",
                 language=self._ui_language,
                 default=(
-                    "Пресеты Zapret 2 не найдены. Обычно здесь должны быть txt-файлы в "
-                    "папке presets_v2 рядом с программой. Если папка пустая, встроенные пресеты не были "
-                    "скопированы или были удалены."
+                    "Пресеты Zapret 2 не найдены. Проверьте папку presets рядом с программой. "
+                    "Если системные пресеты отсутствуют, переустановите приложение."
                 ),
             )
 
@@ -490,6 +500,17 @@ class Zapret2StrategiesPageNew(BasePage):
                 default=(
                     "Не удалось прочитать выбранный source preset «{preset_name}». "
                     "Такое бывает, если файл пустой, повреждён или недоступен для чтения."
+                ),
+            ).format(preset_name=preset_name or "без имени")
+
+        if reason == "unknown_error":
+            return tr_catalog(
+                "page.z2_direct.empty.unknown_error",
+                language=self._ui_language,
+                default=(
+                    "Не удалось построить список категорий для выбранного source preset «{preset_name}». "
+                    "Обычно это значит, что во время чтения preset-а или построения snapshot произошла внутренняя ошибка. "
+                    "Нажмите «Обновить» и проверьте лог."
                 ),
             ).format(preset_name=preset_name or "без имени")
 

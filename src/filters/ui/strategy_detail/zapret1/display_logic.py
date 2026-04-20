@@ -277,7 +277,7 @@ def apply_strategy_detail_v1_language(
         empty_label.setText(
             tr_fn(
                 "page.z1_strategy_detail.empty.no_strategies",
-                "Нет доступных стратегий. Проверьте папку presets_v1 рядом с программой.",
+                "Нет доступных стратегий. Проверьте папку presets рядом с программой.",
             )
         )
 

@@ -9,13 +9,12 @@ from typing import Callable
 
 from core.paths import AppPaths
 from log.log import log
+from settings.schema import SETTINGS_DIR_NAME, SETTINGS_FILE_NAME
 
 from core.presets.cache_signatures import path_cache_signature
 from core.presets.models import PresetManifest
 from core.presets.preset_file_store import PresetFileStore
 from core.presets.selection_service import PresetSelectionService
-from core.presets.v1_builtin_templates import is_builtin_preset_file_name_v1
-from core.presets.z2_builtin_templates import is_builtin_preset_file_name_v2
 
 
 class DirectFlowError(RuntimeError):
@@ -86,13 +85,7 @@ class DirectFlowCoordinator:
         self._app_paths = app_paths
         self._preset_selection_service = preset_selection_service
         self._preset_file_store = preset_file_store
-        self._prepared_support_methods: set[str] = set()
         self._selected_manifest_cache: dict[str, tuple[tuple[object, ...], PresetManifest]] = {}
-        self._support_prepare_errors: dict[str, str] = {}
-
-    def ensure_support_files_ready(self, launch_method: str) -> None:
-        """Prepares runtime support files for the given direct launch method."""
-        self._ensure_support_files(launch_method)
 
     def ensure_launch_profile(
         self,
@@ -186,9 +179,8 @@ class DirectFlowCoordinator:
 
     def get_selected_source_path(self, launch_method: str) -> Path:
         selected = self.get_selected_source_manifest(launch_method)
-
         engine = self._METHOD_TO_ENGINE[self._normalize_method(launch_method)]
-        return self._app_paths.engine_paths(engine).ensure_directories().presets_dir / selected.file_name
+        return self._preset_file_store.get_source_path(engine, selected.file_name)
 
     def ensure_selected_source_path(self, launch_method: str) -> Path:
         return self.get_startup_snapshot(launch_method, require_filters=False).preset_path
@@ -204,8 +196,6 @@ class DirectFlowCoordinator:
     def select_preset_file_name(self, launch_method: str, file_name: str) -> DirectLaunchProfile:
         method = self._normalize_method(launch_method)
         engine = self._METHOD_TO_ENGINE[method]
-        self._ensure_support_files(method)
-
         selected_file_name = self._preset_selection_service.select_preset_file_name_fast(engine, file_name)
         selected_manifest = self._remember_manifest_from_file_name(method, engine, selected_file_name)
         selected_path = self._get_source_preset_path(engine, selected_file_name)
@@ -239,14 +229,6 @@ class DirectFlowCoordinator:
         method = self._normalize_method(launch_method)
         engine = self._METHOD_TO_ENGINE[method]
         label = str(timing_label or f"direct_flow.{method}.ensure_selected_source_manifest")
-
-        t_support = time.perf_counter()
-        self._ensure_support_files(
-            method,
-            timing_callback=timing_callback,
-            timing_label=label,
-        )
-        self._emit_timing(timing_callback, f"{label}.support_files", t_support)
 
         t_selection_service = time.perf_counter()
         selection = self._preset_selection_service
@@ -284,7 +266,7 @@ class DirectFlowCoordinator:
                 return manifest
 
         t_default = time.perf_counter()
-        default_path = self._get_source_preset_path(engine, "Default.txt")
+        default_path = self._get_source_preset_path(engine, "Default v1.txt")
         if default_path.exists():
             selected_file_name = selection.select_preset_file_name_fast(engine, default_path.name)
             manifest = self._remember_manifest_from_file_name(method, engine, selected_file_name)
@@ -296,15 +278,9 @@ class DirectFlowCoordinator:
         preset_paths = self._list_source_preset_paths(engine)
         self._emit_timing(timing_callback, f"{label}.list_source_presets", t_list)
         if not preset_paths:
-            support_error = str(self._support_prepare_errors.get(method) or "").strip()
-            if support_error:
-                raise DirectFlowError(
-                    "Не удалось подготовить встроенные пресеты: "
-                    f"{support_error}"
-                )
             raise DirectFlowError(
-                "Пресеты не найдены. Скачайте файлы пресетов вручную: "
-                f"{self.PRESETS_DOWNLOAD_URL}"
+                "Пресеты не найдены. Проверьте папку presets рядом с программой "
+                "и переустановите приложение, если системные пресеты отсутствуют."
             )
 
         t_first = time.perf_counter()
@@ -334,29 +310,6 @@ class DirectFlowCoordinator:
             return any(flag in content for flag in ("--wf-tcp=", "--wf-udp="))
         return any(flag in content for flag in ("--wf-tcp-out", "--wf-udp-out", "--wf-raw-part"))
 
-    def _ensure_support_files(
-        self,
-        launch_method: str,
-        *,
-        timing_callback: Callable[[str, float], None] | None = None,
-        timing_label: str | None = None,
-    ) -> None:
-        method = self._normalize_method(launch_method)
-        if method in self._prepared_support_methods:
-            return
-        label = str(timing_label or f"direct_flow.{method}.support_files")
-        started_at = time.perf_counter()
-        try:
-            from core.presets.support_files import prepare_direct_support_files
-
-            prepare_direct_support_files(method, self._app_paths)
-            self._prepared_support_methods.add(method)
-            self._support_prepare_errors.pop(method, None)
-            self._emit_timing(timing_callback, f"{label}.prepare_direct_support_files", started_at)
-        except Exception as exc:
-            self._support_prepare_errors[method] = str(exc or "unknown support preparation error")
-            log(f"Failed to prepare direct support files for {method}: {exc}", "DEBUG")
-
     @staticmethod
     def _emit_timing(
         timing_callback: Callable[[str, float], None] | None,
@@ -380,16 +333,18 @@ class DirectFlowCoordinator:
         if not candidate:
             return None
 
-        engine_paths = self._app_paths.engine_paths(engine).ensure_directories()
-        preset_path = engine_paths.presets_dir / candidate
-        if not preset_path.exists():
+        try:
+            preset_path = self._preset_file_store.get_source_path(engine, candidate)
+        except Exception:
             return None
+
+        settings_path = self._app_paths.user_root / SETTINGS_DIR_NAME / SETTINGS_FILE_NAME
 
         return (
             self._normalize_method(launch_method),
             engine,
             candidate.lower(),
-            *path_cache_signature(engine_paths.selected_state_path),
+            *path_cache_signature(settings_path),
             *path_cache_signature(preset_path),
         )
 
@@ -484,15 +439,14 @@ class DirectFlowCoordinator:
         return display_name, template_origin
 
     def _get_source_preset_path(self, engine: str, file_name: str) -> Path:
-        resolved = str(self._preset_file_store.resolve_file_name(engine, file_name) or "").strip()
-        if resolved:
-            return self._app_paths.engine_paths(engine).ensure_directories().presets_dir / resolved
-        return self._app_paths.engine_paths(engine).ensure_directories().presets_dir / str(file_name or "").strip()
+        return self._preset_file_store.get_source_path(engine, file_name)
 
     def _list_source_preset_paths(self, engine: str) -> list[Path]:
-        presets_dir = self._app_paths.engine_paths(engine).ensure_directories().presets_dir
         return sorted(
-            (path for path in presets_dir.glob("*.txt") if path.is_file()),
+            (
+                self._preset_file_store.get_source_path(engine, manifest.file_name)
+                for manifest in self._preset_file_store.list_manifests(engine)
+            ),
             key=lambda path: path.name.lower(),
         )
 
@@ -529,20 +483,22 @@ class DirectFlowCoordinator:
         t_timestamp = time.perf_counter()
         timestamp = self._file_time_to_iso(path)
         self._emit_timing(timing_callback, f"{label}.manifest_timestamp", t_timestamp)
-        kind = "builtin" if self._is_builtin_preset(engine, path, template_origin) else "user"
+        storage_scope = self._storage_scope_for_path(engine, path)
+        kind = "builtin" if storage_scope == "builtin" else "user"
         return PresetManifest(
             file_name=file_name,
             name=display_name,
             template_origin=template_origin,
             updated_at=timestamp,
             kind=kind,
+            storage_scope=storage_scope,
         )
 
-    @staticmethod
-    def _is_builtin_preset(engine: str, path: Path, template_origin: str | None) -> bool:
-        engine_key = str(engine or "").strip().lower()
-        if engine_key == "winws2":
-            return is_builtin_preset_file_name_v2(path.name)
-        if engine_key == "winws1":
-            return is_builtin_preset_file_name_v1(path.name)
-        return False
+    def _storage_scope_for_path(self, engine: str, path: Path) -> str:
+        engine_paths = self._app_paths.engine_paths(engine).ensure_directories()
+        try:
+            if path.resolve().parent == engine_paths.builtin_presets_dir.resolve():
+                return "builtin"
+        except Exception:
+            pass
+        return "user"

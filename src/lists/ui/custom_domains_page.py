@@ -82,7 +82,7 @@ class CustomDomainsPage(BasePage):
         self._desc_label = BodyLabel(
             self._tr(
                 "page.custom_domains.description",
-                "Здесь редактируется файл other.user.txt (только ваши домены). Системная база берётся из шаблона и отдельно хранится в other.base.txt, а общий other.txt собирается автоматически. URL автоматически преобразуются в домены. Изменения сохраняются автоматически. Поддерживается Ctrl+Z.",
+                "Здесь редактируется файл other.user.txt (только ваши домены). Системная база отдельно хранится в other.base.txt, а общий other.txt собирается автоматически. URL автоматически преобразуются в домены. Изменения сохраняются автоматически. Поддерживается Ctrl+Z.",
             )
         )
         try:
@@ -155,7 +155,7 @@ class CustomDomainsPage(BasePage):
             self.clear_btn,
             self._tr(
                 "page.custom_domains.tooltip.clear_all",
-                "Удаляет только пользовательские домены. Базовые домены из шаблона останутся",
+                "Удаляет только пользовательские домены. Системная база из other.base.txt останется",
             ),
         )
 
@@ -456,7 +456,7 @@ class CustomDomainsPage(BasePage):
         self._desc_label.setText(
             self._tr(
                 "page.custom_domains.description",
-                "Здесь редактируется файл other.user.txt (только ваши домены). Системная база берётся из шаблона и отдельно хранится в other.base.txt, а общий other.txt собирается автоматически. URL автоматически преобразуются в домены. Изменения сохраняются автоматически. Поддерживается Ctrl+Z.",
+                "Здесь редактируется файл other.user.txt (только ваши домены). Системная база отдельно хранится в other.base.txt, а общий other.txt собирается автоматически. URL автоматически преобразуются в домены. Изменения сохраняются автоматически. Поддерживается Ctrl+Z.",
             )
         )
         self._add_card.set_title(self._tr("page.custom_domains.card.add", "Добавить домен"))
@@ -497,7 +497,7 @@ class CustomDomainsPage(BasePage):
                 self.clear_btn,
                 self._tr(
                     "page.custom_domains.tooltip.clear_all",
-                    "Удаляет только пользовательские домены. Базовые домены из шаблона останутся",
+                    "Удаляет только пользовательские домены. Системная база из other.base.txt останется",
                 ),
             )
         self.text_edit.setPlaceholderText(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.presets.runtime_store import DirectRuntimePresetStore
-from filters.mode_runtime import resolve_direct_mode_logic
+from direct_preset.modes import resolve_direct_mode_logic
 from direct_preset.engines import (
     winws1_classifier,
     winws1_parser,

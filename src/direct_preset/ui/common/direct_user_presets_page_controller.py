@@ -536,6 +536,7 @@ class DirectUserPresetsPageController:
                     "file_name": item.file_name,
                     "display_name": item.name,
                     "kind": item.kind,
+                    "storage_scope": item.storage_scope,
                     "is_builtin": str(item.kind or "").strip().lower() == "builtin",
                 }
                 for item in facade.list_manifests()
@@ -558,13 +559,13 @@ class DirectUserPresetsPageController:
             return ""
 
     def get_presets_dir_light(self):
-        return self._get_app_paths().engine_paths(self._config.selection_key).ensure_directories().presets_dir
+        return self._get_app_paths().engine_paths(self._config.selection_key).ensure_directories().user_presets_dir
 
     def load_preset_list_metadata_light(self) -> dict[str, dict[str, object]]:
         from core.presets.lightweight_metadata import build_lightweight_preset_metadata
 
         metadata: dict[str, dict[str, object]] = {}
-        presets_dir = self.get_presets_dir_light()
+        facade = self._get_direct_facade()
 
         for entry in self.list_preset_entries_light():
             file_name = str(entry.get("file_name") or "").strip()
@@ -573,7 +574,7 @@ class DirectUserPresetsPageController:
             is_builtin = bool(entry.get("is_builtin", False))
             if not file_name:
                 continue
-            path = presets_dir / file_name
+            path = facade.get_source_path_by_file_name(file_name)
             metadata[file_name] = build_lightweight_preset_metadata(
                 path,
                 display_name=display_name,
@@ -606,7 +607,7 @@ class DirectUserPresetsPageController:
         display_name = str(matched_entry.get("display_name") or candidate_file_name).strip()
         kind = str(matched_entry.get("kind") or "").strip() or "user"
         is_builtin = bool(matched_entry.get("is_builtin", False))
-        path = self.get_presets_dir_light() / candidate_file_name
+        path = self._get_direct_facade().get_source_path_by_file_name(candidate_file_name)
 
         metadata = build_lightweight_preset_metadata(
             path,
